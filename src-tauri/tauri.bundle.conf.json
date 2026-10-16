@@ -4,7 +4,6 @@
     "resources": {
       "bundle-res/llama": "llama",
       "bundle-res/ffmpeg": "ffmpeg",
-      "bundle-res/THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt",
       "../assets/golden": "golden",
       "../skills": "skills"
     }

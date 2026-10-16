@@ -76,11 +76,6 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
 
-      # 生成第三方许可清单用（scripts/build-notices.mjs），版本与 scripts/build-notices.mjs 中的安装命令一致
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.2
-
       # llama.cpp 运行库（CPU、Vulkan）与 ffmpeg：获取脚本校验钉定的 SHA-256，缓存命中且哈希正确时不再下载
       - uses: actions/cache@v4
         with:

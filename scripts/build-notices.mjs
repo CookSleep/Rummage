@@ -1,13 +1,13 @@
-// 生成随 Windows 安装包分发的第三方许可清单 src-tauri/bundle-res/THIRD-PARTY-NOTICES.txt，由 scripts/build-core.mjs 在打包时调用。
+// 生成第三方许可清单 src/assets/third-party-notices.txt（npm run notices），由“设置 → 关于 → 第三方许可”弹窗显示。
+// 生成结果提交进仓库，前端构建与打包不需要 cargo-about；Rust 或前端依赖变化后重新运行并提交。
 // 内容：third_party/ 与 third-party-licenses/ 中随程序分发的组件（llama.cpp、LLVM OpenMP、FFmpeg、字体、移植的代码），
 // cargo-about 汇总的 Rust 依赖（配置见 about.toml，Windows 目标的普通与构建依赖），以及 npm ls --omit=dev 列出的前端依赖。
-// 用纯文本：安装目录中用任何编辑器都能打开，不依赖浏览器，也便于把各来源的原文拼在一起。
 // 需要 cargo-about：cargo install cargo-about --version 0.9.2 --locked --features cli
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const OUT = 'src-tauri/bundle-res/THIRD-PARTY-NOTICES.txt'
+const OUT = 'src/assets/third-party-notices.txt'
 const RULE = '='.repeat(80)
 const THIN = '-'.repeat(80)
 
@@ -16,18 +16,30 @@ const read = (path) => readFileSync(path, 'utf8').replace(/^﻿/, '').replace(/\
 const parts = [
   'Rummage 第三方许可清单 / Third-Party Notices',
   '',
-  'Rummage 以 MIT 协议发布。本文件列出 Rummage Windows 版随附的第三方组件及其许可原文。',
-  'Rummage is released under the MIT License. This file lists the third-party components shipped with',
-  'Rummage for Windows and their license texts.',
+  'Rummage 以 MIT 协议发布。本文件列出 Rummage 使用的第三方组件及其许可原文，其中 Rust 依赖按 Windows 版统计。',
+  'Rummage is released under the MIT License. This file lists the third-party components used by Rummage and their license texts. Rust dependencies are those of the Windows version.',
 ]
 
 const section = (title, body) => parts.push('', '', RULE, title, RULE, '', body)
 
-section('llama.cpp / ggml（llama\\cpu\\、llama\\vulkan\\）', read('third_party/llama.cpp/b11461/LICENSE'))
-section('LLVM OpenMP 运行库 libomp.dll（llama\\cpu\\、llama\\vulkan\\）', read('.cache/third-party/llama.cpp/b11461/win-cpu-x64/LICENSE-LLVM-OpenMP'))
-section('FFmpeg（ffmpeg\\，LGPL 许可全文见 ffmpeg\\LICENSE.txt）', read('third-party-licenses/FFmpeg-NOTICE.txt'))
-section('HarmonyOS Sans SC 字体', read('third-party-licenses/HarmonyOS-Sans-LICENSE.txt'))
-section('Maple Mono NF CN 字体', read('third-party-licenses/MapleMono-LICENSE.txt'))
+section('llama.cpp / ggml（安装目录中的 llama\\cpu\\、llama\\vulkan\\）', read('third_party/llama.cpp/b11461/LICENSE'))
+section('LLVM OpenMP 运行库 libomp.dll（安装目录中的 llama\\cpu\\、llama\\vulkan\\）', read('.cache/third-party/llama.cpp/b11461/win-cpu-x64/LICENSE-LLVM-OpenMP'))
+section('FFmpeg（安装目录中的 ffmpeg\\，LGPL 许可全文见其中的 LICENSE.txt）', read('third-party-licenses/FFmpeg-NOTICE.txt'))
+section('HarmonyOS Sans SC 字体', [
+  '版权方：Huawei Device Co., Ltd.',
+  '许可：HarmonyOS Sans Fonts License Agreement',
+  '项目地址：https://developer.huawei.com/consumer/cn/design/resource/',
+  '许可证：https://github.com/openharmony/resources/blob/master/LICENSE_Fonts',
+  '',
+  read('third-party-licenses/HarmonyOS-Sans-LICENSE.txt'),
+].join('\n'))
+section('Maple Mono NF CN 字体', [
+  '版权方：The Maple Mono Project Authors',
+  '许可：SIL Open Font License 1.1',
+  '项目地址：https://github.com/subframe7536/maple-font',
+  '',
+  read('third-party-licenses/MapleMono-LICENSE.txt'),
+].join('\n'))
 section('Pillow（图像缩放算法的移植）', read('third-party-licenses/Pillow-LICENSE.txt'))
 section('libwebp（静态链接，用于编码缩略图）', read('third-party-licenses/libwebp-LICENSE.txt'))
 
@@ -54,7 +66,9 @@ for (const lic of about.licenses) {
 }
 section(`Rust 依赖（共 ${rustSeen.size} 个包）`, rust.join('\n\n'))
 
-// 前端：生产依赖，同名同版本只列一次；许可原文取包目录中的全部许可文件（如 LICENSE-MIT 与 LICENSE-APACHE-2.0），不含 .spdx
+// 前端：生产依赖，同名同版本只列一次；许可原文取包目录中的全部许可文件（如 LICENSE-MIT 与 LICENSE-APACHE-2.0），不含 .spdx。
+// 包中没有许可文件时取 third-party-licenses/npm/<包名>.txt（@ 去掉，/ 换成 __），两处都没有则生成失败。
+const missing = []
 const tree = JSON.parse(execFileSync('npm', ['ls', '--omit=dev', '--all', '--json', '--long'], { encoding: 'utf8', shell: true, maxBuffer: 256 * 1024 * 1024 }))
 const npm = new Map()
 const walk = (deps) => {
@@ -65,14 +79,21 @@ const walk = (deps) => {
       ? readdirSync(d.path).filter((f) => /^(licen[cs]e|copying)([-_.].*)?$/i.test(f) && !/\.spdx$/i.test(f)).sort()
       : []
     const license = typeof d.license === 'object' ? d.license?.type : d.license
-    const text = files.length ? files.map((f) => read(join(d.path, f))).join(`\n\n${THIN}\n\n`) : `包中没有许可文件，许可为 ${license}。`
+    const extra = `third-party-licenses/npm/${name.replace(/^@/, '').replace(/\//g, '__')}.txt`
+    // 原文第一行为“来源：<包名> <版本>，<URL>”，版本不符时视同缺失
+    if (!files.length && !(existsSync(extra) && read(extra).startsWith(`来源：${name} ${d.version}，`))) missing.push(`${name} ${d.version}（应放在 ${extra}，第一行注明该版本）`)
+    const text = files.length ? files.map((f) => read(join(d.path, f))).join(`\n\n${THIN}\n\n`) : existsSync(extra) ? read(extra) : ''
     npm.set(`${name} ${d.version}`, `${THIN}\n${name} ${d.version}（${license ?? '未声明'}）\n${THIN}\n\n${text}`)
     walk(d.dependencies)
   }
 }
 walk(tree.dependencies)
+if (missing.length) {
+  console.error(`以下前端依赖的包中没有许可文件，请从上游仓库对应版本取许可原文（含版权行），放进 third-party-licenses/npm/，文件第一行注明来源 URL 与版本：\n${missing.map((m) => `  ${m}`).join('\n')}`)
+  process.exit(1)
+}
 section(`前端依赖（共 ${npm.size} 个包）`, [...npm.keys()].sort().map((k) => npm.get(k)).join('\n\n'))
 
-mkdirSync('src-tauri/bundle-res', { recursive: true })
+mkdirSync('src/assets', { recursive: true })
 writeFileSync(OUT, `${parts.join('\n')}\n`)
 console.log(`已生成 ${OUT}：Rust 依赖 ${rustSeen.size} 个、前端依赖 ${npm.size} 个。`)

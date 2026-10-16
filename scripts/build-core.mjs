@@ -10,7 +10,6 @@
 // 安装到 <安装目录>\llama\，与核心进程 runtime_dirs 的约定一致。
 // ffmpeg / ffprobe 与它们依赖的 DLL（scripts/fetch-ffmpeg.ps1 取到 .cache 的 LGPL 共享库构建）连同 LGPL 许可与我们的说明复制到
 // src-tauri/bundle-res/ffmpeg/，安装到 <安装目录>\ffmpeg\，与核心进程 ffmpeg_dir 的约定一致；版本与文件清单取自获取脚本，不另写一份。
-// 第三方许可清单由 scripts/build-notices.mjs 生成到 src-tauri/bundle-res/THIRD-PARTY-NOTICES.txt，安装到安装目录
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -82,6 +81,4 @@ if (release && process.platform === 'win32') {
   mkdirSync(ffOut, { recursive: true })
   for (const name of ffmpegFiles) copyFileSync(`${ffmpeg}/${name}`, `${ffOut}/${name}`)
   copyFileSync('third-party-licenses/FFmpeg-NOTICE.txt', `${ffOut}/NOTICE.txt`)
-
-  execFileSync('node', ['scripts/build-notices.mjs'], { stdio: 'inherit' })
 }

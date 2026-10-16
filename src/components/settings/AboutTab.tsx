@@ -164,8 +164,8 @@ export default function AboutTab() {
         <AboutRow icon={<ScaleIcon className="h-4 w-4" />} title="开源协议" subtitle="本软件以 MIT 协议开源" onClick={() => openExternal(LICENSE_URL)} right={EXTERNAL} />
         <AboutRow
           icon={<DocumentIcon className="h-4 w-4" />}
-          title="字体与第三方许可"
-          subtitle="本软件使用 HarmonyOS Sans SC 与 Maple Mono NF CN 字体"
+          title="第三方许可"
+          subtitle="本软件使用的字体与依赖库的许可"
           onClick={() => setLicenses(true)}
           right={CHEVRON}
         />

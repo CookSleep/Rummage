@@ -10,7 +10,7 @@ src-tauri/gen/schemas/
 src-tauri/dev-data/
 # 打包前由 scripts/build-core.mjs 复制的核心进程（externalBin）
 src-tauri/binaries/
-# 打包前由 scripts/build-core.mjs 准备的 llama.cpp 运行库、ffmpeg 与第三方许可清单（bundle.resources）
+# 打包前由 scripts/build-core.mjs 准备的 llama.cpp 运行库与 ffmpeg（bundle.resources）
 src-tauri/bundle-res/
 # 开发版更改数据目录时写入的指向文件和迁移标记
 src-tauri/data-dir*

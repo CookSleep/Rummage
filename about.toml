@@ -1,4 +1,4 @@
-# cargo-about 的配置，用于生成随安装包分发的第三方许可清单（scripts/build-notices.mjs）。
+# cargo-about 的配置，用于生成第三方许可清单（scripts/build-notices.mjs）。
 # 允许的许可与 scripts/check-licenses.mjs 的规则一致：不含 GPL / AGPL / LGPL；这里列出依赖中实际出现的宽松许可，
 # 出现不在列表中的许可时生成失败，需先确认协议再加入。
 accepted = [
@@ -18,7 +18,7 @@ accepted = [
     "CC0-1.0",
     "MPL-2.0",
 ]
-# 清单随 Windows 安装包分发
+# Rust 部分按 Windows 版统计
 targets = ["x86_64-pc-windows-msvc"]
 # 开发依赖不随程序分发
 ignore-dev-dependencies = true

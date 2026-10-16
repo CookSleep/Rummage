@@ -10,7 +10,8 @@
     "test:watch": "vitest",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build --config src-tauri/tauri.bundle.conf.json",
-    "check:licenses": "node scripts/check-licenses.mjs"
+    "check:licenses": "node scripts/check-licenses.mjs",
+    "notices": "node scripts/build-notices.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.1",

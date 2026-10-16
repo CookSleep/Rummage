@@ -129,7 +129,6 @@ npm run tauri:dev
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/fetch-llama.ps1 -Variant vulkan
-cargo install cargo-about --version 0.9.2 --locked --features cli
 npm run tauri:build
 ```
 
@@ -142,4 +141,4 @@ npm run tauri:build
 本项目基于 [MIT License](LICENSE) 开源。
 
 - 模型 [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) 以 Apache 2.0 许可发布，由用户下载，不随程序分发。
-- 随程序分发的 llama.cpp（MIT）、FFmpeg（LGPL v3，以独立程序调用）、字体与其他依赖的许可见安装目录中的 `THIRD-PARTY-NOTICES.txt`，FFmpeg 的源码获取方式见 [`third-party-licenses/FFmpeg-NOTICE.txt`](third-party-licenses/FFmpeg-NOTICE.txt)。
+- 随程序分发的 llama.cpp（MIT）、FFmpeg（LGPL v3，以独立程序调用）、字体与其他依赖的许可见应用的“设置 → 关于 → 第三方许可”（清单原文为 [`src/assets/third-party-notices.txt`](src/assets/third-party-notices.txt)），FFmpeg 的源码获取方式见 [`third-party-licenses/FFmpeg-NOTICE.txt`](third-party-licenses/FFmpeg-NOTICE.txt)。
