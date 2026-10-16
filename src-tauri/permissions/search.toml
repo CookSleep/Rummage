@@ -1,0 +1,17 @@
+[[permission]]
+identifier = "search"
+description = "允许主窗口搜索、读取索引进度、片段正文与文件详情、选择以图搜图的图片，按索引中的文件 ID 打开文件（可带命中位置）或在资源管理器中显示、查询默认程序能否打开到命中位置，以及读取、记录、删除和清空搜索历史"
+commands.allow = [
+  "search",
+  "index_status",
+  "segment_text",
+  "file_details",
+  "open_file",
+  "can_open_at",
+  "reveal_file",
+  "pick_image",
+  "get_history",
+  "add_history",
+  "remove_history",
+  "clear_history",
+]

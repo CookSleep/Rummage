@@ -1,0 +1,26 @@
+---
+source: crates/rummage-extract/src/chunk/tests.rs
+expression: "render(&run(&english_text(), TextKind::Text, &opts()))"
+---
+=== #0 字符 0..409 行 1..1 token 216 标题“”
+Paragraph 1 sentence 1 explains how the indexer handles files on a local disk! Paragraph 1 sentence 2 explains how the indexer handles files on a local disk! Paragraph 1 sentence 3 explains how the indexer handles files on a local disk! Paragraph 1 sentence 4 explains how the indexer handles files on a local disk! Paragraph 1 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+=== #1 字符 316..820 行 1..3 token 264 标题“”
+Paragraph 1 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+
+Paragraph 2 sentence 1 explains how the indexer handles files on a local disk! Paragraph 2 sentence 2 explains how the indexer handles files on a local disk! Paragraph 2 sentence 3 explains how the indexer handles files on a local disk! Paragraph 2 sentence 4 explains how the indexer handles files on a local disk! Paragraph 2 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+=== #2 字符 727..1231 行 3..5 token 264 标题“”
+Paragraph 2 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+
+Paragraph 3 sentence 1 explains how the indexer handles files on a local disk! Paragraph 3 sentence 2 explains how the indexer handles files on a local disk! Paragraph 3 sentence 3 explains how the indexer handles files on a local disk! Paragraph 3 sentence 4 explains how the indexer handles files on a local disk! Paragraph 3 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+=== #3 字符 1138..1642 行 5..7 token 264 标题“”
+Paragraph 3 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+
+Paragraph 4 sentence 1 explains how the indexer handles files on a local disk! Paragraph 4 sentence 2 explains how the indexer handles files on a local disk! Paragraph 4 sentence 3 explains how the indexer handles files on a local disk! Paragraph 4 sentence 4 explains how the indexer handles files on a local disk! Paragraph 4 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+=== #4 字符 1549..2053 行 7..9 token 264 标题“”
+Paragraph 4 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+
+Paragraph 5 sentence 1 explains how the indexer handles files on a local disk! Paragraph 5 sentence 2 explains how the indexer handles files on a local disk! Paragraph 5 sentence 3 explains how the indexer handles files on a local disk! Paragraph 5 sentence 4 explains how the indexer handles files on a local disk! Paragraph 5 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+=== #5 字符 1960..2464 行 9..11 token 264 标题“”
+Paragraph 5 sentence 5 explains how the indexer handles files on a local disk! Is that clear?
+
+Paragraph 6 sentence 1 explains how the indexer handles files on a local disk! Paragraph 6 sentence 2 explains how the indexer handles files on a local disk! Paragraph 6 sentence 3 explains how the indexer handles files on a local disk! Paragraph 6 sentence 4 explains how the indexer handles files on a local disk! Paragraph 6 sentence 5 explains how the indexer handles files on a local disk! Is that clear?

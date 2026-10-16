@@ -1,0 +1,18 @@
+---
+source: crates/rummage-extract/src/doc.rs
+expression: "render(&format!(\"sample.{ext}\"))"
+---
+页："page" []
+--- 正文
+**安装指南**
+
+本文介绍搜索器的安装步骤。
+
+Download the installer and run it. The setup takes about one minute.
+
+=== 字符 0..23 页 None 标题“”
+**安装指南**
+
+本文介绍搜索器的安装步骤。
+=== 字符 25..93 页 None 标题“”
+Download the installer and run it. The setup takes about one minute.

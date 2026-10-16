@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "update"
+description = "允许主窗口读取 GitHub Releases 的版本列表（只限 api.github.com 的 releases 地址），检查本地已下载的更新包，下载或安装更新包（只限配置中的更新地址）"
+commands.allow = ["fetch_releases", "update_ready", "update_download", "update_install"]

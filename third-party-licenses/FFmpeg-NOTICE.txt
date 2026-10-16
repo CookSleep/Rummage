@@ -1,0 +1,25 @@
+FFmpeg（ffmpeg.exe、ffprobe.exe 及其 DLL）
+
+Rummage 的 Windows 版随附 FFmpeg 项目的 ffmpeg.exe、ffprobe.exe 以及它们使用的 FFmpeg 共享库（avcodec-63.dll、avdevice-63.dll、
+avfilter-12.dll、avformat-63.dll、avutil-61.dll、swresample-7.dll、swscale-10.dll），用来读取音频与视频。
+
+- 版本：n9.0.2-27-g7e93014c5b（FFmpeg release/9.0 分支，提交 7e93014c5b）。
+- 构建：BtbN/FFmpeg-Builds 的 LGPL 共享库构建 win64-lgpl-shared，发布标签 autobuild-2026-10-13-13-05，
+  文件 ffmpeg-n9.0.2-27-g7e93014c5b-win64-lgpl-shared-9.0.zip（SHA-256 9df4db960f3f0cd3ed76be0a2be96265d00db4c3be2526a6d39b03c2b547100d）。
+  构建配置不含 --enable-gpl 与 --enable-nonfree，含 --enable-version3，整体以 GNU 宽通用公共许可证（LGPL）第 3 版或更高版本授权，
+  许可证全文见同目录的 LICENSE.txt。
+- 使用方式：Rummage 只以独立可执行文件调用它们（启动子进程，经管道读取输出），不链接 FFmpeg 的库，也没有修改它们。
+  FFmpeg 的库以独立的 DLL 分发，你可以用自己构建的、兼容的 DLL 或 ffmpeg.exe / ffprobe.exe 替换安装目录 ffmpeg 文件夹中的文件。
+- 源码获取：
+  - FFmpeg 源码：https://git.ffmpeg.org/ffmpeg.git （提交 7e93014c5b），镜像 https://github.com/FFmpeg/FFmpeg
+  - 构建脚本与其中各个依赖库的版本、源码地址：https://github.com/BtbN/FFmpeg-Builds （标签 autobuild-2026-10-13-13-05）
+
+FFmpeg (ffmpeg.exe, ffprobe.exe and DLLs)
+
+The Windows build of Rummage ships ffmpeg.exe, ffprobe.exe and the FFmpeg shared libraries they use (avcodec-63.dll,
+avdevice-63.dll, avfilter-12.dll, avformat-63.dll, avutil-61.dll, swresample-7.dll, swscale-10.dll) from the FFmpeg project,
+version n9.0.2-27-g7e93014c5b, built by BtbN/FFmpeg-Builds (win64-lgpl-shared, release autobuild-2026-10-13-13-05) without --enable-gpl or --enable-nonfree and with
+--enable-version3, i.e. licensed under the GNU Lesser General Public License version 3 or later (see LICENSE.txt).
+Rummage runs them as separate, unmodified executables and does not link against FFmpeg libraries; the libraries are shipped
+as separate DLLs, and you may replace any of these files with your own compatible builds. Source code: https://git.ffmpeg.org/ffmpeg.git (commit 7e93014c5b); build scripts and the
+sources of the bundled dependencies: https://github.com/BtbN/FFmpeg-Builds (tag autobuild-2026-10-13-13-05).

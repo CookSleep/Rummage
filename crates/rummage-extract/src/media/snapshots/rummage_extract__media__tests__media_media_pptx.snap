@@ -1,0 +1,7 @@
+---
+source: crates/rummage-extract/src/media/tests.rs
+expression: "render(name, &opts())"
+---
+{"embed":{"kind":"image","n":1,"part":"ppt/media/image1.jpg","slide":1,"width":200,"height":160}} 扫描页 false → 文件 4965 字节
+{"embed":{"kind":"video","n":2,"part":"ppt/media/media1.mp4","slide":2}} 扫描页 false → 范围 2296 字节
+{"embed":{"kind":"audio","n":3,"part":"ppt/media/media2.m4a","slide":3}} 扫描页 false → 文件 5265 字节

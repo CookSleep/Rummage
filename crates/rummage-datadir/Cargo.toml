@@ -1,0 +1,31 @@
+[package]
+name = "rummage-datadir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+log = "=0.4.34"
+thiserror = "=2.0.21"
+
+[target.'cfg(windows)'.dependencies]
+# 驱动器类型与已知文件夹（位置校验）、带进度和取消的 CopyFileExW、等待旧进程退出、
+# 启动时的迁移进度框（TaskDialog），见 src/windows.rs
+windows-sys = { version = "=0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_Controls",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"

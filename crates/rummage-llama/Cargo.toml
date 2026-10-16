@@ -1,0 +1,9 @@
+[package]
+name = "rummage-llama"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+libloading = "=0.9.0"
+thiserror = "=2.0.21"

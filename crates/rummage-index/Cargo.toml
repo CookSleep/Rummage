@@ -1,0 +1,25 @@
+[package]
+name = "rummage-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# quick_hash 与内容哈希，CC0-1.0 OR Apache-2.0；只开 std
+blake3 = { version = "=1.8.7", default-features = false, features = ["std"] }
+# 根目录设置中的用户排除规则，Unlicense OR MIT
+globset = { version = "=0.4.20", default-features = false }
+# 向量以 f16 存储，编解码用其舍入到最近偶数的转换
+half = "=2.7.1"
+log = "=0.4.34"
+# bundled 自带 SQLite（含 FTS5 与 trigram 分词器），不依赖系统库
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+
+[target.'cfg(windows)'.dependencies]
+# 文件属性与卷信息（网盘占位文件、卷检查）、文件 ID（改名与移动识别），见 src/windows.rs
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"

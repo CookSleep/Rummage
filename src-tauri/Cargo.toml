@@ -1,0 +1,61 @@
+[package]
+name = "rummage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rummage"
+
+[lib]
+name = "rummage_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.3", features = ["devtools", "tray-icon"] }
+tauri-plugin-dialog = "=2.8.2"
+tauri-plugin-log = "=2.10.1"
+tauri-plugin-opener = "=2.7.1"
+tauri-plugin-single-instance = "=2.5.3"
+# 应用内更新（src/update.rs），只供 Rust 侧的更新命令使用
+tauri-plugin-updater = "=2.13.3"
+tauri-plugin-window-state = "=2.5.0"
+# 诊断包的 Deflate 压缩与 CRC（src/zip.rs），已是 png、tiff 的依赖
+flate2 = "=1.1.10"
+log = "=0.4.34"
+# 检查更新时读取 GitHub Releases（src/update.rs），版本与特性同核心进程的模型下载
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider", "http2", "system-proxy"] }
+rummage-core = { path = "../crates/rummage-core" }
+rummage-datadir = { path = "../crates/rummage-datadir" }
+# 诊断包中的显卡与驱动版本（adapters）、推理运行库版本
+rummage-embed = { path = "../crates/rummage-embed" }
+# 预览原图前的网盘占位文件检查（ensure_local）
+rummage-index = { path = "../crates/rummage-index" }
+rummage-proto = { path = "../crates/rummage-proto" }
+# 应用内更新的版本比较，与 tauri 的 PackageInfo.version 同一版本
+semver = "=1.0.28"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+# 已下载更新包的校验值
+sha2 = "=0.10.9"
+tokio = { version = "=1.53.2", features = ["io-util", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[target.'cfg(windows)'.dependencies]
+# 读取系统主题，创建主窗口时设置背景色；诊断包中的系统版本
+windows-registry = "=0.6.1"
+# 用 “edit” 动词打开脚本（ShellExecuteExW，见 src/windows.rs；其结构体 SHELLEXECUTEINFOW 需要 Win32_System_Registry）；诊断包的本地时间（GetLocalTime）；
+# 托盘强制结束核心进程（TerminateProcess）与换算暂停到期的本地时间（Win32_System_Time）
+windows-sys = { version = "=0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Registry",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_System_Time",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }

@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口的默认权限",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-destroy",
+    "core:webview:allow-internal-toggle-devtools",
+    "close-watch",
+    "core-status",
+    "search",
+    "pause",
+    "failures",
+    "setup",
+    "settings",
+    "data",
+    "diagnostics",
+    "update",
+    "log:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }]
+    }
+  ]
+}

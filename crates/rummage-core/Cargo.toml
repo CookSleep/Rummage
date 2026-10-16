@@ -1,0 +1,76 @@
+[package]
+name = "rummage-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rummage 核心进程"
+
+# 库部分供界面进程复用管道名、令牌与客户端握手；可执行文件是核心进程本身
+[lib]
+name = "rummage_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rummage-core"
+path = "src/main.rs"
+
+[dependencies]
+# 文档内嵌媒体的缓存图按条目名的哈希命名（server/files/embed.rs），与 rummage-index 同版本
+blake3 = { version = "=1.8.7", default-features = false, features = ["std"] }
+# 命令行的 --since / --until 按本地时区换算、结果中的修改日期（src/cli.rs），MIT OR Apache-2.0；版本同锁文件中已有的
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
+flexi_logger = { version = "=0.31.10", default-features = false }
+getrandom = "=0.4.3"
+log = "=0.4.34"
+# 实时监听文件夹的变化，去抖自己做（server/watch.rs），不用 notify-debouncer-full；CC0-1.0。
+# 不带默认的 macOS FSEvents 后端（不发布 macOS 版）
+notify = { version = "=8.2.0", default-features = false }
+# MCP 服务（src/mcp.rs）：官方 Rust SDK，Apache-2.0；只要服务端、宏、stdio 传输与参数的 JSON Schema。
+# 同时支持 2026-07-28 与之前带 initialize 握手的协议版本；版本更新频繁，升级时单独提交
+rmcp = { version = "=3.5.1", default-features = false, features = ["server", "macros", "transport-io", "schemars"] }
+# 模型下载。与 Playground 相同：rustls + 系统证书库校验（rustls-platform-verifier），
+# 跟随系统代理；不带加密实现，启动时安装 ring。MIT OR Apache-2.0。
+# 传递依赖 webpki-root-certs（Mozilla 根证书数据）为 CDLA-Permissive-2.0，宽松协议
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider", "http2", "system-proxy"] }
+rummage-datadir = { path = "../rummage-datadir" }
+rummage-embed = { path = "../rummage-embed" }
+rummage-extract = { path = "../rummage-extract" }
+rummage-index = { path = "../rummage-index" }
+rummage-media = { path = "../rummage-media" }
+rummage-proto = { path = "../rummage-proto" }
+# 进程默认的加密实现 ring（rustls：Apache-2.0 OR ISC OR MIT；ring：Apache-2.0 AND ISC）
+rustls = { version = "=0.23.45", default-features = false, features = ["ring"] }
+# bench 直接写入合成的索引数据，测试中另开一个只读连接核对索引数据库的内容；与 rummage-index 同版本同 feature，MIT
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+# 命令行 --json 的输出结构与 ASCII 转义（src/cli/output.rs），MIT OR Apache-2.0；与 rummage-proto 同版本
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+# 下载与导入模型时校验 SHA-256，MIT OR Apache-2.0；与 rummage-embed 同版本
+sha2 = "=0.10.9"
+thiserror = "=2.0.21"
+tokio = { version = "=1.53.2", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+# 当前用户 SID、SDDL 安全描述符、核对管道服务端进程的用户、只授予当前用户的令牌文件、
+# 监听关机、注销与电源事件的隐藏窗口，进程优先级，检测全屏、电池与磁盘剩余空间，读取进程内存占用（bench），测试中造稀疏文件，见 src/windows.rs
+windows-sys = { version = "=0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Pipes",
+  "Win32_System_Power",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"

@@ -1,0 +1,52 @@
+# 评测用的负样本查询（rummage-core eval）：评测集里没有相关内容的专门话题，
+# 用来统计相关度门槛能挡住多少“库里没有”的查询。不随程序用于搜索。每行一条，# 开头的行与空行忽略。
+量子色动力学中的渐近自由
+拉格朗日乘子法求解约束优化
+鸡传染性支气管炎疫苗的接种程序
+光刻机极紫外光源的工作原理
+民事诉讼中的举证责任倒置
+蜂王浆的采收方法
+二叠纪末生物大灭绝的原因
+中药材黄芪的炮制工艺
+船舶压载水处理公约
+核磁共振波谱的化学位移
+钢筋混凝土梁的抗剪承载力计算
+甲骨文中“卜”字的释读
+卫星轨道的霍曼转移
+奶牛乳房炎的治疗
+拓扑绝缘体的边缘态
+古琴减字谱的读法
+增值税留抵退税的申报流程
+嵌入式 Linux 设备树的编写
+葡萄酒酿造中的苹果酸乳酸发酵
+哥德尔不完备定理的证明思路
+高铁接触网的张力补偿装置
+蝴蝶翅膀鳞片的结构色
+风力发电机齿轮箱的故障诊断
+青铜器铭文的拓印方法
+深海热泉的化能合成细菌
+心脏起搏器的程控参数
+围棋定式中的大雪崩
+盾构机刀盘的磨损检测
+昆曲水磨腔的唱法
+蛋白质折叠的分子伴侣
+Byzantine fault tolerance in distributed consensus
+mitochondrial DNA inheritance patterns
+torque specifications for a motorcycle cylinder head
+Baroque counterpoint rules in fugue writing
+soil pH testing for blueberry cultivation
+maritime salvage law
+transistor biasing in a class AB amplifier
+enzymes of the Krebs cycle
+beekeeping hive inspection checklist
+glacier crevasse rescue technique
+compiler register allocation by graph coloring
+sourdough starter hydration ratio
+orbital mechanics near a Lagrange point
+pigments in medieval illuminated manuscripts
+hydraulic fracturing wastewater treatment
+knitting pattern for a cable sweater
+radiocarbon dating calibration curve
+tax treaty withholding rates for royalties
+ultrasonic welding of thermoplastics
+superconducting qubit decoherence time

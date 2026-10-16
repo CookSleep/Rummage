@@ -1,0 +1,8 @@
+// 测试进程的类路径处理不了含中文的目录：把插件模块的构建目录放到 CARGO_TARGET_DIR（纯英文路径）下
+allprojects {
+    if (name == 'tauri-plugin-rummage-android') {
+        def target = System.getenv('CARGO_TARGET_DIR')
+        if (!target) throw new GradleException('先把 CARGO_TARGET_DIR 设为纯英文路径')
+        layout.buildDirectory = file("$target/gradle/tauri-plugin-rummage-android")
+    }
+}

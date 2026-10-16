@@ -1,0 +1,24 @@
+[[permission]]
+identifier = "setup"
+description = "允许主窗口进行首次使用引导：读取引导状态、选择并添加或移除被索引的文件夹、读写参数、下载、导入、校验或删除模型（导入的文件由 Rust 侧的对话框选择）、设置网络代理、运行设备自检、选择使用的设备或解除显卡的屏蔽、预估索引规模，记下引导进行到的步骤，以及完成引导"
+commands.allow = [
+  "setup_status",
+  "finish_setup",
+  "set_onboarding_step",
+  "list_roots",
+  "add_root",
+  "remove_root",
+  "get_params",
+  "set_param",
+  "download_models",
+  "import_models",
+  "cancel_model_task",
+  "verify_model",
+  "verify_models",
+  "delete_model",
+  "set_proxy",
+  "run_selftest",
+  "set_preferred_device",
+  "unblock_gpu",
+  "index_estimate",
+]

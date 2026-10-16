@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["crates/rummage-core", "crates/rummage-datadir", "crates/rummage-embed", "crates/rummage-extract", "crates/rummage-index", "crates/rummage-llama", "crates/rummage-media", "crates/rummage-proto", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[profile.dev.package."*"]
+# 第三方依赖只保留行号（调用栈仍完整），减小调试构建的体积；需要调试某个依赖时临时给它单独设 debug = true
+debug = "line-tables-only"

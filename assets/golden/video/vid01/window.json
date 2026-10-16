@@ -1,0 +1,22 @@
+{
+  "window_start_seconds": 1.0,
+  "window_seconds": 6.0,
+  "frames": 6,
+  "frame_times": [
+    0.0,
+    1.2,
+    2.4,
+    3.6,
+    4.8,
+    6.0
+  ],
+  "timestamps": [
+    "00:01",
+    "00:02",
+    "00:03",
+    "00:04",
+    "00:05",
+    "00:07"
+  ],
+  "audio_segment_seconds": 1.0
+}

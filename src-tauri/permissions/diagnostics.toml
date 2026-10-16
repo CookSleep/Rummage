@@ -1,0 +1,7 @@
+[[permission]]
+identifier = "diagnostics"
+description = "允许主窗口打开日志目录，以及导出诊断包（保存位置由 Rust 侧的对话框选择）"
+commands.allow = [
+  "open_log_dir",
+  "export_diagnostics",
+]

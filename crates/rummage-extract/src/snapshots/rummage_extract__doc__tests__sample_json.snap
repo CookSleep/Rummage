@@ -1,0 +1,24 @@
+---
+source: crates/rummage-extract/src/doc.rs
+expression: "render(&format!(\"sample.{ext}\"))"
+---
+页："page" []
+--- 正文
+title: 安装指南
+
+# steps
+
+- 下载安装包后双击运行。
+- Follow the prompts to finish the setup.
+
+offline: true
+
+=== 字符 0..11 页 None 标题“”
+title: 安装指南
+=== 字符 13..77 页 None 标题“steps”
+# steps
+
+- 下载安装包后双击运行。
+- Follow the prompts to finish the setup.
+=== 字符 79..92 页 None 标题“steps”
+offline: true

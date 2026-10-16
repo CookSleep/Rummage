@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "pause"
+description = "允许主窗口手动暂停建索引（1 小时、到明天或直到手动恢复）和恢复建索引"
+commands.allow = ["pause_indexing", "resume_indexing"]

@@ -1,0 +1,33 @@
+[package]
+name = "rummage-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# WIC 不可用或解码失败时的回退，也是非 Windows 平台的解码器；只开需要的格式
+image = { version = "=0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
+log = "=0.4.34"
+# 解析 ffprobe 的 JSON 输出、写音频元数据，MIT OR Apache-2.0
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+# 缩略图的有损 WebP 编码，MIT OR Apache-2.0；静态链接 libwebp（libwebp-sys，MIT；
+# libwebp 本身为 BSD-3-Clause，许可文本见 third-party-licenses/libwebp-LICENSE.txt）。不开 img，不依赖 image
+webp = { version = "=0.3.1", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+# WIC 是 COM 接口，windows-sys 没有接口绑定；windows 0.62.2 已随 Tauri 进入 Cargo.lock，见 src/windows.rs
+# 系统缩略图接口 IShellItemImageFactory 与读取其位图的 GDI 函数；启动 ffmpeg 不弹窗口的 CREATE_NO_WINDOW
+# 与随核心进程结束的 Job Object（ffmpeg/windows.rs）
+windows = { version = "=0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Imaging",
+  "Win32_Security",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+  "Win32_UI_Shell",
+] }

@@ -1,0 +1,111 @@
+import { useEffect, useRef, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import type { ProxySetting, SetupStatus } from '../../types'
+import { errorMessage } from '../../lib/errors'
+import { DownloadIcon } from '../icons'
+import { ImportRow, MODELS, ModelRow, modelLabel, ProxyStatus, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from './ModelDownload'
+import { BUTTON, CARD, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
+
+/**
+ * 第 3 步：下载模型。下载与导入在核心进程中进行，关闭窗口也会继续，进度经事件推来；
+ * 显示当前代理状态，并提供换用镜像或设置代理的入口。
+ * 进入时依次完整校验本步需要的、已安装但还没有通过校验的模型（下载、导入成功时已记为通过）；校验不通过的按未安装处理，
+ * 需要重新下载或导入。所需模型都通过校验后才能进入下一步（Onboarding 的 `blockerAt`）
+ */
+export default function ModelStep({ status, mmproj, onProxy }: { status: SetupStatus; mmproj: boolean; onProxy: (p: ProxySetting) => void }) {
+  const [source, setSource] = useState<SourceChoice>({ type: 'official', url: '' })
+  const [error, setError] = useState('')
+  // 进入这一步时已发起过校验；开发模式下 effect 会执行两次
+  const autoVerified = useRef(false)
+  const task = status.task
+  const running = task?.state === 'running'
+  const files = mmproj ? [status.model, status.mmproj] : [status.model]
+  // 都已安装且没有校验出问题，不需要下载或导入
+  const ready = files.every((f) => f.ready && f.verified !== false)
+  // 已安装但还没有通过校验（校验被取消时由“重新校验”再发起）
+  const unverified = files.some((f) => f.ready && f.verified === null)
+  // 校验已发起、还没看到进行中的校验任务，不显示“重新校验”；进入时会自动校验的，从第一次渲染起就算
+  const [starting, setStarting] = useState(unverified && !running)
+  // 校验刚结束、重新读取的状态还没到时文件仍是未校验，不显示“重新校验”
+  const verifyDone = task?.kind === 'verify' && task.state === 'done'
+  // 有下载了一部分的 .part 时续传
+  const resumable = status.model.partialBytes > 0 || (mmproj && status.mmproj.partialBytes > 0)
+
+  const call = (cmd: string, args?: Record<string, unknown>) => {
+    setError('')
+    return invoke(cmd, args).then(
+      () => true,
+      (err) => {
+        console.warn(`${cmd} 失败：`, err)
+        setError(errorMessage(err, '操作失败，请重试。'))
+        return false
+      },
+    )
+  }
+
+  const download = () => call('download_models', { source: toSource(source), mmproj })
+  // 返回时校验任务已开始（之后由 `running` 控制显示），或没有要校验的文件
+  const verify = () => {
+    setStarting(true)
+    call('verify_models', { mmproj }).then(() => setStarting(false))
+  }
+
+  useEffect(() => {
+    if (autoVerified.current || running || !unverified) return
+    autoVerified.current = true
+    verify()
+  }, [])
+
+  return (
+    <div>
+      <h2 className="text-base font-bold text-gray-800 dark:text-gray-100">下载模型</h2>
+      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">识别文件内容需要本地模型，下载一次即可，之后完全离线使用。</p>
+
+      <div className={`mt-4 ${CARD}`}>
+        {MODELS.filter((m) => !m.mmproj || mmproj).map((m) => (
+          <ModelRow key={m.label} info={m} url={status.modelUrl} file={m.mmproj ? status.mmproj : status.model} running={running} />
+        ))}
+        {!ready && <ImportRow disabled={running} onImport={() => call('import_models')} />}
+      </div>
+
+      {running && task && (
+        <div className="mt-4 flex items-center gap-3">
+          <TaskProgress task={task} label={modelLabel(status)} className="min-w-0 flex-1" />
+          {task.kind !== 'delete' && (
+            <button type="button" className={`flex-shrink-0 ${BUTTON}`} onClick={() => call('cancel_model_task')}>
+              {task.kind === 'download' ? '暂停' : '取消'}
+            </button>
+          )}
+        </div>
+      )}
+      {/* 成功时模型行的状态已说明结果；暂停的下载在行中显示已下载的大小，不再显示“已取消” */}
+      {!running && task?.message && task.state !== 'done' && !(task.kind === 'download' && task.state === 'cancelled') && (
+        <p data-selectable-text className={`mt-3 text-xs ${taskMessageClass(task)}`}>
+          {task.message}
+        </p>
+      )}
+      {!running && !starting && !verifyDone && unverified && (
+        <div className="mt-3">
+          <button type="button" className={BUTTON} onClick={verify}>
+            重新校验
+          </button>
+        </div>
+      )}
+
+      {!ready && (
+        <div className="mt-5 space-y-3">
+          <SourcePicker value={source} onChange={setSource} disabled={running} />
+          <ProxyStatus proxy={status.proxy} onProxy={onProxy} />
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button type="button" className={`inline-flex items-center gap-1.5 ${PRIMARY_BUTTON}`} disabled={running} onClick={download}>
+              <DownloadIcon className="h-4 w-4" />
+              {files.some((f) => f.verified === false) ? '重新下载' : resumable ? '继续下载' : '开始下载'}
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
+    </div>
+  )
+}

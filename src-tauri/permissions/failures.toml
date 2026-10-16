@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "failures"
+description = "允许主窗口查看建立索引失败的文件及原因，重试或忽略其中一个或全部"
+commands.allow = ["failed_files", "retry_failed", "retry_all_failed", "ignore_failed", "ignore_all_failed"]

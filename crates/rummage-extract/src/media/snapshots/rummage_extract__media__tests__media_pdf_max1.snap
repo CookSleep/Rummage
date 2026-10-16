@@ -1,0 +1,6 @@
+---
+source: crates/rummage-extract/src/media/tests.rs
+expression: "render(\"media.pdf\", &one)"
+---
+{"embed":{"kind":"image","n":1,"pos":2,"page":1,"width":200,"height":160}} 扫描页 false → RGB 200×160
+{"embed":{"kind":"image","n":2,"pos":0,"page":4,"width":300,"height":424}} 扫描页 true → RGB 300×424

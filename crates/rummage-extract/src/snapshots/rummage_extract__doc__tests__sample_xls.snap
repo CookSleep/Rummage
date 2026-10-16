@@ -1,0 +1,32 @@
+---
+source: crates/rummage-extract/src/doc.rs
+expression: "render(&format!(\"sample.{ext}\"))"
+---
+页："page" []
+--- 正文
+## 预算
+
+| 项目 | 金额 |
+| --- | --- |
+| 显卡 | 4999 |
+| Memory | 899 |
+
+## Schedule
+
+| 阶段 | 完成日期 |
+| --- | --- |
+| 文档提取 | 2026-10-20 |
+
+=== 字符 0..63 页 None 标题“预算”
+## 预算
+
+| 项目 | 金额 |
+| --- | --- |
+| 显卡 | 4999 |
+| Memory | 899 |
+=== 字符 65..127 页 None 标题“Schedule”
+## Schedule
+
+| 阶段 | 完成日期 |
+| --- | --- |
+| 文档提取 | 2026-10-20 |

@@ -1,0 +1,6 @@
+---
+source: crates/rummage-extract/src/chunk/tests.rs
+expression: "render(&run(\"只有一行的文件。\", TextKind::Text, &opts()))"
+---
+=== #0 字符 0..8 行 1..1 token 16 标题“”
+只有一行的文件。

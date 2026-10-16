@@ -1,0 +1,226 @@
+# 分数校准用的通用查询表：用来估计“随便一条查询”对某类文件的分数分布，
+# 不针对任何评测集。每行一条，# 开头的行与空行忽略。改动后已缓存的旧查询向量自动作废。
+# 日常生活
+今天晚饭吃什么
+周末去哪里玩
+家里的猫在睡觉
+小狗在草地上奔跑
+下雨天的街道
+早餐的煎蛋和牛奶
+超市购物小票
+冰箱里的剩菜
+阳台上的绿植
+客厅沙发和电视
+厨房里的锅碗瓢盆
+洗衣机的使用说明
+快递取件码
+小区停车位
+地铁换乘路线
+公交车站的站牌
+医院挂号单
+体检报告
+感冒药的说明书
+宝宝的满月照
+孩子的生日派对
+婚礼现场的照片
+老家的院子
+春节全家福
+中秋节的月饼
+雪地里的脚印
+海边的日落
+山顶的云海
+樱花盛开的公园
+秋天的落叶
+city skyline at night
+a cup of coffee on a wooden table
+my dog playing in the park
+grocery list for the week
+family photo on the beach
+birthday cake with candles
+# 工作
+季度销售报表
+项目进度汇报
+会议纪要
+年终总结
+员工考勤表
+报销单据
+合同扫描件
+发票照片
+简历模板
+面试安排
+客户联系方式
+产品需求文档
+市场调研报告
+预算表格
+工作周报
+出差行程安排
+公司组织架构图
+PPT 封面设计
+团队合影
+办公室工位
+quarterly revenue report
+meeting notes from last week
+project timeline and milestones
+invoice for the consulting work
+employee onboarding checklist
+slides for the product launch
+# 学习
+高等数学期末复习
+英语四级单词表
+物理实验报告
+化学方程式配平
+历史课笔记
+古诗词鉴赏
+作文范文
+考研政治大纲
+论文参考文献
+毕业论文答辩
+课堂板书照片
+数学错题本
+编程作业
+图书馆借书记录
+留学申请文书
+linear algebra lecture notes
+how photosynthesis works
+history of the Roman Empire
+introduction to machine learning
+essay on climate change
+# 生活与健康
+减肥食谱
+跑步机训练计划
+瑜伽动作图解
+睡眠质量差怎么办
+血压记录
+牙齿矫正
+宠物疫苗本
+房屋租赁合同
+装修效果图
+家具组装说明
+水电费账单
+银行流水
+信用卡账单
+保险合同条款
+旅游攻略
+酒店预订确认
+机票行程单
+护照照片
+签证材料清单
+菜谱：红烧肉的做法
+healthy breakfast recipes
+weekly workout routine
+apartment lease agreement
+travel itinerary for Japan
+hotel booking confirmation
+# 技术
+电脑蓝屏怎么办
+手机截图
+软件安装步骤
+路由器设置
+Python 读取文件
+数据库连接失败
+服务器日志
+代码报错截图
+接口文档
+系统架构图
+Git 提交记录
+命令行参数说明
+配置文件示例
+Excel 函数公式
+网页设计稿
+App 界面原型
+显卡驱动更新
+硬盘空间不足
+网络测速结果
+密码修改提示
+how to fix a memory leak
+REST API documentation
+install Node.js on Windows
+SQL query optimization
+error message in the terminal
+user interface mockup
+# 娱乐
+电影海报
+演唱会门票
+游戏截图
+动漫人物
+综艺节目片段
+篮球比赛
+足球进球瞬间
+钢琴演奏
+吉他和弦谱
+流行歌曲歌词
+小说章节
+漫画分镜
+抖音短视频
+猫咪搞笑视频
+烟花表演
+游乐园过山车
+电视剧剧情介绍
+博物馆展品
+画展作品
+摄影作品集
+movie trailer
+live concert recording
+video game boss fight
+funny cat video
+podcast episode about history
+# 声音与说话
+有人在说话
+会议录音
+电话录音
+课堂讲课录音
+雨声
+雷声
+鸟叫声
+汽车喇叭声
+婴儿哭声
+掌声和欢呼
+狗叫声
+厨房里切菜的声音
+键盘打字声
+海浪声
+风声
+someone giving a speech
+music with drums and guitar
+people laughing
+traffic noise in the city
+# 视频场景
+有人在做饭
+孩子在学走路
+街头采访
+旅行 vlog
+开箱视频
+教学视频
+跳舞的人群
+骑自行车
+开车的行车记录
+无人机航拍
+运动会比赛
+婚礼致辞
+生日唱歌
+宠物洗澡
+游泳池跳水
+a person cooking in the kitchen
+drone footage over mountains
+people dancing at a party
+# 其他
+红色的汽车
+蓝色的连衣裙
+黑白照片
+手写的字条
+二维码
+地图
+表格里的数字
+图表和折线图
+一张收据
+身份证复印件
+证件照
+屏幕上的文字
+一本打开的书
+桌上的笔记本电脑
+窗外的风景
+a handwritten note
+a bar chart with sales data
+a screenshot of a chat conversation
+a map of the city
+an old black and white photo

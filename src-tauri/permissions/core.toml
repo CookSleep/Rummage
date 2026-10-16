@@ -1,0 +1,7 @@
+[[permission]]
+identifier = "core-status"
+description = "允许主窗口查询核心进程的连接状态，以及在核心进程无法启动时重新拉起它"
+commands.allow = [
+  "core_status",
+  "restart_core",
+]

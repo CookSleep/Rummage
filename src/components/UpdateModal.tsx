@@ -1,0 +1,286 @@
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { closeConfirm, refreshClientUpdate, requestClientUpdateInstall, startClientUpdateDownload, useClientUpdate } from '../hooks/useClientUpdate'
+import { useEscape } from '../hooks/useEscape'
+import { checkForUpdates, ignoreReleaseVersion, loadOlderReleases, setUpdateModalOpen, useReleaseUpdates } from '../hooks/useReleaseUpdates'
+import { formatUpdateProgress } from '../lib/clientUpdate'
+import { errorMessage } from '../lib/errors'
+import { isTauri, openExternal } from '../lib/platform'
+import { compareVersions, MANUAL_CHECK_MIN_INTERVAL_MS, parseReleaseBody, RELEASES_PAGE_URL, shouldShowUpdate, stripReleaseHeading } from '../lib/releaseUpdates'
+import ConfirmDialog from './ConfirmDialog'
+import { CloseIcon, ExternalLinkIcon } from './icons'
+import { HoverTip } from './Tip'
+import { BUTTON, PRIMARY_BUTTON } from './onboarding/styles'
+
+function formatReleaseDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
+/** 按 RELEASE.md 的格式显示更新说明：分类标题、条目与缩进的子条目 */
+function ReleaseBody({ body }: { body: string }) {
+  const lines = parseReleaseBody(body)
+  if (!lines.length) return <p>暂无更新说明</p>
+  return (
+    <div className="space-y-1">
+      {lines.map((line, idx) => {
+        if (line.type === 'heading') return <h5 key={idx} className="pt-2 font-bold text-gray-800 first:pt-0 dark:text-gray-100">{line.text}</h5>
+        if (line.type === 'text') return <p key={idx}>{line.text}</p>
+        return (
+          <div key={idx} className={`flex gap-2 ${line.nested ? 'pl-5' : ''}`}>
+            <span className="shrink-0 select-none text-gray-400 dark:text-gray-500">{line.nested ? '◦' : '•'}</span>
+            <span className="min-w-0">{line.text}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const CLIENT_UPDATE_LABELS = {
+  idle: '下载',
+  downloading: '下载中',
+  ready: '安装',
+  installing: '安装中',
+}
+
+// 下载进度更新频繁，按钮单独订阅 store，避免整个弹窗随之重渲染
+function ClientUpdateButton({ version }: { version: string }) {
+  const status = useClientUpdate((s) => s.status)
+  const progress = useClientUpdate((s) => s.progress)
+
+  // 最新版本变化时重新检查本地安装包
+  useEffect(() => {
+    void refreshClientUpdate()
+  }, [version])
+
+  const handleClick = () => {
+    if (status !== 'ready') return void startClientUpdateDownload(version)
+    void requestClientUpdateInstall(version)
+  }
+
+  const label = status === 'downloading' && progress ? `下载中 ${formatUpdateProgress(progress)}` : CLIENT_UPDATE_LABELS[status]
+  return (
+    <button
+      type="button"
+      disabled={status === 'downloading' || status === 'installing'}
+      onClick={handleClick}
+      className={`${PRIMARY_BUTTON} whitespace-nowrap tabular-nums disabled:cursor-default disabled:opacity-70 disabled:hover:bg-blue-500`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function UpdateModalContent() {
+  const releases = useReleaseUpdates((s) => s.releases)
+  const hasMore = useReleaseUpdates((s) => s.hasMore)
+  const ignoredVersion = useReleaseUpdates((s) => s.ignoredVersion)
+  const checkError = useReleaseUpdates((s) => s.checkError)
+  const confirmOpen = useClientUpdate((s) => s.confirm !== null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // 加载新一页后要滚动到的条目序号，-1 表示不滚动
+  const scrollToRef = useRef(-1)
+
+  const latest = releases[0]
+  const onClose = () => setUpdateModalOpen(false)
+
+  // 确认框打开时由它处理 Esc
+  useEscape(onClose, !confirmOpen)
+
+  const run = async (task: () => Promise<unknown>) => {
+    setLoading(true)
+    setError('')
+    try {
+      await task()
+    } catch (err) {
+      setError(errorMessage(err, '获取版本信息失败，请稍后再试。'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadMore = () => {
+    if (loading || !hasMore) return
+    scrollToRef.current = releases.length
+    void run(() => loadOlderReleases())
+  }
+
+  useEffect(() => {
+    // 还没有数据时（没有检查过，或上次检查失败）补一次请求
+    if (!useReleaseUpdates.getState().releases.length) void run(() => checkForUpdates())
+  }, [])
+
+  useEffect(() => {
+    // 新一页显示后滚到它的第一条，让用户看到加载结果
+    const idx = scrollToRef.current
+    if (idx < 0 || idx >= releases.length) return
+    scrollToRef.current = -1
+    const el = scrollRef.current
+    const item = el?.querySelector<HTMLElement>(`[data-release-index="${idx}"]`)
+    if (el && item) el.scrollTo({ top: item.offsetTop - 12, behavior: 'smooth' })
+  }, [releases.length])
+
+  const hasUpdate = Boolean(latest && compareVersions(latest.version, __APP_VERSION__) > 0)
+  // 没有版本列表时正文已显示加载中或失败详情，标题下只给简短状态，不重复
+  const status = !releases.length
+    ? !loading && (error || checkError)
+      ? { label: '检查失败', text: 'text-red-600 dark:text-red-400', dot: 'bg-red-500 ring-red-500/20' }
+      : { label: '当前版本', text: 'text-gray-500 dark:text-gray-400', dot: 'bg-gray-300 ring-gray-300/25 dark:bg-gray-600 dark:ring-gray-600/30' }
+    : hasUpdate
+      ? { label: '有新版本可用', text: 'font-medium text-blue-600 dark:text-blue-400', dot: 'bg-blue-500 ring-blue-500/20' }
+      : checkError
+        ? { label: `检查失败：${checkError}`, text: 'text-red-600 dark:text-red-400', dot: 'bg-red-500 ring-red-500/20' }
+        : { label: '当前已是最新版本', text: 'text-gray-500 dark:text-gray-400', dot: 'bg-emerald-500 ring-emerald-500/20' }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 animate-overlay-in bg-black/30 backdrop-blur-sm" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="版本更新"
+        className="relative z-10 flex h-[85vh] max-h-[720px] w-full max-w-2xl animate-modal-in flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-start gap-3 border-b border-gray-100 px-5 py-4 dark:border-white/[0.08]">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-3">
+              <h3 className="text-base font-bold text-gray-800 dark:text-gray-100">版本更新</h3>
+              <button
+                type="button"
+                onClick={() => openExternal(latest?.url ?? RELEASES_PAGE_URL)}
+                className="flex items-center gap-1 text-xs text-gray-400 transition-colors hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400"
+              >
+                <ExternalLinkIcon className="h-3.5 w-3.5" />
+                在 GitHub 打开
+              </button>
+            </div>
+            {/* 检查失败时列表可能来自过期缓存，不能断言已是最新；有新版本时仍以新版本信息优先 */}
+            <div className={`mt-1.5 flex min-w-0 items-center gap-2 text-xs ${status.text}`}>
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ring-[3px] ${status.dot}`} />
+              <span className="min-w-0 truncate">
+                {status.label}
+                <HoverTip label={status.label.replace(/。$/, '')} wrap />
+              </span>
+              <span data-selectable-text className="shrink-0 font-mono text-gray-400 dark:text-gray-500">
+                {hasUpdate ? `v${__APP_VERSION__} → ${latest?.tag}` : `v${__APP_VERSION__}`}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="-mr-1 shrink-0 rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+            aria-label="关闭"
+          >
+            <CloseIcon className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [scrollbar-gutter:stable]">
+          {releases.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-gray-500 dark:text-gray-400">
+              {loading ? '正在获取版本信息' : error ? (
+                <>
+                  <span data-selectable-text>获取版本信息失败：{error}</span>
+                  <button type="button" onClick={() => void run(() => checkForUpdates(MANUAL_CHECK_MIN_INTERVAL_MS))} className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300">重试</button>
+                </>
+              ) : '暂无已发布的版本'}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {releases.map((release, idx) => {
+                const cmp = compareVersions(release.version, __APP_VERSION__)
+                return (
+                  <section
+                    key={release.tag}
+                    data-release-index={idx}
+                    className={`rounded-2xl p-4 ${cmp > 0 ? 'bg-blue-50/80 ring-1 ring-blue-100 dark:bg-blue-500/[0.08] dark:ring-blue-400/15' : 'bg-black/[0.03] dark:bg-white/[0.04]'}`}
+                  >
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <h4 className="text-[15px] font-bold text-gray-800 dark:text-gray-100">{release.tag}</h4>
+                      {idx === 0 && cmp > 0 && <span className="text-xs font-medium text-blue-500 dark:text-blue-400">最新</span>}
+                      {cmp === 0 && <span className="text-xs text-gray-400 dark:text-gray-500">当前版本</span>}
+                      <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">{formatReleaseDate(release.publishedAt)}</span>
+                    </div>
+                    <div data-selectable-text className="text-sm leading-relaxed text-gray-700 dark:text-gray-200">
+                      <ReleaseBody body={stripReleaseHeading(release.body, release.version)} />
+                    </div>
+                  </section>
+                )
+              })}
+              <div className="flex items-center justify-center gap-2 pb-2 text-xs text-gray-400 dark:text-gray-500">
+                {error ? (
+                  <>
+                    <span data-selectable-text>加载失败：{error}</span>
+                    <button type="button" onClick={loadMore} className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300">重试</button>
+                  </>
+                ) : loading ? '正在加载' : hasMore ? (
+                  <button type="button" onClick={loadMore} className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300">加载更早的版本</button>
+                ) : '没有更早的版本了'}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-gray-100 p-3 dark:border-white/[0.08] sm:p-4">
+          {latest && shouldShowUpdate(latest, __APP_VERSION__, ignoredVersion) && (
+            <button
+              type="button"
+              onClick={() => {
+                ignoreReleaseVersion(latest.version)
+                onClose()
+              }}
+              className="whitespace-nowrap rounded-xl px-2 py-2 text-xs text-gray-500 transition hover:bg-black/[0.05] hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200 sm:px-3 sm:text-sm"
+            >
+              忽略当前最新版本
+            </button>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={onClose} className={BUTTON}>
+              关闭
+            </button>
+            {hasUpdate && latest && (isTauri ? <ClientUpdateButton version={latest.version} /> : (
+              <button type="button" onClick={() => openExternal(latest.url)} className={PRIMARY_BUTTON}>
+                前往 GitHub 下载
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/**
+ * 更新日志弹窗：列出 GitHub Releases 中的各版本与更新说明，底部按钮加载更早的版本，
+ * 可忽略当前最新版本。有新版本时底部按钮下载更新包，下载完成后变为“安装”；关闭弹窗后下载继续。
+ * 由“关于”页或搜索页设置按钮旁的 NEW 打开，放在 App 中，叠在设置之上。Esc 或点遮罩关闭
+ */
+export default function UpdateModal() {
+  const modalOpen = useReleaseUpdates((s) => s.modalOpen)
+  const confirm = useClientUpdate((s) => s.confirm)
+  if (!modalOpen) return null
+  // 确认框不放在弹窗的元素树中，点击不会经 React 事件冒泡到弹窗遮罩
+  return (
+    <>
+      <UpdateModalContent />
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.title}
+          message={confirm.message}
+          confirmText={confirm.confirmText}
+          danger={confirm.danger}
+          extra={confirm.extra}
+          onConfirm={confirm.onConfirm}
+          onCancel={closeConfirm}
+        />
+      )}
+    </>
+  )
+}

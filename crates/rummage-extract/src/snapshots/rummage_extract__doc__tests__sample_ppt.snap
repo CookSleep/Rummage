@@ -1,0 +1,38 @@
+---
+source: crates/rummage-extract/src/doc.rs
+expression: "render(&format!(\"sample.{ext}\"))"
+---
+页："slide" []
+--- 正文
+-----
+
+## 项目概览
+
+本地语义搜索
+
+Works offline
+
+-----
+
+## 下一步
+
+接入文档提取
+
+评测召回率
+
+=== 字符 0..5 页 None 标题“”
+-----
+=== 字符 7..44 页 None 标题“项目概览”
+## 项目概览
+
+本地语义搜索
+
+Works offline
+
+-----
+=== 字符 46..67 页 None 标题“下一步”
+## 下一步
+
+接入文档提取
+
+评测召回率

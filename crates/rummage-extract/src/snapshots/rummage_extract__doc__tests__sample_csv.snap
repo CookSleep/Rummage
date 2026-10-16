@@ -1,0 +1,16 @@
+---
+source: crates/rummage-extract/src/doc.rs
+expression: "render(&format!(\"sample.{ext}\"))"
+---
+页："page" []
+--- 正文
+| 项目 | 金额 | 备注 |
+| --- | --- | --- |
+| 显卡 | 4999 | 用于建索引 |
+| Memory | 899 | 32 GB |
+
+=== 字符 0..83 页 None 标题“”
+| 项目 | 金额 | 备注 |
+| --- | --- | --- |
+| 显卡 | 4999 | 用于建索引 |
+| Memory | 899 | 32 GB |

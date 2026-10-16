@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "data"
+description = "允许主窗口管理数据：查看数据目录占用、打开数据目录、更改数据目录（目录由 Rust 侧的对话框选择）、读取启动时的数据目录提示、查看索引数据库状态并在无法打开时清除重建、清空索引，以及连同核心进程退出（含设置为关闭窗口时退出的关窗）"
+commands.allow = [
+  "storage_info",
+  "open_data_dir",
+  "data_dir_pick",
+  "data_dir_change",
+  "data_dir_notices",
+  "db_status",
+  "reset_index",
+  "clear_index",
+  "exit_app",
+]

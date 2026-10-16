@@ -1,0 +1,29 @@
+---
+source: crates/rummage-extract/src/doc.rs
+expression: "render(&format!(\"sample.{ext}\"))"
+---
+页："page" [(0, 1), (118, 2)]
+--- 正文
+# 安装指南
+
+本文介绍搜索器的安装步骤。安装程序不会修改系统设置。
+
+## Windows
+
+Download the installer and run it. The setup takes about one minute.
+
+# 常见问题
+
+索引速度取决于显卡。第一次建索引时请保持电脑通电。
+=== 字符 0..34 页 Some((1, 1)) 标题“安装指南”
+# 安装指南
+
+本文介绍搜索器的安装步骤。安装程序不会修改系统设置。
+=== 字符 36..116 页 Some((1, 1)) 标题“安装指南 > Windows”
+## Windows
+
+Download the installer and run it. The setup takes about one minute.
+=== 字符 118..151 页 Some((2, 2)) 标题“常见问题”
+# 常见问题
+
+索引速度取决于显卡。第一次建索引时请保持电脑通电。

@@ -1,0 +1,6 @@
+---
+source: crates/rummage-extract/src/media/tests.rs
+expression: "render(name, &opts())"
+---
+{"embed":{"kind":"image","n":1,"part":"xl/media/image1.jpeg","sheet":"销售","width":200,"height":160}} 扫描页 false → 文件 4965 字节
+{"embed":{"kind":"image","n":2,"part":"xl/media/image2.jpeg","sheet":"图表","width":160,"height":200}} 扫描页 false → 文件 4992 字节

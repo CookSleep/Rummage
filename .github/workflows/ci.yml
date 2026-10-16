@@ -1,0 +1,56 @@
+name: CI
+
+# 推送分支与 pull request 时检查；推送 tag 由发布工作流构建，不在这里重复
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: swatinem/rust-cache@v2
+
+      # 解码音视频的测试使用 ffmpeg，找不到时会跳过；获取脚本校验钉定的 SHA-256，缓存命中且哈希正确时不再下载。
+      # 不需要模型与 GPU 的测试都不加载 llama.cpp 运行库，这里不获取
+      - uses: actions/cache@v4
+        with:
+          path: .cache/third-party/ffmpeg
+          key: ffmpeg-${{ hashFiles('scripts/fetch-ffmpeg.ps1', 'scripts/common.ps1') }}
+
+      - name: Fetch ffmpeg
+        run: powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg.ps1
+
+      # 前端在前：cargo 编译 src-tauri 时 frontendDist（dist/）已存在
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm test
+
+      - run: cargo fmt --all -- --check
+
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - run: cargo test --workspace
+
+      - run: npm run check:licenses

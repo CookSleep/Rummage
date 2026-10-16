@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "settings"
+description = "允许主窗口使用设置页：读取参数定义、按根目录 ID 修改排除规则、读写外观设置，以及读取和清除设置页的通知"
+commands.allow = [
+  "param_defs",
+  "set_root_excludes",
+  "get_appearance",
+  "set_appearance",
+  "get_notices",
+  "dismiss_notice",
+]

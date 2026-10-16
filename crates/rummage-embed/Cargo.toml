@@ -1,0 +1,28 @@
+[package]
+name = "rummage-embed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+log = "=0.4.34"
+rummage-llama = { path = "../rummage-llama" }
+rummage-media = { path = "../rummage-media" }
+rummage-proto = { path = "../rummage-proto" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.10.9"
+thiserror = "=2.0.21"
+
+[target.'cfg(windows)'.dependencies]
+# 自检时用 DXGI 查显卡驱动版本（COM 接口，windows-sys 没有接口绑定；0.62.2 已随 Tauri 进入 Cargo.lock），见 src/windows.rs
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dxgi"] }
+# 推理子进程的 Job Object、隐藏控制台窗口与 stdout 重定向，自检时查系统日志中的驱动事件，见 src/windows.rs
+windows-sys = { version = "=0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Console",
+  "Win32_System_EventLog",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }

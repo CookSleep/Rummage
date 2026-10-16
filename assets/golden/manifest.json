@@ -1,0 +1,492 @@
+{
+  "version": 2,
+  "prefix_scheme": "A",
+  "license": "全部素材由 AI 生成（图片 gpt-image-2.5-sunburst，音频与视频 doubao-seedance-2.5，2026-10），不含第三方版权素材；与仓库同为 MIT，见 README.md",
+  "texts": [
+    {
+      "id": "q01",
+      "kind": "query",
+      "lang": "en",
+      "target": "img02_photo_corgi",
+      "text": "a corgi running on the grass with a red frisbee",
+      "input": "task: search result | query: a corgi running on the grass with a red frisbee"
+    },
+    {
+      "id": "q02",
+      "kind": "query",
+      "lang": "zh",
+      "target": "img08_photo_receipt",
+      "text": "便利店的购物小票，底部有二维码",
+      "input": "task: search result | query: 便利店的购物小票，底部有二维码"
+    },
+    {
+      "id": "q03",
+      "kind": "query",
+      "lang": "en",
+      "target": "img14_ui_error_en",
+      "text": "error dialog saying the disk is full during file sync",
+      "input": "task: search result | query: error dialog saying the disk is full during file sync"
+    },
+    {
+      "id": "q04",
+      "kind": "query",
+      "lang": "zh",
+      "target": "img22_chart_bar_zh",
+      "text": "上半年每个月门店客流量的柱状图",
+      "input": "task: search result | query: 上半年每个月门店客流量的柱状图"
+    },
+    {
+      "id": "q05",
+      "kind": "query",
+      "lang": "zh",
+      "target": "img28_long_chat_zh",
+      "text": "读书会群里商量下次活动的时间和地点",
+      "input": "task: search result | query: 读书会群里商量下次活动的时间和地点"
+    },
+    {
+      "id": "q06",
+      "kind": "query",
+      "lang": "zh",
+      "target": "aud01_zh",
+      "text": "提醒下午有阵雨要带伞的语音",
+      "input": "task: search result | query: 提醒下午有阵雨要带伞的语音"
+    },
+    {
+      "id": "q07",
+      "kind": "query",
+      "lang": "en",
+      "target": "aud07_en",
+      "text": "voice note about baking a loaf of bread",
+      "input": "task: search result | query: voice note about baking a loaf of bread"
+    },
+    {
+      "id": "q08",
+      "kind": "query",
+      "lang": "zh",
+      "target": "aud09_env",
+      "text": "雨点打在窗户上的声音",
+      "input": "task: search result | query: 雨点打在窗户上的声音"
+    },
+    {
+      "id": "q09",
+      "kind": "query",
+      "lang": "zh",
+      "target": "vid01",
+      "text": "手把手教擀饺子皮的视频",
+      "input": "task: search result | query: 手把手教擀饺子皮的视频"
+    },
+    {
+      "id": "d01",
+      "kind": "document",
+      "lang": "zh",
+      "target": "img08_photo_receipt",
+      "title": null,
+      "text": "邻里便利店 2026-09-18 19:42：矿泉水 2.00 元，全麦面包 6.50 元，原味酸奶 7.90 元，合计 16.40 元。",
+      "input": "title: none | text: 邻里便利店 2026-09-18 19:42：矿泉水 2.00 元，全麦面包 6.50 元，原味酸奶 7.90 元，合计 16.40 元。"
+    },
+    {
+      "id": "d02",
+      "kind": "document",
+      "lang": "en",
+      "target": "img14_ui_error_en",
+      "title": null,
+      "text": "Sync failed: not enough disk space. Your files could not be synced because the disk is full. 2.1 GB is required, but only 340 MB is available on drive D:. Error code SYNC_DISK_FULL.",
+      "input": "title: none | text: Sync failed: not enough disk space. Your files could not be synced because the disk is full. 2.1 GB is required, but only 340 MB is available on drive D:. Error code SYNC_DISK_FULL."
+    },
+    {
+      "id": "d03",
+      "kind": "document",
+      "lang": "zh",
+      "target": "img22_chart_bar_zh",
+      "title": null,
+      "text": "2026 年上半年门店客流量：1 月 8200 人次，2 月 7600，3 月 9100，4 月 9800，5 月 11300，6 月 12500，6 月环比增长 10.6%。",
+      "input": "title: none | text: 2026 年上半年门店客流量：1 月 8200 人次，2 月 7600，3 月 9100，4 月 9800，5 月 11300，6 月 12500，6 月环比增长 10.6%。"
+    },
+    {
+      "id": "d04",
+      "kind": "document",
+      "lang": "zh",
+      "target": "img28_long_chat_zh",
+      "title": null,
+      "text": "周末读书会群聊：下次活动定在 10 月 24 日周六下午两点，地点是社区图书馆二楼阅读室；小周带红茶和饼干，我准备五个讨论问题，下个月可能读一本讲城市鸟类的科普书。",
+      "input": "title: none | text: 周末读书会群聊：下次活动定在 10 月 24 日周六下午两点，地点是社区图书馆二楼阅读室；小周带红茶和饼干，我准备五个讨论问题，下个月可能读一本讲城市鸟类的科普书。"
+    },
+    {
+      "id": "d05",
+      "kind": "document",
+      "lang": "en",
+      "target": "aud07_en",
+      "title": null,
+      "text": "Voice note: I just baked a loaf of bread, and the whole kitchen smells wonderful.",
+      "input": "title: none | text: Voice note: I just baked a loaf of bread, and the whole kitchen smells wonderful."
+    },
+    {
+      "id": "d06",
+      "kind": "document",
+      "lang": "zh",
+      "target": "vid01",
+      "title": null,
+      "text": "视频：俯拍双手揉面、切剂子、擀饺子皮，画外音讲解“先把面团揉到表面光滑，再搓成长条，切成小剂子，擀成中间厚边缘薄的饺子皮”。",
+      "input": "title: none | text: 视频：俯拍双手揉面、切剂子、擀饺子皮，画外音讲解“先把面团揉到表面光滑，再搓成长条，切成小剂子，擀成中间厚边缘薄的饺子皮”。"
+    }
+  ],
+  "images": [
+    {
+      "id": "img02_photo_corgi",
+      "file": "images/img02_photo_corgi.jpg",
+      "kind": "photo",
+      "lang": "en",
+      "desc": "照片：公园草地上叼着红色飞盘奔跑的柯基",
+      "width": 1536,
+      "height": 1152,
+      "jpeg_quality": 90,
+      "source": {
+        "model": "gpt-image-2.5-sunburst",
+        "generated_at": "2026-10-12T19:53:21+08:00",
+        "params": {
+          "size": "1536x1152",
+          "quality": "high"
+        },
+        "prompt": "A candid smartphone photo of a corgi running across a green lawn in a public park with a red frisbee in its mouth, ears up, slight motion blur on the paws, trees softly blurred in the background, late afternoon sun. Looks like an ordinary phone snapshot, not a studio or advertising photo. No people, no faces, no logos, no text, no watermark."
+      }
+    },
+    {
+      "id": "img08_photo_receipt",
+      "file": "images/img08_photo_receipt.jpg",
+      "kind": "photo",
+      "lang": "zh",
+      "desc": "照片：便利店热敏纸小票（中文，含二维码，文字类照片）",
+      "width": 1152,
+      "height": 1536,
+      "jpeg_quality": 90,
+      "source": {
+        "model": "gpt-image-2.5-sunburst",
+        "generated_at": "2026-10-12T20:00:26+08:00",
+        "params": {
+          "size": "1152x1536",
+          "quality": "high"
+        },
+        "prompt": "手机俯拍放在浅灰色桌面上的一张便利店热敏纸购物小票，纸张略有折痕，黑色打印字清晰可读，内容逐行为：“邻里便利店”、“2026-09-18 19:42”、“矿泉水 550ml   2.00”、“全麦面包   6.50”、“原味酸奶   7.90”、“合计   16.40”、“移动支付   16.40”、“谢谢惠顾”，底部有一个二维码。竖构图，小票占画面大部分。手机随手拍摄的真实照片，自然光，轻微的手机成像噪点与景深，构图略随意，像普通人发朋友圈的生活照，不是摄影棚、不是广告图、不是插画或 3D 渲染。画面中不出现任何人脸、任何品牌标志或商标、任何水印。"
+      }
+    },
+    {
+      "id": "img14_ui_error_en",
+      "file": "images/img14_ui_error_en.png",
+      "kind": "ui",
+      "lang": "en",
+      "desc": "界面截图（英文，桌面）：同步失败，磁盘空间不足的错误对话框",
+      "width": 1920,
+      "height": 1200,
+      "jpeg_quality": null,
+      "source": {
+        "model": "gpt-image-2.5-sunburst",
+        "generated_at": "2026-10-12T19:57:42+08:00",
+        "params": {
+          "size": "1920x1200",
+          "quality": "high"
+        },
+        "prompt": "A realistic desktop screenshot of a modal error dialog in front of a blurred file-sync application window, light theme. The dialog has a red warning icon and exactly this text:\nTitle: \"Sync failed\"\nHeading: \"Not enough disk space\"\nBody: \"Your files could not be synced because the disk is full. 2.1 GB is required, but only 340 MB is available on drive D:.\"\nSmall grey line: \"Error code: SYNC_DISK_FULL\"\nButtons: \"Free up space\" (primary, blue) and \"Cancel\".\nFlat UI pixels, not a photo of a screen. All text sharp and spelled exactly as given. No real brand or OS vendor logos, no watermark."
+      }
+    },
+    {
+      "id": "img22_chart_bar_zh",
+      "file": "images/img22_chart_bar_zh.png",
+      "kind": "chart",
+      "lang": "zh",
+      "desc": "图表（中文）：上半年门店月客流量柱状图",
+      "width": 1536,
+      "height": 1072,
+      "jpeg_quality": null,
+      "source": {
+        "model": "gpt-image-2.5-sunburst",
+        "generated_at": "2026-10-12T19:56:56+08:00",
+        "params": {
+          "size": "1536x1072",
+          "quality": "high"
+        },
+        "prompt": "一张中文柱状图。标题“2026 年上半年门店月客流量（人次）”。横轴为“1月”“2月”“3月”“4月”“5月”“6月”，纵轴刻度 0、3,000、6,000、9,000、12,000、15,000。蓝色柱子，柱顶数据标签依次为 8,200、7,600、9,100、9,800、11,300、12,500。右上角注释“6 月环比 +10.6%”。真实的数据图表截图（像从办公软件或网页报表里导出的图，平面清晰），白色背景，坐标轴、刻度、图例、数据标签齐全，所有数字与文字必须与下面给出的数据完全一致、清晰可读，不要乱码，不要额外的数据，不要任何品牌标志或水印。"
+      }
+    },
+    {
+      "id": "img28_long_chat_zh",
+      "file": "images/img28_long_chat_zh.png",
+      "kind": "long",
+      "lang": "zh",
+      "desc": "长截图（中文，文字密集）：读书会群聊记录",
+      "width": 1280,
+      "height": 3840,
+      "jpeg_quality": null,
+      "source": {
+        "model": "gpt-image-2.5-sunburst",
+        "generated_at": "2026-10-12T21:24:52+08:00",
+        "params": {
+          "size": "1280x3840",
+          "quality": "high"
+        },
+        "prompt": "手机即时通讯应用里一段群聊的长截图（滚动截屏拼接而成的竖长条），浅色主题，气泡密集但文字清晰可读。标题栏“周末读书会（8）”。消息按顺序为（左侧他人气泡带纯色圆形头像和名字，右侧绿色气泡为自己）：\n阿云：“这个月读完的举手～”\n小周：“读完了，最后两章节奏有点慢。”\n自己：“我还差三十页，周末能看完。”\n阿云：“那下次活动定在 10 月 24 日周六下午两点，可以吗？”\n老陈：“可以，地点还是社区图书馆二楼吗？”\n阿云：“对，二楼阅读室，我已经预约好了。”\n小周：“我带一壶红茶和饼干。”\n自己：“我来准备讨论问题，列五个左右。”\n老陈：“下个月想推荐一本科普书，讲城市里的鸟类。”\n阿云：“好主意，活动当天大家投票决定。”\n小周：“记得带书和笔记本～”\n自己：“收到，周六见！”\n中间有一条灰色系统时间“昨天 21:15”。底部是输入框。每句都是通顺正确的中文，不要乱码；不要出现任何真实品牌、应用名称或标志，不要水印。"
+      }
+    }
+  ],
+  "audios": [
+    {
+      "id": "aud01_zh",
+      "file": "audio/aud01_zh.wav",
+      "kind": "speech",
+      "lang": "zh",
+      "desc": "中文朗读：天气提醒（带伞、添衣）",
+      "transcript": "下午可能有阵雨，出门记得带伞。晚上降温到十五度，多穿件外套。",
+      "seconds": 9.66,
+      "source": {
+        "model": "doubao-seedance-2.5",
+        "generated_at": "2026-10-12T21:16:24+08:00",
+        "params": {
+          "generate_audio": true,
+          "ratio": "16:9",
+          "duration": 10,
+          "resolution": "480p",
+          "watermark": false
+        },
+        "prompt": "【音频约束】单人普通话播音，只有一位成年女声播音员，语气亲切平和的画外音。严格按照台词生成音频，禁止增加、删减或改动任何字；人声干净无杂音，吐字清晰标准，语速平稳偏慢，每个字都完整念出，两句之间停顿约半秒。仅生成台词音频和极轻的室内底噪，不要任何音乐、背景音乐、BGM、配乐、器乐、旋律、氛围铺底音，不要其他人声。画面中禁止出现任何形式的字幕和文字，画面中不出现人脸。\n【画面】透过家里窗户看到的阴天街景，窗玻璃上有几滴雨点，窗台上放着一把折叠伞，光线柔和。固定机位，画面安静。\n【时间轴】\n0-1 秒：安静，无人说话。\n1-5 秒：画外音台词（平和）：“下午可能有阵雨，出门记得带伞。”\n5-9 秒：画外音台词（平和）：“晚上降温到十五度，多穿件外套。”\n9-10 秒：安静，无人说话。\n【音频约束】只有上面两句普通话台词，一字不差、吐字清楚；无任何音乐，无字幕。"
+      }
+    },
+    {
+      "id": "aud07_en",
+      "file": "audio/aud07_en.wav",
+      "kind": "speech",
+      "lang": "en",
+      "desc": "英文朗读：刚烤好面包",
+      "transcript": "I just baked a loaf of bread. The whole kitchen smells wonderful.",
+      "seconds": 9.18,
+      "source": {
+        "model": "doubao-seedance-2.5",
+        "generated_at": "2026-10-12T21:35:28+08:00",
+        "params": {
+          "generate_audio": true,
+          "ratio": "16:9",
+          "duration": 12,
+          "resolution": "480p",
+          "watermark": false
+        },
+        "prompt": "Audio policy (applies to the whole video): ONLY one adult female voice-over in clear, standard English, plus a very faint constant room tone. Strictly follow the script: do not add, drop or change any word; clean voice, every word fully and clearly pronounced, calm and slightly slow pace, a half-second pause between the two sentences. No music, no background music, no BGM, no score, no instrumental, no melody, no ambient pad, no echo, no reverb, no other voices. No subtitles or on-screen text of any kind, no faces.\nVisual: a static close-up of a freshly baked golden loaf of bread cooling on a wire rack on a wooden kitchen counter, soft morning light, a little steam rising.\nTimeline:\n0-1s: silence.\n1-5s: voice-over line (warm): \"I just baked a loaf of bread.\"\n5-9s: voice-over line (warm): \"The whole kitchen smells wonderful.\"\n9-12s: silence.\nAudio policy again: only these two English sentences, word for word and clearly pronounced; no music; no subtitles."
+      }
+    },
+    {
+      "id": "aud09_env",
+      "file": "audio/aud09_env.wav",
+      "kind": "ambient",
+      "lang": "env",
+      "desc": "环境声：雨打窗户",
+      "transcript": null,
+      "seconds": 5.0,
+      "source": {
+        "model": "doubao-seedance-2.5",
+        "generated_at": "2026-10-12T19:51:34+08:00",
+        "params": {
+          "generate_audio": true,
+          "ratio": "16:9",
+          "duration": 5,
+          "resolution": "480p",
+          "watermark": false
+        },
+        "prompt": "Static close-up of a window pane at dusk while steady rain falls outside: raindrops hit the glass and run down it, blurred street lights behind. Audio: ONLY the sound of steady rain pattering on the window glass and a roof, natural and clear. No thunder, no music, no BGM, no voices, no melody. No subtitles, no text, no people."
+      }
+    }
+  ],
+  "videos": [
+    {
+      "id": "vid01",
+      "lang": "zh",
+      "desc": "视频（中文解说）：揉面切剂子擀饺子皮",
+      "transcript": "先把面团揉到表面光滑，再搓成长条，切成大小均匀的小剂子，擀成中间厚、边缘薄的饺子皮。",
+      "window_start_seconds": 1.0,
+      "window_seconds": 6.0,
+      "frames": 6,
+      "frame_times": [
+        0.0,
+        1.2,
+        2.4,
+        3.6,
+        4.8,
+        6.0
+      ],
+      "vision_tokens_per_image": 70,
+      "audio_segment_seconds": 1.0,
+      "inputs_av": [
+        {
+          "type": "text",
+          "text": "00:01"
+        },
+        {
+          "type": "audio",
+          "file": "video/vid01/audio0.wav"
+        },
+        {
+          "type": "text",
+          "text": "00:01"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame0.jpg"
+        },
+        {
+          "type": "text",
+          "text": "00:02"
+        },
+        {
+          "type": "audio",
+          "file": "video/vid01/audio1.wav"
+        },
+        {
+          "type": "text",
+          "text": "00:02"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame1.jpg"
+        },
+        {
+          "type": "text",
+          "text": "00:03"
+        },
+        {
+          "type": "audio",
+          "file": "video/vid01/audio2.wav"
+        },
+        {
+          "type": "text",
+          "text": "00:03"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame2.jpg"
+        },
+        {
+          "type": "text",
+          "text": "00:04"
+        },
+        {
+          "type": "audio",
+          "file": "video/vid01/audio3.wav"
+        },
+        {
+          "type": "text",
+          "text": "00:04"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame3.jpg"
+        },
+        {
+          "type": "text",
+          "text": "00:05"
+        },
+        {
+          "type": "audio",
+          "file": "video/vid01/audio4.wav"
+        },
+        {
+          "type": "text",
+          "text": "00:05"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame4.jpg"
+        },
+        {
+          "type": "text",
+          "text": "00:07"
+        },
+        {
+          "type": "audio",
+          "file": "video/vid01/audio5.wav"
+        },
+        {
+          "type": "text",
+          "text": "00:07"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame5.jpg"
+        }
+      ],
+      "inputs_v": [
+        {
+          "type": "image",
+          "file": "video/vid01/frame0.jpg"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame1.jpg"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame2.jpg"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame3.jpg"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame4.jpg"
+        },
+        {
+          "type": "image",
+          "file": "video/vid01/frame5.jpg"
+        }
+      ],
+      "files": [
+        "video/vid01/frame0.jpg",
+        "video/vid01/audio0.wav",
+        "video/vid01/frame1.jpg",
+        "video/vid01/audio1.wav",
+        "video/vid01/frame2.jpg",
+        "video/vid01/audio2.wav",
+        "video/vid01/frame3.jpg",
+        "video/vid01/audio3.wav",
+        "video/vid01/frame4.jpg",
+        "video/vid01/audio4.wav",
+        "video/vid01/frame5.jpg",
+        "video/vid01/audio5.wav",
+        "video/vid01/window.json",
+        "video/vid01/transcript.txt"
+      ],
+      "source": {
+        "model": "doubao-seedance-2.5",
+        "generated_at": "2026-10-12T19:57:30+08:00",
+        "params": {
+          "generate_audio": true,
+          "ratio": "16:9",
+          "duration": 10,
+          "resolution": "720p",
+          "watermark": false
+        },
+        "prompt": "写实生活纪录风格，俯拍厨房木质案板上包饺子前的准备过程，只拍到一双手和前臂，不出现人脸。\n0-3 秒：双手在撒了面粉的案板上揉一团白色面团，面团逐渐变得光滑。\n3-6 秒：把面团搓成长条，用刀切成一个个大小均匀的小剂子。\n6-10 秒：用小擀面杖把一个剂子擀成圆形饺子皮，旁边放着一碗韭菜鸡蛋馅。\n固定俯拍机位，暖色室内光，画面清晰。\n声音：一位成年女声用清楚的普通话做画外音解说，语速平稳，从第 0.5 秒开始说：“先把面团揉到表面光滑，再搓成长条，切成大小均匀的小剂子，擀成中间厚、边缘薄的饺子皮。”同时能听到揉面、切面团、擀面杖滚动的轻微动作声。没有任何音乐、背景音乐、BGM、配乐、旋律；不要字幕，不要任何文字。"
+      }
+    }
+  ],
+  "file_sha256": {
+    "audio/aud01_zh.wav": "67f2cb4539a820222d508354686575f15e56bd3336573e7b41c34b4071a03258",
+    "audio/aud07_en.wav": "e0a39084732479fb47a9afb550b108d8110d917a61e58f638cf9386be10aedde",
+    "audio/aud09_env.wav": "a6bea7221981f327b7898a902e489a6eb963dfea9022e02cd44fc6ffe98be0e6",
+    "images/img02_photo_corgi.jpg": "892b4a8af1ac751e0f31cfc1195e9e6394c23f8c9c490d790f6b4e937a142d0a",
+    "images/img08_photo_receipt.jpg": "dd3c5488fb8fe5a37cbaf57446611ddb423a0fe899c03c05584eb2f42ee04560",
+    "images/img14_ui_error_en.png": "e62eeadd89c45c15a322e7f897e89bd13d659a349a99520ffc0c6dd0bde08661",
+    "images/img22_chart_bar_zh.png": "c51a91928740aded561dfecbdb7d390c7f06b0b06c1ee1dbfd01518d607fad1b",
+    "images/img28_long_chat_zh.png": "44ee552c3405cd194986e58b2d999bcc06fa0ea4f7421efaea985b678d3a354b",
+    "video/vid01/audio0.wav": "0ce6d9f7c5b8025f7fcdd9c368194ad52988ce7b1ba5a0706d5afb8c6b90a74c",
+    "video/vid01/audio1.wav": "8dd616e214128881daef90dfdb675ed59b5f60bf6b9f179a5d5896efec4e695c",
+    "video/vid01/audio2.wav": "5ee0124174b0b1662420341e419f1aba497596a7dc55a795b55b1059e2abdcf4",
+    "video/vid01/audio3.wav": "85b1e7cfad33138d2f6c59f250174abda69d3d2a76c713bd9a05fe5e49b46a1b",
+    "video/vid01/audio4.wav": "020c5c2f7a624f6b3052ce21242a16d844ee73804e167c455952f25867ec69eb",
+    "video/vid01/audio5.wav": "766089f266628246999e2a4d84bc4a6c057d76883881307166e3ec72339e5deb",
+    "video/vid01/frame0.jpg": "def50eec6683377bd8acf93d65550e615f7db200ec5b92f92681de9d337172a8",
+    "video/vid01/frame1.jpg": "183d4b77a94f033f11957382553ac6cec49085d3d6706a33921c1ea5656e93ad",
+    "video/vid01/frame2.jpg": "6c8654e8859130cee97d4cb9724e2781848966a50d365e43cd1ec2a44703ba5f",
+    "video/vid01/frame3.jpg": "852811160b534e6e43de5eac9fb96e7e2e2f8ce4d73f69c6fd8beceec7ce724a",
+    "video/vid01/frame4.jpg": "48e902c6fde5f8143b26dcf3d7593c35a4ed85b3fba57c3d20210e65c355e869",
+    "video/vid01/frame5.jpg": "fe1c6ee4adfbf81cf6fe98e4756252abab6ad7535dcc91b1a92d52d501825e9b",
+    "video/vid01/transcript.txt": "7b9c369206e92d86fd230b376e6b92410afe8143f9f58dab7026cd7554abe91e",
+    "video/vid01/window.json": "6de392b321c10fac08752373d73d266339b962824f65d2e1b1600fbeccce8c51"
+  }
+}
