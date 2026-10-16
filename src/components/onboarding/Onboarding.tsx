@@ -3,8 +3,11 @@ import { invoke } from '@tauri-apps/api/core'
 import type { CoreStatus, ParamValues, RootInfo, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { KIND_PARAMS, type Kinds, kindsOf, needsMmproj } from '../../lib/kinds'
+import { isAndroid } from '../../lib/platform'
+import { useBackLayer } from '../../hooks/useBackLayer'
 import CoreStatusNotice from '../CoreStatusNotice'
 import LoadError from '../LoadError'
+import BackgroundRunRow from '../settings/BackgroundRunRow'
 import EstimateStep from './EstimateStep'
 import FoldersStep from './FoldersStep'
 import KindsStep from './KindsStep'
@@ -28,7 +31,8 @@ interface Props {
  * 检测完成，或选择只用 CPU（结果过期时可以直接继续，建立索引时后台服务会自动重新检测）。
  * 进行到的步骤记在后台服务中（随数据目录迁移），重启后（包括更改数据目录后的重启）从这一步继续；
  * 之前某一步的必需项已不满足（如模型被删除）时退回到那一步。
- * 各步都要用后台服务：不可用时内容区只显示它的状态（步骤条保留），不能前进；重新连上后重新读取
+ * 各步都要用后台服务：不可用时内容区只显示它的状态（步骤条保留），不能前进；重新连上后重新读取。
+ * 手机宽度下按钮固定在底部；Android 的返回键回到上一步，最后一步另有“后台运行”（不强制）
  */
 export default function Onboarding({ status, coreStatus, onStatus, onDone }: Props) {
   // 恢复到上次的步骤之前为空
@@ -153,10 +157,13 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
 
   const blocker = step === null ? '' : blockerAt(step)
   const last = step === STEPS.length - 1
+  useBackLayer(() => step !== null && go(step - 1), step !== null && step > 0 && running)
 
   return (
-    <main className="flex min-h-screen justify-center px-6 py-10">
-      <div className="w-full max-w-xl">
+    <main className="flex min-h-screen justify-center px-4 pt-[calc(1.5rem+var(--safe-top))] sm:px-6 sm:py-10">
+      {/* 状态栏的底色：页面滚动时内容不和状态栏图标叠在一起 */}
+      <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 z-30 h-[var(--safe-top)] bg-gray-50/85 backdrop-blur-xl dark:bg-gray-950/85" />
+      <div className="flex w-full max-w-xl flex-col">
         <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">欢迎使用 Rummage</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">完成几项设置后，就能用文字或图片搜索本机文件。</p>
 
@@ -169,7 +176,7 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
           ))}
         </ol>
 
-        <section className="mt-5 rounded-3xl border border-white/50 bg-white/90 p-6 shadow-[0_8px_40px_rgb(0,0,0,0.06)] ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900/90 dark:ring-white/10">
+        <section className="mt-5 rounded-3xl border border-white/50 bg-white/90 p-4 shadow-[0_8px_40px_rgb(0,0,0,0.06)] ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900/90 dark:ring-white/10 sm:p-6">
           {!running && <CoreStatusNotice status={coreStatus} className="py-16" />}
           {running && step === 0 && <FoldersStep onCount={setRootCount} />}
           {running && step === 1 && kinds && (
@@ -178,27 +185,32 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
           {running && step === 2 && kinds && <ModelStep status={status} mmproj={mmprojOn} onProxy={(proxy) => onStatus((s) => ({ ...s, proxy }))} />}
           {running && step === 3 && <SelftestStep selftest={st} model={status.model.ready} />}
           {running && step === 4 && kinds && <EstimateStep kinds={kinds} preset={preset} selftest={st} minFreeGb={minFreeGb} />}
+          {running && step === 4 && isAndroid && (
+            <div className="mt-5">
+              <BackgroundRunRow />
+            </div>
+          )}
         </section>
 
         {running && paramsError && <LoadError message={paramsError} onRetry={loadParams} className="mt-3 px-1" />}
         {error && <p data-selectable-text className={`mt-3 px-1 ${ERROR_TEXT}`}>{error}</p>}
 
         {step !== null && (
-          <footer className="mt-5 flex items-center gap-3">
+          <footer className="mt-5 flex items-center gap-3 max-sm:sticky max-sm:bottom-0 max-sm:-mx-4 max-sm:mt-auto max-sm:bg-gray-50/85 max-sm:px-4 max-sm:pb-[calc(0.75rem+var(--safe-bottom))] max-sm:pt-5 max-sm:backdrop-blur-xl dark:max-sm:bg-gray-950/85">
             {step > 0 && (
-              <button type="button" className={BUTTON} disabled={!running} onClick={() => go(step - 1)}>
+              <button type="button" className={`shrink-0 ${BUTTON}`} disabled={!running} onClick={() => go(step - 1)}>
                 上一步
               </button>
             )}
-            <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">{blocker}</span>
+            <span className="ml-auto min-w-0 text-right text-xs text-gray-400 dark:text-gray-500">{blocker}</span>
             {last ? (
-              <button type="button" className={PRIMARY_BUTTON} disabled={finishing || !running} onClick={finish}>
+              <button type="button" className={`shrink-0 ${PRIMARY_BUTTON}`} disabled={finishing || !running} onClick={finish}>
                 开始使用
               </button>
             ) : (
               <button
                 type="button"
-                className={PRIMARY_BUTTON}
+                className={`shrink-0 ${PRIMARY_BUTTON}`}
                 disabled={Boolean(blocker) || !kinds || !running}
                 onClick={() => {
                   setError('')

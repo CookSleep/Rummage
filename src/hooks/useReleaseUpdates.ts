@@ -34,7 +34,7 @@ export const useReleaseUpdates = create<ReleaseUpdatesState>(() => ({
 }))
 
 async function fetchReleasePage(page: number) {
-  // 由 Rust 侧发出（src-tauri/src/update.rs），走网络代理设置，CSP 不必放开 GitHub
+  // 由 Rust 侧发出（src-tauri/src/releases.rs），走网络代理设置，CSP 不必放开 GitHub
   const text = await invoke<string>('fetch_releases', { page })
   try {
     return parseReleasePage(JSON.parse(text))

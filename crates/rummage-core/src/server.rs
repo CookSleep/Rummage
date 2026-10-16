@@ -86,6 +86,8 @@ pub struct State {
     /// 未到期的手动暂停，与 `meta` 表一致：外层为空表示没有，内层为到期时间（Unix 毫秒）。
     /// 判定并设置暂停原因的全过程持有这把锁，先于数据库锁获取
     manual: Mutex<Option<Option<i64>>>,
+    /// Android 前台服务今日的后台额度已用完（`BackgroundQuota`），不持久化
+    quota: AtomicBool,
     /// `configure` 之后才有
     config: OnceLock<Config>,
     setup: setup::Setup,
@@ -156,6 +158,7 @@ impl State {
             pipeline: OnceLock::new(),
             sys,
             manual: Mutex::new(manual),
+            quota: AtomicBool::new(false),
             config: OnceLock::new(),
             setup: setup::Setup::default(),
             scan_pending: AtomicUsize::new(0),
@@ -173,7 +176,7 @@ impl State {
         }
         // 启动前就按暂停原因决定是否领取作业，不会在手动暂停中先领出几个
         let mut manual = lock(&self.manual);
-        let paused = self.pause_reason(&mut manual);
+        let (paused, slow) = self.pause_reason(&mut manual);
         let p = Pipeline::start(
             core.db.clone(),
             core.index.clone(),
@@ -183,6 +186,7 @@ impl State {
             self.disabled.clone(),
             paused,
         );
+        p.set_slow(slow);
         let _ = self.pipeline.set(p);
     }
 
@@ -237,6 +241,10 @@ impl State {
     /// `start_pipeline` 之后才有
     pub fn pipeline(&self) -> Option<&Pipeline> {
         self.pipeline.get()
+    }
+
+    pub(crate) fn token(&self) -> &str {
+        &self.token
     }
 
     pub fn params(&self) -> BTreeMap<String, ParamValue> {
@@ -534,6 +542,7 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
             // 影响索引的参数改了值就重建受影响的部分；值没变的已在前面返回
             let def = params::def(&key).expect("validate 已确认参数存在");
             let mut affected = def.affects_index;
+            let void = pipeline::void_kinds(&key);
             // 视频的高级项只在预设为“自定义”时生效：实际设置没变就不重建
             let video_before = pipeline::video_opts(&values);
             let pause = [
@@ -587,11 +596,7 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
                 return Ok(Reply::Done);
             }
             // 正在处理的这几类作业按旧参数计算，结果作废；打开或关闭文件类型时正在处理的文档的内嵌媒体也按旧设置算的
-            let active: &[&str] = if affected {
-                def.index_kinds
-            } else {
-                &["document"]
-            };
+            let active: &[&str] = if affected { &void } else { &["document"] };
             match p.requeue(active) {
                 Ok(n) => {
                     if !n.is_empty() {
@@ -611,6 +616,11 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
         }
         Request::PauseIndexing { until } => state.set_manual_pause(Some(until)),
         Request::ResumeIndexing => state.set_manual_pause(None),
+        Request::BackgroundQuota { exhausted } => {
+            state.quota.store(exhausted, Ordering::Relaxed);
+            state.refresh_pause();
+            Ok(Reply::Done)
+        }
         // 回复写出后由 session 通知主循环退出
         Request::Shutdown => Ok(Reply::Done),
         Request::ListRoots => {

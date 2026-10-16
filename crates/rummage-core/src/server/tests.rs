@@ -255,7 +255,7 @@ fn indexed(dir: &std::path::Path, docs: &std::path::Path) {
             break;
         };
         let (kind, preprocess, mmproj, size) = if job.ext == "png" {
-            ("image", "image-v1-t140", Some("p".into()), Some((640, 480)))
+            ("image", "image-v1-t280", Some("p".into()), Some((640, 480)))
         } else {
             ("document", "text-v1-t64-c384-o15-m64", None, None)
         };
@@ -478,7 +478,7 @@ fn index_params_requeue_affected_kinds() {
     assert_eq!(rebuild(), None);
     // 大小上限不影响已建好的索引；值没变时不重建
     set("max_doc_mb", ParamValue::Int(100));
-    set("image_tokens", ParamValue::Int(140));
+    set("image_tokens", ParamValue::Int(280));
     assert_eq!(stages(), ["stored", "stored"]);
     // 关闭的类型不重建，重新开启时按当前设置检查
     set("index_documents", ParamValue::Bool(false));
@@ -486,7 +486,7 @@ fn index_params_requeue_affected_kinds() {
     assert_eq!(stages(), ["stored", "stored"]);
     set("index_documents", ParamValue::Bool(true));
     assert_eq!(stages(), ["pending", "stored"]);
-    set("image_tokens", ParamValue::Int(280));
+    set("image_tokens", ParamValue::Int(560));
     assert_eq!(stages(), ["pending", "pending"]);
     let r = rebuild().unwrap();
     assert_eq!((r.done, r.total), (0, 2));

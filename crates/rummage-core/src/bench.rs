@@ -230,16 +230,15 @@ fn throughput(
             }
             thread::sleep(Duration::from_millis(100));
         };
-        let max_pixels = params::max_image_pixels(&state.params());
+        let values = state.params();
+        let max_pixels = params::max_image_pixels(&values);
+        let tier = params::int(&values, "image_tokens") as u32;
         // 单条推理：前 100 张已预处理的图片逐条计算，第一张加载 mmproj，不计时
         let mut ms = Vec::new();
         for (i, path) in images.iter().take(101).enumerate() {
-            let rgb = rummage_media::prepare(path, engine.tier(), max_pixels)
+            let rgb = rummage_media::prepare(path, tier, max_pixels)
                 .map_err(|err| format!("\"{}\"：{err}", path.display()))?;
-            let input = Input::Image {
-                rgb,
-                tokens: engine.tier(),
-            };
+            let input = Input::Image { rgb, tokens: tier };
             let t = Instant::now();
             p.embed_query(&mut engine, input)
                 .map_err(|err| format!("推理失败：{err}"))?;

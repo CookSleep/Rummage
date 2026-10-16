@@ -43,7 +43,7 @@ export default function ConfirmDialog({ title, message, children, confirmText, d
   })
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={() => !busy && onCancel()}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center modal-pad" onClick={() => !busy && onCancel()}>
       <div className="absolute inset-0 animate-overlay-in bg-black/20 backdrop-blur-md dark:bg-black/40" />
       <div
         role="dialog"

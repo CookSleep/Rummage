@@ -1,7 +1,13 @@
 import type { BlockedGpu, DeviceResult, SelftestStatus } from '../types'
+import { isAndroid } from './platform'
 
 /** 显示名称用到的字段，检测结果与被屏蔽的显卡都有 */
 type Named = Pick<DeviceResult, 'gpu' | 'pciId' | 'name'>
+
+/** CPU 的名称（检测结果中的处理器型号）；还没有检测过时为“CPU” */
+export function cpuName(st: SelftestStatus) {
+  return st.devices.find((d) => !d.gpu)?.name ?? 'CPU'
+}
 
 /** 检测通过的显卡都比 CPU 慢（与核心的选择规则相同：有图片耗时按图片，否则按文字），所以选用了 CPU */
 export function cpuFaster(st: SelftestStatus) {
@@ -13,7 +19,9 @@ export function cpuFaster(st: SelftestStatus) {
 }
 
 /** 引导与设备页共用的检测设备说明 */
-export const SELFTEST_TEXT = '用 CPU 和每块显卡计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。'
+export const SELFTEST_TEXT = isAndroid
+  ? '用 CPU 计算几条样本，确认结果正确并测速。检测约需几分钟。'
+  : '用 CPU 和每块显卡计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。'
 
 /** 用户没有选择只用 CPU，却用 CPU 建立索引的原因，见 `cpuFallbackReason` */
 export type CpuFallback = 'detecting' | 'gpusOff' | 'notDetected' | 'stale' | 'failed' | 'blocked'
@@ -76,7 +84,7 @@ export function indexDevice(st: SelftestStatus | null | undefined): { name: stri
   const s = switchedDevice(st)
   if (s) return { name: s.to, why: `「${s.from}」出现问题` }
   const r = cpuFallbackReason(st)
-  return r && { name: 'CPU', why: CPU_FALLBACK_TEXT[r] }
+  return r && st ? { name: cpuName(st), why: CPU_FALLBACK_TEXT[r] } : null
 }
 
 /** 已屏蔽的显卡的名称；与检测结果及其他已屏蔽的显卡同型号时附 PCI 号 */

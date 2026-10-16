@@ -197,6 +197,7 @@ pub(crate) fn sense(dir: &Path) -> Sensed {
         fullscreen,
         battery,
         free_gb: free_gb(dir),
+        ..Sensed::default()
     }
 }
 

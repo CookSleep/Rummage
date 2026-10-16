@@ -1,33 +1,16 @@
 //! 调度线程：按优先级领取一个 `pending` 作业（`Db::claim_job`，置为 `preprocessing`），
 //! 交给空闲的预处理线程。`hold`、暂停或睡眠时不领取新作业，已领取的照常处理完；没有作业时等待唤醒，
 //! 另每 60 秒兜底检查一次，不轮询数据库。领取在数据库锁内进行，并在锁内检查停止标志：放回之后不会再领出新作业。
+//! 作业所用的参数（`Task::params`）也在这把锁内取出：核心修改参数时持有数据库锁，所以领取在修改之前的，作业在
+//! `Pipeline::requeue` 时已在处理中、记入 `stale`，结果作废；在修改之后的，取到的就是新参数。
+//! 降温（`Shared::slow`）时领取一个作业后先等处理中的作业全部完成，再休息与之相同的时长，占空比约 50%；
+//! 等待期间降温解除或停止时立即继续。
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Sender};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use rummage_index::{Claimed, Db, DbError, Outcome};
-
-use super::{Engine, Msg, Shared, Task, int, lock};
-
-pub(super) enum Claim {
-    Job(Claimed),
-    /// 没有可领取的作业
-    Empty,
-    /// 领到了，但引擎的视觉 token 档位已与参数不一致，作业已放回
-    Stale,
-}
-
-/// 领取一个作业，调用方持有数据库锁。调度线程先取引擎、后领取：两步之间若改了 `image_tokens`，`requeue` 时这个作业
-/// 还没领出、不会记入 `stale`，用旧档位的引擎算出的结果会写成已完成。所以在锁内核对档位，不一致就放回、不计失败
-pub(super) fn claim(db: &Db, shared: &Shared, engine: &Engine) -> Result<Claim, DbError> {
-    let Some(job) = db.claim_job(engine.images, engine.audio, engine.video)? else {
-        return Ok(Claim::Empty);
-    };
-    if int(&lock(&shared.params), "image_tokens") as u32 == engine.tier {
-        return Ok(Claim::Job(job));
-    }
-    db.apply(&[(job, Outcome::Released)])?;
-    Ok(Claim::Stale)
-}
+use super::{Msg, Shared, Task, lock};
 
 pub(super) fn schedule(shared: &Shared, tasks: &mpsc::SyncSender<Task>, out: &Sender<Msg>) {
     // 上次循环停下等待过（暂停、睡眠、空闲等）；再领到作业时清空剩余时间的估算窗口，不把停下的时间算进速度
@@ -67,13 +50,12 @@ pub(super) fn schedule(shared: &Shared, tasks: &mpsc::SyncSender<Task>, out: &Se
             if shared.stop.load(Ordering::Relaxed) {
                 return;
             }
-            claim(&db, shared, &engine)
+            db.claim_job(engine.images, engine.audio, engine.video)
+                .map(|job| job.map(|j| (j, lock(&shared.params).clone())))
         };
-        let job = match claimed {
-            Ok(Claim::Job(job)) => job,
-            // 下一轮按新参数重建引擎后再领
-            Ok(Claim::Stale) => continue,
-            Ok(Claim::Empty) => {
+        let (job, params) = match claimed {
+            Ok(Some(claimed)) => claimed,
+            Ok(None) => {
                 if shared.busy.swap(false, Ordering::Relaxed) {
                     let _ = out.send(Msg::Progress);
                 }
@@ -98,11 +80,32 @@ pub(super) fn schedule(shared: &Shared, tasks: &mpsc::SyncSender<Task>, out: &Se
             job,
             engine,
             generation,
-            params: lock(&shared.params).clone(),
+            params,
         };
         // 预处理线程都已退出
         if tasks.send(task).is_err() {
             return;
         }
+        if shared.slow.load(Ordering::Relaxed) {
+            cool_down(shared);
+        }
+    }
+}
+
+/// 降温：等处理中的作业完成，再休息同样长的时间（见模块说明）
+fn cool_down(shared: &Shared) {
+    let tick = Duration::from_millis(100);
+    let going = || shared.slow.load(Ordering::Relaxed) && !shared.stop.load(Ordering::Relaxed);
+    let started = Instant::now();
+    while going() && shared.inflight.load(Ordering::Relaxed) > 0 {
+        thread::sleep(tick);
+    }
+    let until = Instant::now() + started.elapsed();
+    while going() {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        thread::sleep(left.min(tick));
     }
 }

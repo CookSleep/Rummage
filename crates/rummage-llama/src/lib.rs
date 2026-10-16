@@ -2,7 +2,7 @@
 //!
 //! 流程与参考实现 `scripts/golden/llama_embed.py`（只有 CPU）一一对应：
 //! - 加载：`Runtime::load` 从运行库目录加载 ggml-base、ggml、llama、mtmd，再 `ggml_backend_load_all_from_path`；
-//!   之后枚举设备（`Runtime::devices`）。
+//!   之后枚举设备（`Runtime::devices`）。推理在应用进程内运行（Android）时用 `Runtime::load_once`，每个目录只加载一次。
 //! - 设备：不指定时只用 CPU，主模型 `n_gpu_layers = 0`、设备列表只放 CPU 设备，mtmd `use_gpu = false`；
 //!   指定一块 GPU 时设备列表只放这块 GPU，`n_gpu_layers = 999`、
 //!   `split_mode = NONE`、`main_gpu = 0`，mtmd `use_gpu = true` 并指定同一设备，其余上下文参数按 b11461 默认。
@@ -16,6 +16,12 @@
 //! - 输出：池化后、未归一化的向量；归一化与数值检查由 `rummage-embed` 统一做。
 //! - 计数：`count_tokens` 用与纯文本输入相同的 `llama_tokenize` 设置分词，只返回 token 数（含 `<bos>`、`<eos>`），供切片使用。
 //! - mmproj 可以不加载：只编码文本时不初始化 mtmd，遇到含媒体的输入报错。
+//! - 中止（`Embedder::new` 的 `abort`，推理在应用进程内运行、线程无法强制结束时用）：标志置位后，模型与 mmproj 的加载
+//!   （进度回调返回假）、llama 的编码（`abort_callback`，只对 CPU 生效）和 mtmd 的编码都尽快停下，返回 `Error::Aborted`。
+//!   mtmd 没有中止回调，借用调度器的 `cb_eval`：每 `ABORT_CHECK_NODES` 个节点要一次结果（`ask` 为真时返回真），
+//!   随后 `ask` 为假的调用返回假即停止本段计算（b11461 ggml-backend.cpp 1898-1919；只在 `ask` 时看标志会整段算完）；
+//!   之后在逐个媒体块的循环中检查标志。中止只在计算节点之间生效（i7-12700H 上 1120 档图像最慢的单个节点约 2.4 秒）。
+//!   不给标志时这些回调一律不设。
 //! - `vulkan`：加载 ggml 之前按原始顺序列出 Vulkan 物理设备，供调用方算出 `GGML_VK_VISIBLE_DEVICES`。
 //!
 //! 图像须由调用方缩放到最终尺寸（48 的倍数）；mtmd 给出的软 token 数与按尺寸推算的不符时报错，避免 mtmd 再次缩放。
@@ -24,11 +30,12 @@ mod ffi;
 pub mod vulkan;
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
+#[cfg(not(target_os = "android"))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ffi::Api;
 
@@ -39,6 +46,8 @@ pub const PATCH_PIXELS: u32 = 48;
 /// 一张图像允许的视觉 token 数上限，即模型允许的最大值。
 const MAX_IMAGE_TOKENS: u32 = 1120;
 const AUDIO_SAMPLE_RATE: c_int = 16000;
+/// mtmd 编码时每隔多少个计算节点检查一次中止标志（见模块说明）
+const ABORT_CHECK_NODES: u32 = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -80,6 +89,8 @@ pub enum Error {
     TooManyTokens { tokens: usize, limit: usize },
     #[error("推理失败：{0}")]
     Inference(String),
+    #[error("推理已中止")]
+    Aborted,
 }
 
 /// 一个输入片段，按顺序拼成一个序列。
@@ -97,8 +108,9 @@ pub enum Part<'a> {
 
 static LAST_LOG_LEVEL: AtomicI32 = AtomicI32::new(0);
 
-/// 只把 WARN 及以上的日志写到 stderr；INFO / DEBUG 每次推理很多，不输出。
-extern "C" fn log_to_stderr(level: c_int, text: *const c_char, _user: *mut c_void) {
+/// 只输出 WARN 及以上的日志；INFO / DEBUG 每次推理很多，不输出。推理子进程写到 stderr，由父进程读取末尾判断设备丢失等；
+/// Android 上推理在应用进程内运行，交给 `log`
+extern "C" fn log_callback(level: c_int, text: *const c_char, _user: *mut c_void) {
     // CONT 沿用上一条的级别。
     let level = if level == ffi::GGML_LOG_LEVEL_CONT {
         LAST_LOG_LEVEL.load(Ordering::Relaxed)
@@ -111,8 +123,54 @@ extern "C" fn log_to_stderr(level: c_int, text: *const c_char, _user: *mut c_voi
     }
     // SAFETY: llama.cpp 传入以空字符结尾的字符串，只在回调期间读取。
     let msg = unsafe { CStr::from_ptr(text) };
+    #[cfg(target_os = "android")]
+    {
+        let msg = msg.to_string_lossy();
+        let msg = msg.trim_end();
+        if msg.is_empty() {
+            return;
+        }
+        if level >= ffi::GGML_LOG_LEVEL_ERROR {
+            log::error!("{msg}");
+        } else {
+            log::warn!("{msg}");
+        }
+    }
     // 写 stderr 失败时忽略，不能在 C 回调里 panic。
+    #[cfg(not(target_os = "android"))]
     let _ = std::io::stderr().write_all(msg.to_bytes());
+}
+
+/// 中止标志与 mtmd 调度回调的节点计数；由 `Embedder` 装箱持有，地址交给各回调
+struct Abort {
+    flag: Arc<AtomicBool>,
+    nodes: AtomicU32,
+}
+
+/// 回调的 `user_data`；回调只在 `Embedder` 的生命周期内被调用
+fn abort_of<'a>(data: *mut c_void) -> &'a Abort {
+    // SAFETY: data 是 `Embedder` 持有的 `Box<Abort>` 的地址，它在模型、上下文与 mtmd 都释放之后才释放
+    unsafe { &*data.cast::<Abort>() }
+}
+
+/// llama 上下文的 `abort_callback`
+extern "C" fn abort_requested(data: *mut c_void) -> bool {
+    abort_of(data).flag.load(Ordering::Relaxed)
+}
+
+/// 模型与 mmproj 加载的进度回调：返回假中止加载
+extern "C" fn keep_loading(_progress: f32, data: *mut c_void) -> bool {
+    !abort_requested(data)
+}
+
+/// mtmd 调度器的 `cb_eval`（见模块说明）
+extern "C" fn eval_check(_tensor: *mut c_void, ask: bool, data: *mut c_void) -> bool {
+    let abort = abort_of(data);
+    if ask {
+        return abort.nodes.fetch_add(1, Ordering::Relaxed) % ABORT_CHECK_NODES
+            == ABORT_CHECK_NODES - 1;
+    }
+    !abort.flag.load(Ordering::Relaxed)
 }
 
 fn c_path(path: &Path) -> Result<CString, Error> {
@@ -153,6 +211,12 @@ pub struct Runtime {
     devices: Vec<Device>,
 }
 
+// SAFETY: 设备句柄指向 ggml 全局注册表中的设备，随 `api` 持有的运行库常驻、加载后不再变化；
+// ggml 允许在多个线程中用同一个设备分别创建模型与上下文（llama.cpp 的服务端即如此）
+unsafe impl Send for Runtime {}
+// SAFETY: 同上；`Runtime` 加载后只读
+unsafe impl Sync for Runtime {}
+
 impl Runtime {
     /// 目录中的后端都会被加载（`ggml_backend_load_all_from_path`）。调用方要保证未经自检的 GPU 后端
     /// 只在可强行结束的子进程中加载：驱动出错可能卡死整个进程。
@@ -169,8 +233,8 @@ impl Runtime {
         // `DevProps` 的字段都是整数、布尔或指针，全零是合法值，随后由 ggml 填写。
         unsafe {
             // llama_log_set 同时设置 ggml 的日志回调（b11461 src/llama-impl.cpp）。
-            (api.llama_log_set)(log_to_stderr, ptr::null_mut());
-            (api.mtmd_log_set)(log_to_stderr, ptr::null_mut());
+            (api.llama_log_set)(log_callback, ptr::null_mut());
+            (api.mtmd_log_set)(log_callback, ptr::null_mut());
             (api.ggml_backend_load_all_from_path)(dir_c.as_ptr());
             (api.llama_backend_init)();
             for k in 0..(api.ggml_backend_dev_count)() {
@@ -202,6 +266,19 @@ impl Runtime {
             handles,
             devices,
         })
+    }
+
+    /// 同一进程中多次使用运行库时用它（Android 上推理在应用进程内运行）：每个目录只加载一次，之后返回同一个。
+    /// `ggml_backend_load_all_from_path` 重复调用会重复注册后端
+    pub fn load_once(dir: &Path) -> Result<Arc<Self>, Error> {
+        static LOADED: Mutex<Vec<(PathBuf, Arc<Runtime>)>> = Mutex::new(Vec::new());
+        let mut loaded = LOADED.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, rt)) = loaded.iter().find(|(d, _)| d == dir) {
+            return Ok(rt.clone());
+        }
+        let rt = Arc::new(Self::load(dir)?);
+        loaded.push((dir.to_path_buf(), rt.clone()));
+        Ok(rt)
     }
 
     pub fn devices(&self) -> &[Device] {
@@ -272,11 +349,12 @@ impl Drop for MediaInputs<'_> {
     }
 }
 
-/// 主模型 + mmproj（可选）+ 推理上下文。字段按释放顺序排列：批与上下文、mtmd、主模型。
+/// 主模型 + mmproj（可选）+ 推理上下文。字段按释放顺序排列：批与上下文、mtmd、主模型，最后是各回调用到的中止标志。
 pub struct Embedder {
     ctx: Context,
     mtmd: Option<Mtmd>,
     model: Model,
+    abort: Option<Box<Abort>>,
     api: Arc<Api>,
     marker: String,
     n_embd_inp: usize,
@@ -286,6 +364,7 @@ pub struct Embedder {
 impl Embedder {
     /// `device` 为 `Runtime::devices` 中的序号，必须是 GPU 或核显；`None` 时只用 CPU。
     /// `mmproj` 为 `None` 时不初始化 mtmd，只能编码纯文本。`flash_attn` 同时用于 llama 上下文与 mtmd。
+    /// `abort` 置位时加载与推理尽快停下并返回 `Error::Aborted`（见模块说明）；为 `None` 时不设任何回调
     pub fn new(
         rt: &Runtime,
         model: &Path,
@@ -293,8 +372,23 @@ impl Embedder {
         threads: i32,
         device: Option<usize>,
         flash_attn: bool,
+        abort: Option<Arc<AtomicBool>>,
     ) -> Result<Self, Error> {
         let api = rt.api.clone();
+        let abort = abort.map(|flag| {
+            Box::new(Abort {
+                flag,
+                nodes: AtomicU32::new(0),
+            })
+        });
+        let abort_data = abort.as_deref().map_or(ptr::null_mut(), |a| {
+            ptr::from_ref(a).cast_mut().cast::<c_void>()
+        });
+        let aborted = || {
+            abort
+                .as_ref()
+                .is_some_and(|a| a.flag.load(Ordering::Relaxed))
+        };
         let model_c = c_path(model)?;
         let mmproj_c = mmproj.map(c_path).transpose()?;
         let gpu = match device {
@@ -345,8 +439,15 @@ impl Embedder {
             } else {
                 mp.n_gpu_layers = 0;
             }
+            if abort.is_some() {
+                mp.progress_callback = Some(keep_loading);
+                mp.progress_callback_user_data = abort_data;
+            }
             (api.llama_model_load_from_file)(model_c.as_ptr(), mp)
         };
+        if model_ptr.is_null() && aborted() {
+            return Err(Error::Aborted);
+        }
         if model_ptr.is_null() {
             return Err(Error::LoadModel(model.to_path_buf()));
         }
@@ -372,6 +473,10 @@ impl Embedder {
             if gpu.is_none() {
                 cp.offload_kqv = false;
                 cp.op_offload = false;
+            }
+            if abort.is_some() {
+                cp.abort_callback = Some(abort_requested);
+                cp.abort_callback_data = abort_data;
             }
             (api.llama_init_from_model)(model_ptr, cp)
         };
@@ -401,6 +506,7 @@ impl Embedder {
                 ctx,
                 mtmd: None,
                 model: model_h,
+                abort,
                 api,
                 marker: String::new(),
                 n_embd_inp: n_embd_inp as usize,
@@ -420,8 +526,17 @@ impl Embedder {
             // 图像已由调用方缩放到最终尺寸，mtmd 不再缩放；上限取模型允许的最大值 1120。
             p.image_min_tokens = 1;
             p.image_max_tokens = MAX_IMAGE_TOKENS as c_int;
+            if abort.is_some() {
+                p.cb_eval = Some(eval_check);
+                p.cb_eval_user_data = abort_data;
+                p.progress_callback = Some(keep_loading);
+                p.progress_callback_user_data = abort_data;
+            }
             (api.mtmd_init_from_file)(mmproj_c.as_ptr(), model_ptr, p)
         };
+        if mtmd_ptr.is_null() && aborted() {
+            return Err(Error::Aborted);
+        }
         if mtmd_ptr.is_null() {
             return Err(Error::LoadMmproj(mmproj.to_path_buf()));
         }
@@ -447,11 +562,18 @@ impl Embedder {
             ctx,
             mtmd: Some(mtmd),
             model: model_h,
+            abort,
             api,
             marker,
             n_embd_inp: n_embd_inp as usize,
             n_embd_out: n_embd_out as usize,
         })
+    }
+
+    fn aborted(&self) -> bool {
+        self.abort
+            .as_ref()
+            .is_some_and(|a| a.flag.load(Ordering::Relaxed))
     }
 
     /// 把一个 token 或一行嵌入放到序列位置 `pos`，并要求输出它的嵌入（参与池化）。
@@ -555,6 +677,9 @@ impl Embedder {
         unsafe {
             let rc =
                 (api.llama_process)(self.ctx.ptr, ffi::LLAMA_PROCESS_TYPE_ENCODE, self.ctx.batch);
+            if self.aborted() {
+                return Err(Error::Aborted);
+            }
             if rc != 0 {
                 return Err(Error::Inference(format!("llama_process 失败（{rc}）")));
             }
@@ -656,6 +781,9 @@ impl Embedder {
                 return Err(Error::TooManyTokens { tokens, limit });
             }
             for k in 0..n_chunks {
+                if self.aborted() {
+                    return Err(Error::Aborted);
+                }
                 let ch = (api.mtmd_input_chunks_get)(inputs.chunks, k);
                 if (api.mtmd_input_chunk_get_type)(ch) == ffi::MTMD_INPUT_CHUNK_TYPE_TEXT {
                     let mut n = 0usize;
@@ -668,7 +796,12 @@ impl Embedder {
                     }
                     continue;
                 }
-                if (api.mtmd_encode_chunk)(mtmd.ptr, ch) != 0 {
+                let rc = (api.mtmd_encode_chunk)(mtmd.ptr, ch);
+                // 中止时调度器停在半途，输出不完整
+                if self.aborted() {
+                    return Err(Error::Aborted);
+                }
+                if rc != 0 {
                     return Err(Error::Inference("mtmd_encode_chunk 失败".to_string()));
                 }
                 let rows = (api.mtmd_get_output_embd)(mtmd.ptr);
@@ -703,5 +836,86 @@ impl Embedder {
             )));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    fn data(abort: &Abort) -> *mut c_void {
+        ptr::from_ref(abort).cast_mut().cast()
+    }
+
+    #[test]
+    fn abort_callbacks() {
+        let abort = Abort {
+            flag: Arc::default(),
+            nodes: AtomicU32::new(0),
+        };
+        let d = data(&abort);
+        assert!(!abort_requested(d) && keep_loading(0.5, d));
+        // 每 ABORT_CHECK_NODES 个节点要一次结果；之后的检查在标志置位前放行
+        let asks: Vec<bool> = (0..2 * ABORT_CHECK_NODES)
+            .map(|_| eval_check(ptr::null_mut(), true, d))
+            .collect();
+        assert_eq!(asks.iter().filter(|&&a| a).count(), 2);
+        assert!(asks[ABORT_CHECK_NODES as usize - 1]);
+        assert!(eval_check(ptr::null_mut(), false, d));
+        abort.flag.store(true, Ordering::Relaxed);
+        assert!(abort_requested(d) && !keep_loading(0.5, d));
+        assert!(!eval_check(ptr::null_mut(), false, d));
+    }
+
+    /// 本机测试：CPU 上编码一张 560 档的图像，1 秒后置位中止标志，应在 1 秒内返回 `Aborted`。
+    /// 运行库取仓库 `.cache` 中的 Windows CPU 包，模型取开发版数据目录；找不到时跳过
+    #[test]
+    #[ignore]
+    fn abort_stops_image_encoding() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let runtime = root.join(".cache/third-party/llama.cpp/b11461/win-cpu-x64");
+        let models = root.join("src-tauri/dev-data/models/embeddinggemma-2-gguf");
+        let model = models.join("embeddinggemma-2-Q8_0.gguf");
+        let mmproj = models.join("mmproj-embeddinggemma-2-Q8_0.gguf");
+        if !runtime.is_dir() || !model.is_file() || !mmproj.is_file() {
+            eprintln!("跳过：找不到运行库或模型");
+            return;
+        }
+        let rt = Runtime::load(&runtime).unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut emb = Embedder::new(
+            &rt,
+            &model,
+            Some(&mmproj),
+            8,
+            None,
+            false,
+            Some(flag.clone()),
+        )
+        .unwrap();
+        // 560 档：中止只在计算节点之间生效，1120 档最慢的单个节点在 i7-12700H 上约 2.4 秒
+        let (width, height) = (20 * PATCH_PIXELS, 28 * PATCH_PIXELS);
+        let rgb: Vec<u8> = (0..width * height * 3).map(|i| (i % 251) as u8).collect();
+        let setter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(1));
+            flag.store(true, Ordering::Relaxed);
+            Instant::now()
+        });
+        let res = emb.embed(&[Part::Image {
+            width,
+            height,
+            rgb: &rgb,
+        }]);
+        let returned = Instant::now();
+        let set_at = setter.join().unwrap();
+        assert!(
+            matches!(res, Err(Error::Aborted)),
+            "{:?}",
+            res.map(|v| v.len())
+        );
+        let late = returned.saturating_duration_since(set_at);
+        assert!(late < Duration::from_secs(1), "置位后 {late:?} 才返回");
     }
 }

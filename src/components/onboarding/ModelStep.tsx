@@ -15,6 +15,8 @@ import { BUTTON, CARD, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
 export default function ModelStep({ status, mmproj, onProxy }: { status: SetupStatus; mmproj: boolean; onProxy: (p: ProxySetting) => void }) {
   const [source, setSource] = useState<SourceChoice>({ type: 'official', url: '' })
   const [error, setError] = useState('')
+  // `import_models` 还没返回
+  const [picking, setPicking] = useState(false)
   // 进入这一步时已发起过校验；开发模式下 effect 会执行两次
   const autoVerified = useRef(false)
   const task = status.task
@@ -44,6 +46,10 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
   }
 
   const download = () => call('download_models', { source: toSource(source), mmproj })
+  const importModels = () => {
+    setPicking(true)
+    call('import_models').then(() => setPicking(false))
+  }
   // 返回时校验任务已开始（之后由 `running` 控制显示），或没有要校验的文件
   const verify = () => {
     setStarting(true)
@@ -65,7 +71,7 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
         {MODELS.filter((m) => !m.mmproj || mmproj).map((m) => (
           <ModelRow key={m.label} info={m} url={status.modelUrl} file={m.mmproj ? status.mmproj : status.model} running={running} />
         ))}
-        {!ready && <ImportRow disabled={running} onImport={() => call('import_models')} />}
+        {!ready && <ImportRow disabled={running} picking={picking} onImport={importModels} />}
       </div>
 
       {running && task && (
@@ -98,7 +104,7 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
           <ProxyStatus proxy={status.proxy} onProxy={onProxy} />
 
           <div className="flex flex-wrap gap-2 pt-1">
-            <button type="button" className={`inline-flex items-center gap-1.5 ${PRIMARY_BUTTON}`} disabled={running} onClick={download}>
+            <button type="button" className={`inline-flex items-center gap-1.5 ${PRIMARY_BUTTON}`} disabled={running || picking} onClick={download}>
               <DownloadIcon className="h-4 w-4" />
               {files.some((f) => f.verified === false) ? '重新下载' : resumable ? '继续下载' : '开始下载'}
             </button>

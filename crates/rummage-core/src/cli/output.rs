@@ -312,7 +312,10 @@ pub(crate) fn pause_text(p: &PauseReason) -> String {
         }
         PauseReason::Sleeping => "系统即将睡眠或刚唤醒，稍后继续".into(),
         PauseReason::DiskLow { .. } => "磁盘空间不足，已暂停".into(),
-        PauseReason::Battery => "正在使用电池，已暂停".into(),
+        PauseReason::Quota => "已达到系统每天 6 小时的后台运行上限".into(),
+        PauseReason::Hot => "手机温度过高，已暂停".into(),
+        PauseReason::Battery => "未接电源，已暂停".into(),
+        PauseReason::ScreenOn => "屏幕亮着，已暂停".into(),
         PauseReason::Fullscreen => "有全屏程序在运行，已暂停".into(),
     }
 }

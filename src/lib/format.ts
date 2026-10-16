@@ -17,12 +17,18 @@ export function canFindSimilar(hit: SearchHit) {
   return hit.kind in KIND_LABELS
 }
 
+/** 按路径本身的写法拼回：Windows 路径用反斜杠，Android 路径用斜杠并保留开头的“/” */
+function joinPath(path: string, parts: string[]) {
+  if (path.includes('\\')) return parts.join('\\')
+  return `${path.startsWith('/') ? '/' : ''}${parts.join('/')}`
+}
+
 /** 所在文件夹的缩写：保留开头（盘符或第一段）和最后两级，中间用“…”代替 */
 export function abbreviateDir(path: string) {
   const parts = path.split(/[\\/]/).filter(Boolean)
   const dirs = parts.slice(0, -1)
-  if (dirs.length <= 3) return dirs.join('\\')
-  return [dirs[0], '…', ...dirs.slice(-2)].join('\\')
+  if (dirs.length <= 3) return joinPath(path, dirs)
+  return joinPath(path, [dirs[0], '…', ...dirs.slice(-2)])
 }
 
 /** 过长的文件夹路径：保留开头（盘符或第一段）和尽量多的末尾几级，中间用“…”代替 */
@@ -31,10 +37,10 @@ export function abbreviatePath(path: string, max = 60) {
   const parts = path.split(/[\\/]/).filter(Boolean)
   const tail: string[] = []
   for (let i = parts.length - 1; i > 0; i--) {
-    if (tail.length && [parts[0], '…', parts[i], ...tail].join('\\').length > max) break
+    if (tail.length && joinPath(path, [parts[0], '…', parts[i], ...tail]).length > max) break
     tail.unshift(parts[i])
   }
-  return [parts[0], '…', ...tail].join('\\')
+  return joinPath(path, [parts[0], '…', ...tail])
 }
 
 /** 补零到两位，如 5 → 05 */

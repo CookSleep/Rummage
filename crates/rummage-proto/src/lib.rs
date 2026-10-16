@@ -21,7 +21,7 @@ pub use setup::{
     RootEstimate, SelftestStatus, SetupStatus,
 };
 
-/// 发布 v0.1.0 之前保持 1；之后每次修改消息类型都要加 1。
+/// 每次修改消息类型都要加 1。
 pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, thiserror::Error)]
@@ -137,6 +137,11 @@ pub enum Request {
     },
     /// 取消手动暂停；自动暂停的条件（全屏、电池、磁盘空间）仍然生效
     ResumeIndexing,
+    /// Android：前台服务今日的后台运行额度是否已用完。用完时以 `PauseReason::Quota` 暂停领取作业，
+    /// 应用回到前台后由界面解除。不持久化，核心重启后清除
+    BackgroundQuota {
+        exhausted: bool,
+    },
     /// 搜索，回复 `Reply::Results`。`similar` 不为空时“找相似的”（用已存的向量，忽略 `image_path`；`text` 不为空时
     /// 只限图片，重新读取该图片与文字合成一条查询）；`image_path` 不为空时以图搜图（不走文件名通道，`text` 为附加的
     /// 文字描述，与图片合成一条查询），路径只用于计算查询向量；
@@ -303,6 +308,7 @@ impl Request {
             | Request::IgnoreAllFailed
             | Request::PauseIndexing { .. }
             | Request::ResumeIndexing
+            | Request::BackgroundQuota { .. }
             | Request::FinishSetup
             | Request::SetOnboardingStep { .. }
             | Request::DownloadModels { .. }
@@ -551,7 +557,7 @@ pub struct IndexCounts {
 }
 
 /// 建索引暂停的原因。多个原因同时成立时只报一个，
-/// 优先级：手动 > 睡眠 > 磁盘 > 电池 > 全屏
+/// 优先级：手动 > 睡眠 > 磁盘 > 额度 > 过热 > 电池 > 亮屏 > 全屏
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -565,8 +571,14 @@ pub enum PauseReason {
     Sleeping,
     /// 数据目录所在磁盘的剩余空间低于 `min_free_disk_gb`
     DiskLow { free_gb: f64 },
-    /// 使用电池供电，且开启了 `pause_on_battery`
+    /// Android 前台服务今日的后台运行额度已用完（`BackgroundQuota`），应用回到前台后解除
+    Quota,
+    /// Android 手机过热：热状态达到 `SEVERE` 或以上，或预测的温度余量达到 1.0
+    Hot,
+    /// 使用电池供电（未充电），且开启了 `pause_on_battery`
     Battery,
+    /// Android 屏幕亮着，且开启了 `pause_when_screen_on`
+    ScreenOn,
     /// 有全屏程序，且开启了 `pause_on_fullscreen`
     Fullscreen,
 }

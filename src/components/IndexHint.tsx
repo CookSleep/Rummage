@@ -13,7 +13,10 @@ const PAUSE_TEXT: Record<PauseReason['type'], string> = {
   manual: '已手动暂停',
   sleeping: '系统即将睡眠或刚唤醒，稍后继续',
   disk_low: '磁盘空间不足，已暂停',
-  battery: '正在使用电池，已暂停',
+  quota: '已达到系统每天 6 小时的后台运行上限',
+  hot: '手机温度过高，已暂停',
+  battery: '未接电源，已暂停',
+  screen_on: '屏幕亮着，已暂停',
   fullscreen: '有全屏程序在运行，已暂停',
 }
 
@@ -146,8 +149,9 @@ export default function IndexHint({ status, base, onFailed, up = false, device =
 
   return (
     <div className="px-1">
-      {/* 有进度条时按钮在进度条右端，没有时跟在文字这一行的右端；没有文字（只剩失败文件）时居中 */}
-      <div className={`flex items-center gap-2 ${text ? '' : 'justify-center'}`}>
+      {/* 有进度条时按钮在进度条右端，没有时跟在文字这一行的右端；没有文字（只剩失败文件）时居中。
+          手机宽度下失败文件数单独一行，居中放在最上方 */}
+      <div className={`flex items-center gap-2 max-sm:flex-wrap max-sm:gap-y-1 ${text ? '' : 'justify-center'}`}>
         {text && warn && (
           <div className={`min-w-0 flex-1 ${NOTICE_BOX}`}>
             <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
@@ -159,7 +163,7 @@ export default function IndexHint({ status, base, onFailed, up = false, device =
           <button
             type="button"
             onClick={onFailed}
-            className="flex-shrink-0 text-xs text-blue-500 transition hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+            className="flex-shrink-0 text-xs text-blue-500 transition max-sm:order-first max-sm:basis-full max-sm:text-center hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
           >
             {failed} 个文件失败
           </button>

@@ -56,6 +56,7 @@ fn request_round_trip() {
             until: Some(1_760_000_000_000),
         },
         Request::ResumeIndexing,
+        Request::BackgroundQuota { exhausted: true },
         Request::Search {
             text: Some("柯基 \"飞盘\"".into()),
             image_path: None,
@@ -379,7 +380,10 @@ fn response_and_event_round_trip() {
         PauseReason::Manual { until: Some(5) },
         PauseReason::Sleeping,
         PauseReason::DiskLow { free_gb: 1.5 },
+        PauseReason::Quota,
+        PauseReason::Hot,
         PauseReason::Battery,
+        PauseReason::ScreenOn,
         PauseReason::Fullscreen,
     ] {
         round_trip(Event::IndexProgress(IndexStatus {
@@ -397,6 +401,7 @@ fn response_and_event_round_trip() {
     );
     assert_eq!(encode(&PauseReason::Battery), r#"{"type":"battery"}"#);
     assert_eq!(encode(&PauseReason::Sleeping), r#"{"type":"sleeping"}"#);
+    assert_eq!(encode(&PauseReason::ScreenOn), r#"{"type":"screen_on"}"#);
     round_trip(CoreMsg::Event {
         body: Event::Selftest(SelftestStatus::default()),
     });

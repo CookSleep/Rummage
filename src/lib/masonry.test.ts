@@ -7,6 +7,9 @@ describe('columnCount', () => {
     expect(columnCount(452, 220, 12)).toBe(2)
     expect(columnCount(451, 220, 12)).toBe(1)
     expect(columnCount(1000, 220, 12)).toBe(4)
+    // 手机宽度下排成两列
+    expect(columnCount(328)).toBe(2)
+    expect(columnCount(444)).toBe(1)
   })
 })
 

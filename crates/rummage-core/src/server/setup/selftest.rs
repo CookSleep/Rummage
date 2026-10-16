@@ -205,7 +205,10 @@ fn device(r: &CandidateReport) -> DeviceResult {
         id: r.device_id(),
         pci_id: r.pci_id.clone(),
         gpu: r.backend == Backend::Vulkan,
-        name: if r.description.is_empty() {
+        // CPU 按本机当前的处理器型号显示，不用检测记录中保存的名称
+        name: if r.backend == Backend::Cpu {
+            rummage_embed::cpu_name().to_string()
+        } else if r.description.is_empty() {
             r.name.clone()
         } else {
             r.description.clone()
@@ -561,7 +564,7 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
                 },
                 gpu: matches!(c, Candidate::Gpu(_)),
                 name: match c {
-                    Candidate::Cpu => "CPU".to_string(),
+                    Candidate::Cpu => rummage_embed::cpu_name().to_string(),
                     Candidate::Gpu(g) => g.description.clone(),
                 },
                 status: DeviceStatus::Pending,

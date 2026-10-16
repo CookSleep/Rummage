@@ -3,17 +3,40 @@
 //! - `-ss` 放在 `-i` 之前，按关键帧快速定位后解码到该时刻，取一帧；ffmpeg 内缩到不超过缩略图宽度，
 //!   以 PNG 经管道读出（PNG 编码器是 ffmpeg 自带的，LGPL 构建也有），再与缩略图一样编码为 WebP。
 //! - 软件解码：只取一帧，硬件解码的初始化反而更慢；按旋转标记转正（ffmpeg 默认）。
+//! - Android 用系统解码器，定位与取帧的规则相同（`android/video.rs`），`ffmpeg_dir` 不用。
 //! - **调用方必须先确认不是网盘占位文件**（`rummage_index::ensure_local`）。
 
+#[cfg(not(target_os = "android"))]
 use std::ffi::OsString;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::ffmpeg::{self, MediaError, input, tool};
-use crate::{Rgb, THUMB_WIDTH};
+use crate::Rgb;
+use crate::ffmpeg::MediaError;
+#[cfg(not(target_os = "android"))]
+use crate::{
+    THUMB_WIDTH,
+    ffmpeg::{self, input, tool},
+};
 
-/// 取 `ms` 毫秒处的一帧，宽度不超过 `THUMB_WIDTH`；时刻超出视频末尾时 ffmpeg 不输出画面，返回 `NoVideo`
+/// 取 `ms` 毫秒处的一帧，宽度不超过 `THUMB_WIDTH`；时刻超出视频末尾时没有画面，返回 `NoVideo`
 pub fn frame_at(
+    ffmpeg_dir: &Path,
+    path: &Path,
+    ms: u64,
+    timeout: Duration,
+) -> Result<Rgb, MediaError> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = ffmpeg_dir;
+        crate::android::video::frame_at(path, ms, timeout)
+    }
+    #[cfg(not(target_os = "android"))]
+    ffmpeg_frame_at(ffmpeg_dir, path, ms, timeout)
+}
+
+#[cfg(not(target_os = "android"))]
+fn ffmpeg_frame_at(
     ffmpeg_dir: &Path,
     path: &Path,
     ms: u64,
@@ -73,6 +96,7 @@ pub fn frame_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::THUMB_WIDTH;
     use crate::ffmpeg::tests::ffmpeg_dir;
 
     #[test]

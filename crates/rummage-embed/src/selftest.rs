@@ -242,7 +242,7 @@ pub struct CandidateReport {
 impl CandidateReport {
     fn new(c: &Candidate, key: &DeviceKey) -> Self {
         let (backend, name, driver) = match c {
-            Candidate::Cpu => (Backend::Cpu, "CPU".to_string(), None),
+            Candidate::Cpu => (Backend::Cpu, crate::cpu_name().to_string(), None),
             Candidate::Gpu(g) => (Backend::Vulkan, g.name.clone(), Some(key.driver.clone())),
         };
         CandidateReport {
@@ -517,10 +517,10 @@ pub fn run(
             return;
         }
         if let Some(prev) = &previous[i] {
-            // 显卡的驱动版本按现在的记（运行中屏蔽、本次运行停用都按它的键）；CPU 的名称是推理进程报告的处理器型号，沿用
+            // 名称按现在的显示；显卡的驱动版本也按现在的记（运行中屏蔽、本次运行停用都按它的键）
             let fresh = std::mem::replace(r, prev.clone());
+            r.name = fresh.name;
             if gpu {
-                r.name = fresh.name;
                 r.driver = fresh.driver;
             }
             return;

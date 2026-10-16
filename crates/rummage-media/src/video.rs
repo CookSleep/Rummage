@@ -9,7 +9,7 @@
 //!   一个等距网格上（`Grid`）：不重叠时网格就是帧间隔，相邻窗口共用边界上的那一帧；带重叠时网格更密，多抽的帧不用。
 //! - 一次解码：`fps` 滤镜把视频变成网格间隔的恒定帧率（`start_time=0` 时网格从 0 秒起，开头缺帧时重复第一帧；
 //!   `round=up` 使网格时刻 T 取 T 及之前最后一帧，即播放到 T 时屏幕上的那一帧），随后 `scale` 直接缩放到
-//!   70 档视觉 token 的尺寸（`frame_size`，Gemma 4 公式，与图片相同），以 RGB 原始像素经管道读出，不经 JPEG。
+//!   每帧视觉 token 档位的尺寸（`frame_size`，Gemma 4 公式，与图片相同；档位为参数 `video_frame_tokens`），以 RGB 原始像素经管道读出，不经 JPEG。
 //!   第 m 帧即网格上第 m 个时刻，不必逐个定位、也不依赖时间戳输出；关键帧稀疏时相邻窗口也不会拿到同一帧。
 //!   软件解码时 ffmpeg 默认按旋转标记把画面转正，所以尺寸按转正后的宽高算（`VideoInfo`）。
 //!   黄金样本按 `-ss T` 取 T 之后的第一帧（`post.py`），与这里最多差一帧。
@@ -20,8 +20,14 @@
 //! - 组装（`assemble`）：带音频时依次为 `时间戳, 音频段, 时间戳, 画面帧`，时间戳为窗口起点加帧时刻取整秒的 `mm:ss`，
 //!   音频段为窗口音频按帧数等分（`window_s × 16000 / 帧数` 个采样）；不带音频时只放画面帧。与黄金样本的
 //!   `inputs_av` / `inputs_v` 相同，媒体之间不加空格，占位与分词由推理引擎做。
+//! - Android 不用 ffmpeg：元数据与抽帧用系统的 MediaExtractor + MediaCodec（`android/video.rs`），取帧规则、YUV 转 RGB 与转正
+//!   按 ffmpeg 的做法自己实现（`raw`），缩放用 `resize_bicubic`，结果与电脑接近而不逐位相同；`ffmpeg_dir`、`hwaccel` 在 Android 上不用。
 //! - 修改窗口、抽帧或组装的规则时提升 `rummage_embed::space::VIDEO_PREPROCESS`。
 
+#[cfg(any(target_os = "android", test))]
+pub(crate) mod raw;
+
+#[cfg(not(target_os = "android"))]
 use std::ffi::OsString;
 use std::path::Path;
 use std::sync::Arc;
@@ -30,15 +36,15 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::audio::SAMPLE_RATE;
-use crate::ffmpeg::{self, MediaError, input, num, tag, text, tool};
+use crate::ffmpeg::{self, MediaError, num, tag, text};
+#[cfg(not(target_os = "android"))]
+use crate::ffmpeg::{input, tool};
 use crate::{Error, Rgb, target_size};
 
-/// 每帧的视觉 token 档位
-pub const FRAME_TOKENS: u32 = 70;
 /// 末尾不足这么多毫秒的内容不另开窗口、并入上一个窗口：两帧几乎相同，只多算一次推理
 const MIN_TAIL_MS: u64 = 500;
 
-/// ffprobe 读出的元数据，各项读不到时为空
+/// 视频的元数据（电脑上由 ffprobe 读出，Android 上由 MediaExtractor 读出），各项读不到时为空
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VideoInfo {
     pub duration_ms: Option<u64>,
@@ -81,8 +87,15 @@ impl VideoInfo {
     }
 }
 
-/// 用 `ffmpeg_dir` 中的 ffprobe 读取元数据，超过 `timeout` 就结束它
+/// 读取元数据：电脑上用 `ffmpeg_dir` 中的 ffprobe，超过 `timeout` 就结束它；Android 上用 MediaExtractor（见 `android/video.rs`）
 pub fn probe(ffmpeg_dir: &Path, path: &Path, timeout: Duration) -> Result<VideoInfo, MediaError> {
+    // Android 上不设时限，读取卡住时无法中途结束
+    #[cfg(target_os = "android")]
+    {
+        let _ = (ffmpeg_dir, timeout);
+        crate::android::video::probe(path)
+    }
+    #[cfg(not(target_os = "android"))]
     parse_probe(&ffmpeg::probe_json(ffmpeg_dir, path, timeout, "视频")?)
 }
 
@@ -260,9 +273,9 @@ pub fn windows(duration_ms: u64, opts: WindowOpts) -> Vec<Window> {
     out
 }
 
-/// 每帧缩放后的尺寸：70 档视觉 token
-pub fn frame_size(width: u32, height: u32) -> Result<(u32, u32), Error> {
-    target_size(width, height, FRAME_TOKENS)
+/// 每帧缩放后的尺寸：`tokens` 为每帧的视觉 token 档位
+pub fn frame_size(width: u32, height: u32, tokens: u32) -> Result<(u32, u32), Error> {
+    target_size(width, height, tokens)
 }
 
 /// 整段视频按 `grid` 抽帧并缩放到 `size`（见模块说明）。`start_s` 为开始的秒数（只供测试对照黄金样本，建索引时为空）。
@@ -278,6 +291,12 @@ pub fn extract(
     start_s: Option<f64>,
     timeout: Duration,
 ) -> Result<Vec<Rgb>, MediaError> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = (ffmpeg_dir, hwaccel);
+        crate::android::video::extract(path, size, grid, max_frames, start_s, timeout)
+    }
+    #[cfg(not(target_os = "android"))]
     if hwaccel {
         match extract_once(
             ffmpeg_dir, path, size, grid, max_frames, true, start_s, timeout,
@@ -288,11 +307,13 @@ pub fn extract(
             res => return res,
         }
     }
+    #[cfg(not(target_os = "android"))]
     extract_once(
         ffmpeg_dir, path, size, grid, max_frames, false, start_s, timeout,
     )
 }
 
+#[cfg(not(target_os = "android"))]
 #[allow(clippy::too_many_arguments)]
 fn extract_once(
     ffmpeg_dir: &Path,
@@ -369,7 +390,7 @@ fn extract_once(
 #[derive(Debug, Clone)]
 pub enum VideoPart {
     Text(String),
-    /// 已缩放到 70 档的画面帧；相邻窗口共用的帧只存一份
+    /// 已缩放到每帧档位的画面帧；相邻窗口共用的帧只存一份
     Frame(Arc<Rgb>),
     /// 16 kHz 单声道采样
     Audio(Vec<f32>),
@@ -415,6 +436,9 @@ mod tests {
 
     use super::*;
     use crate::ffmpeg::tests::ffmpeg_dir;
+
+    /// 黄金样本的每帧档位
+    const GOLDEN_TOKENS: u32 = 70;
 
     const OBJECTS: WindowOpts = WindowOpts {
         window_s: 2,
@@ -659,7 +683,7 @@ mod tests {
             .map(|i| {
                 crate::prepare(
                     &dir.join(format!("frame{i}.jpg")),
-                    FRAME_TOKENS,
+                    GOLDEN_TOKENS,
                     100_000_000,
                 )
                 .unwrap()
@@ -678,7 +702,7 @@ mod tests {
         };
         let info = probe(&dir, &src, Duration::from_secs(30)).unwrap();
         assert_eq!((info.width, info.height), (1280, 720));
-        let size = frame_size(info.width, info.height).unwrap();
+        let size = frame_size(info.width, info.height, GOLDEN_TOKENS).unwrap();
         let want = golden_frames();
         assert_eq!(size, (want[0].width, want[0].height));
         for hw in [true, false] {
@@ -728,7 +752,7 @@ mod tests {
             return;
         };
         let info = probe(&dir, &src, Duration::from_secs(30)).unwrap();
-        let size = frame_size(info.width, info.height).unwrap();
+        let size = frame_size(info.width, info.height, 140).unwrap();
         let secs = info.duration_ms.unwrap_or(0) as f64 / 1000.0;
         for opts in [OBJECTS, SPEECH] {
             for hw in [true, false] {

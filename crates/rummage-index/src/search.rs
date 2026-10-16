@@ -579,8 +579,41 @@ fn modalities(space: &Space) -> &'static [&'static str] {
 }
 
 /// “找相似的”的查询：文件 `file_id` 中片段 `segment_id`（为空时取该文件第一个有向量的片段）已存的向量、
-/// 所在空间与片段的模态。片段有多个空间的向量（重建期间）时取最新写入的，即当前空间。片段不属于该文件、没有向量或向量损坏时为空
+/// 所在空间与片段的模态。片段有多个空间的向量（重建期间）时取最新写入的，即当前空间。片段不属于该文件、没有向量或向量损坏时为空。
+/// 长图切片（locator 带区域）与整图档位不同、空间不可比较时改用同一文件的整图向量：切片的空间里只有其他长图的切片；
+/// 档位相同时仍用切片本身，找与这一段相似的
 pub fn stored_vector(
+    db: &Db,
+    file_id: i64,
+    segment_id: Option<i64>,
+) -> Result<Option<(Vec<f32>, Space, String)>, DbError> {
+    let found = segment_vector(db, file_id, segment_id)?;
+    let (Some(id), Some((_, slice, _))) = (segment_id, &found) else {
+        return Ok(found);
+    };
+    let whole: Option<i64> = db
+        .conn
+        .query_row(
+            "SELECT w.id FROM segments s JOIN segments w ON w.file_id = s.file_id AND w.modality = 'image'
+             AND json_extract(w.locator_json, '$.region') IS NULL
+             WHERE s.id = ?1 AND s.modality = 'image' AND json_extract(s.locator_json, '$.region') IS NOT NULL
+             ORDER BY w.id LIMIT 1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|err| db.err(err))?;
+    let Some(whole) = whole else {
+        return Ok(found);
+    };
+    match segment_vector(db, file_id, Some(whole))? {
+        Some(w) if !comparable(slice, &w.1) => Ok(Some(w)),
+        _ => Ok(found),
+    }
+}
+
+/// 片段已存的向量、空间与模态（见 `stored_vector`）
+fn segment_vector(
     db: &Db,
     file_id: i64,
     segment_id: Option<i64>,

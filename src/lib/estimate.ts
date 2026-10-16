@@ -26,6 +26,8 @@ const CHUNK_COST = [3, 10]
 const BYTES_PER_CHUNK = [900, 1600]
 /** 长截图按区域切成几张、解码与缩放的开销，图片按单条耗时的 1–1.5 倍算 */
 const IMAGE_COST = [1, 1.5]
+/** 自检用 140 档图片，默认的 280 档在 GPU 上约慢 1.2–1.5 倍、CPU 上约 2.6 倍。下限按 GPU、上限按 CPU，与所测设备无关，因此区间偏宽 */
+const IMAGE_TIER = [1.2, 2.6]
 /** 每条向量：768 维 f16 + 256 维 int8 粗排 + 行与索引的开销 */
 const VECTOR_BYTES = [1800, 2600]
 /** 每个文件的元数据行与文件名全文索引（trigram） */
@@ -49,6 +51,8 @@ const VIDEO_BYTES_PER_S = [2_000_000, 125_000]
 const GOLDEN_VIDEO_FRAMES = 6
 /** 视频解码抽帧的开销，按推理耗时的 1.2–2 倍算 */
 const VIDEO_COST = [1.2, 2]
+/** 自检的视频帧为 70 档，默认的 140 档在 GPU 上约慢 1.1–1.9 倍、CPU 上约 2 倍。下限按 GPU、上限按 CPU，与所测设备无关，因此区间偏宽 */
+const FRAME_TIER = [1.1, 2]
 
 export interface Range {
   low: number
@@ -118,9 +122,9 @@ export function estimateIndex(est: Estimate, kinds: Kinds, speeds: Speeds, prese
   const windows = (i: 0 | 1) => Math.max(videoFiles, videoBytes / VIDEO_BYTES_PER_S[i] / video.windowS)
   const timeMs = (i: 0 | 1) =>
     (i ? chunksHigh : chunksLow) * speeds.textMs * CHUNK_COST[i]
-    + imageFiles * speeds.imageMs * IMAGE_COST[i]
+    + imageFiles * speeds.imageMs * IMAGE_COST[i] * IMAGE_TIER[i]
     + segments(i) * speeds.audioMs * AUDIO_COST[i]
-    + windows(i) * speeds.videoMs * (video.frames / GOLDEN_VIDEO_FRAMES) * VIDEO_COST[i]
+    + windows(i) * speeds.videoMs * (video.frames / GOLDEN_VIDEO_FRAMES) * VIDEO_COST[i] * FRAME_TIER[i]
   const disk = (i: 0 | 1) =>
     ((i ? chunksHigh : chunksLow) + imageFiles * IMAGE_COST[i] + segments(i) + windows(i)) * VECTOR_BYTES[i]
     + docBytes * TEXT_STORE[i]

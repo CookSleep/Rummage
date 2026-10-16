@@ -319,7 +319,7 @@ async fn index_and_resume_on_cpu() {
     let elapsed = t.elapsed();
     println!("建索引用时 {:.1} 秒，进度：{s:?}", elapsed.as_secs_f64());
     assert_eq!((s.done, s.failed), (6, 0), "{s:?}");
-    assert_eq!(s.backend.as_deref(), Some("CPU"));
+    assert_eq!(s.backend.as_deref(), Some(rummage_embed::cpu_name()));
     // 进度事件最多每 500 毫秒一次，查询期间应收到过
     assert!(events > 0);
     assert!(client::shutdown(c).await.unwrap());

@@ -1,4 +1,4 @@
-//! 非 Windows 平台的占位实现：不调用 ffmpeg，读取音频与视频一律返回 `Unsupported`（Android 以后用 MediaCodec）。
+//! Windows、Android 以外平台的占位实现：不调用 ffmpeg，一律返回 `Unsupported`（Android 的音视频用系统解码器，见 `android.rs`）。
 
 use std::ffi::OsString;
 use std::path::Path;

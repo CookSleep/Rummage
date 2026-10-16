@@ -31,12 +31,17 @@ const SELECT_WIDTH = 'w-32'
  */
 export default function FilterBar({ filters, onChange, refresh, connected }: Props) {
   const [roots, setRoots] = useState<RootInfo[]>([])
+  // 读取过文件夹列表；读到之前不禁用文件夹筛选
+  const [loaded, setLoaded] = useState(false)
   const [editing, setEditing] = useState(false)
   const range = customLabel(filters.from, filters.to)
 
   const loadRoots = () =>
     invoke<RootInfo[]>('list_roots')
-      .then(setRoots)
+      .then((list) => {
+        setRoots(list)
+        setLoaded(true)
+      })
       .catch((err) => console.warn('无法读取文件夹列表：', err))
 
   useEffect(() => {
@@ -80,6 +85,8 @@ export default function FilterBar({ filters, onChange, refresh, connected }: Pro
           options={roots.map((r) => ({ label: folderName(r.path), value: r.id, tip: abbreviatePath(r.path) }))}
           allText="全部文件夹"
           unit="个文件夹"
+          disabled={loaded && !roots.length}
+          tip={loaded && !roots.length ? '还没有添加文件夹' : undefined}
         />
       </div>
       {/* 自定义范围比其他选项长，按内容定宽 */}

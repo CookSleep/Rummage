@@ -18,7 +18,7 @@ accepted = [
     "CC0-1.0",
     "MPL-2.0",
 ]
-# Rust 部分按 Windows 版统计
-targets = ["x86_64-pc-windows-msvc"]
+# Rust 部分按 Windows 版与 Android 版统计
+targets = ["x86_64-pc-windows-msvc", "aarch64-linux-android"]
 # 开发依赖不随程序分发
 ignore-dev-dependencies = true

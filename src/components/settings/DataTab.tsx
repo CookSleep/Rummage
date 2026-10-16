@@ -3,13 +3,15 @@ import { invoke } from '@tauri-apps/api/core'
 import type { CoreStatus, StorageInfo } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { formatSize } from '../../lib/format'
+import { isAndroid } from '../../lib/platform'
 import ChangeDataDirButton from '../ChangeDataDirButton'
 import ConfirmDialog from '../ConfirmDialog'
 import CoreStatusNotice from '../CoreStatusNotice'
 import { FolderIcon, TrashIcon } from '../icons'
 import LoadError from '../LoadError'
 import { HoverTip } from '../Tip'
-import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, SMALL_BUTTON, SMALL_DANGER_BUTTON } from '../onboarding/styles'
+import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_DANGER_BUTTON } from '../onboarding/styles'
+import PathText from '../PathText'
 import { ROW_DESC, SECTION_NOTICE, SECTION_TITLE } from './styles'
 
 /** 占用的各部分，固定顺序；颜色在浅色与深色模式下都取柔和的中间色 */
@@ -26,7 +28,8 @@ const PLACEHOLDER = 'animate-pulse rounded bg-black/[0.06] dark:bg-white/[0.08]'
 /**
  * “数据”页：数据目录（打开、更改位置）、各部分的空间占用与清空索引。
  * 更改位置的目录由 Rust 侧的对话框选择，确认后重启，下次启动时迁移并显示进度。
- * 只有清空索引要用后台服务，不可用（`offline`）时那一分区只显示它的状态
+ * 只有清空索引要用后台服务，不可用（`offline`）时那一分区只显示它的状态。
+ * Android 上数据目录是应用私有目录，其他应用打不开，也不能更改，不显示这两个按钮
  */
 export default function DataTab({ offline, coreStatus }: { offline: boolean; coreStatus: CoreStatus }) {
   const [info, setInfo] = useState<StorageInfo | null>(null)
@@ -89,8 +92,8 @@ export default function DataTab({ offline, coreStatus }: { offline: boolean; cor
             </span>
             <span className="min-w-0 flex-1">
               {info ? (
-                <span data-selectable-text className="block truncate text-sm text-gray-800 dark:text-gray-100">
-                  {info.dataDir}
+                <span data-selectable-text className={`block text-sm text-gray-800 dark:text-gray-100 ${ROW_LONG_TEXT}`}>
+                  <PathText path={info.dataDir} />
                   <HoverTip label={info.dataDir} wrap />
                 </span>
               ) : (
@@ -107,12 +110,14 @@ export default function DataTab({ offline, coreStatus }: { offline: boolean; cor
                 </span>
               )}
             </span>
-            <span className="flex flex-shrink-0 gap-1.5">
-              <button type="button" className={SMALL_BUTTON} disabled={!info} onClick={open}>
-                打开
-              </button>
-              <ChangeDataDirButton label="更改位置" className={SMALL_BUTTON} disabled={!info} onError={setDirError} />
-            </span>
+            {!isAndroid && (
+              <span className={`gap-1.5 ${ROW_ACTIONS}`}>
+                <button type="button" className={SMALL_BUTTON} disabled={!info} onClick={open}>
+                  打开
+                </button>
+                <ChangeDataDirButton label="更改位置" className={SMALL_BUTTON} disabled={!info} onError={setDirError} />
+              </span>
+            )}
           </div>
         </div>
         {loadError && <LoadError message={loadError} onRetry={load} />}
@@ -157,9 +162,11 @@ export default function DataTab({ offline, coreStatus }: { offline: boolean; cor
                 <span className="block text-sm text-gray-800 dark:text-gray-100">清空索引</span>
                 <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">删除全部索引后按现有文件夹重新建立，不会删除你的文件。</span>
               </span>
-              <button type="button" className={`flex-shrink-0 ${SMALL_DANGER_BUTTON}`} disabled={clearing} onClick={() => setConfirmClear(true)}>
-                {clearing ? '正在清空' : '清空'}
-              </button>
+              <span className={ROW_ACTIONS}>
+                <button type="button" className={SMALL_DANGER_BUTTON} disabled={clearing} onClick={() => setConfirmClear(true)}>
+                  {clearing ? '正在清空' : '清空'}
+                </button>
+              </span>
             </div>
           </div>
         )}

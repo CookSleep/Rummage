@@ -4878,13 +4878,18 @@ name = "rummage"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "jni 0.22.4",
+ "libc",
  "log",
+ "ndk",
+ "ndk-context",
  "reqwest",
  "rummage-core",
  "rummage-datadir",
  "rummage-embed",
  "rummage-index",
  "rummage-proto",
+ "rustls-platform-verifier",
  "semver",
  "serde",
  "serde_json",
@@ -4894,6 +4899,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-opener",
+ "tauri-plugin-rummage-android",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
@@ -4911,7 +4917,10 @@ dependencies = [
  "chrono",
  "flexi_logger",
  "getrandom 0.4.3",
+ "jni 0.22.4",
+ "libc",
  "log",
+ "ndk-context",
  "notify",
  "reqwest",
  "rmcp",
@@ -4946,6 +4955,7 @@ dependencies = [
 name = "rummage-embed"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "log",
  "rummage-llama",
  "rummage-media",
@@ -5002,6 +5012,7 @@ name = "rummage-llama"
 version = "0.1.0"
 dependencies = [
  "libloading 0.9.0",
+ "log",
  "thiserror 2.0.21",
 ]
 
@@ -5011,6 +5022,7 @@ version = "0.1.0"
 dependencies = [
  "image",
  "log",
+ "ndk-sys",
  "serde_json",
  "thiserror 2.0.21",
  "webp",
@@ -6190,6 +6202,15 @@ dependencies = [
  "url",
  "windows",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-rummage-android"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

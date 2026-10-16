@@ -10,6 +10,7 @@ import { renderMessage } from './ConfirmDialog'
 import { CloseIcon, FolderIcon, KindIcon, OpenIcon, PanelCollapseIcon, SimilarIcon } from './icons'
 import Preview from './Preview'
 import { HoverTip } from './Tip'
+import PathText from './PathText'
 
 /** 详情栏宽度（px）；窗口不窄于 `PANEL_OVERLAY_BELOW` 时详情栏常驻右侧、网格让出这么宽，否则选中结果后覆盖整个窗口 */
 export const PANEL_WIDTH = 400
@@ -21,7 +22,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex gap-3 py-1 text-xs">
       <dt className="w-14 flex-shrink-0 text-gray-400 dark:text-gray-500">{label}</dt>
-      <dd className="min-w-0 flex-1 break-all text-gray-700 dark:text-gray-200">{children}</dd>
+      <dd className="min-w-0 flex-1 text-gray-700 [overflow-wrap:anywhere] dark:text-gray-200">{children}</dd>
     </div>
   )
 }
@@ -39,7 +40,8 @@ interface DetailsProps {
   hit: SearchHit
   query: string
   onOpen: () => void
-  onReveal: () => void
+  /** 为空时不显示“在资源管理器中显示”（Android） */
+  onReveal?: () => void
   onSimilar: () => void
 }
 
@@ -112,7 +114,7 @@ function Details({ hit, query, onOpen, onReveal, onSimilar }: DetailsProps) {
         <Preview hit={hit} query={query} />
 
         <Section title="文件">
-          <Row label="路径"><span data-selectable-text>{hit.path}</span></Row>
+          <Row label="路径"><span data-selectable-text><PathText path={hit.path} /></span></Row>
           <Row label="类型">{kindLabel(hit.kind)}{info?.ext ? `（.${info.ext}）` : ''}</Row>
           <Row label="大小">{formatSize(info?.size ?? hit.size)}</Row>
           <Row label="修改时间">{formatTime(info?.mtime ?? hit.mtime)}</Row>
@@ -138,17 +140,19 @@ function Details({ hit, query, onOpen, onReveal, onSimilar }: DetailsProps) {
         </Section>
       </div>
 
-      <div className="flex items-center gap-1 border-t border-black/5 px-5 py-3 dark:border-white/[0.06]">
+      <div className="flex items-center gap-1 border-t border-black/5 px-5 pb-[calc(0.75rem+var(--safe-bottom))] pt-3 dark:border-white/[0.06]">
         {canFindSimilar(hit) && (
           <button type="button" onClick={onSimilar} aria-label="找相似" className={ICON_BUTTON}>
             <SimilarIcon kind={hit.kind} className="h-4 w-4" />
             <HoverTip label="找相似" />
           </button>
         )}
-        <button type="button" onClick={onReveal} aria-label="在资源管理器中显示" className={ICON_BUTTON}>
-          <FolderIcon className="h-4 w-4" />
-          <HoverTip label="在资源管理器中显示" />
-        </button>
+        {onReveal && (
+          <button type="button" onClick={onReveal} aria-label="在资源管理器中显示" className={ICON_BUTTON}>
+            <FolderIcon className="h-4 w-4" />
+            <HoverTip label="在资源管理器中显示" />
+          </button>
+        )}
         <button type="button" onClick={onOpen} className="ml-auto inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white transition duration-200 hover:bg-blue-600">
           <OpenIcon className="h-4 w-4" />
           {at && canJump ? openAtText(at) : '打开'}
@@ -174,7 +178,8 @@ interface Props {
   connected: boolean
   onHide: () => void
   onOpen: () => void
-  onReveal: () => void
+  /** 为空时不显示“在资源管理器中显示”（Android） */
+  onReveal?: () => void
   onSimilar: () => void
 }
 
@@ -195,7 +200,7 @@ export default function DetailPanel({ hit, query, overlay, viewportHeight, conne
       }`}
     >
       {/* 收起按钮与收起后的“展开详情栏”按钮同位置、同大小 */}
-      <div className="flex items-start gap-3 pb-3 pl-5 pr-3 pt-5">
+      <div className="flex items-start gap-3 pb-3 pl-5 pr-3 pt-[calc(1.25rem+var(--safe-top))]">
         {hit && (
           <>
             <KindIcon kind={hit.kind} className="mt-2 h-5 w-5 flex-shrink-0 text-gray-400" />

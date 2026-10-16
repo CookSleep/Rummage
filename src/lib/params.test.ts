@@ -3,7 +3,7 @@ import type { ParamDef } from '../types'
 import { describeParam, parseParamInput, rebuildLabel } from './params'
 
 function def(kind: ParamDef['kind'], extra: Partial<ParamDef> = {}): ParamDef {
-  return { key: 'k', group: 'Index', section: '', kind, default: 1, affectsIndex: false, indexKinds: [], label: '', help: '', basis: '', ...extra }
+  return { key: 'k', group: 'Index', section: '', kind, default: 1, affectsIndex: false, indexKinds: [], label: '', help: '', basis: '', platform: '', ...extra }
 }
 
 describe('describeParam', () => {

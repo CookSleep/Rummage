@@ -9,8 +9,8 @@
 //!   随结果写回，用于识别改名与移动）→ 黑名单 →
 //!   图片：内容哈希，库中已有同空间向量（长图还要有当前参数的切片）的直接复制（宽高随之复制），否则解码原图、
 //!   记下宽高、缩放得到整图片段（像素数超过 `max_image_mp` 的只记下所用的上限，`Outcome::TooLong`）；
-//!   长宽比超过 `long_image_ratio` 的长图另按 `rummage_media::slices` 切段，每段按整图的档位（`image_tokens`）
-//!   缩放成一个片段，locator 记区域；
+//!   长宽比超过 `long_image_ratio` 的长图另按 `rummage_media::slices` 切段，每段按切片档位（`long_image_tokens`）
+//!   缩放成一个片段，locator 记区域，向量在该档位的图像空间；整图按 `image_tokens`；
 //!   `.ts` / `.mts`（种类为 `other`）：读文件头判断是否为视频，是视频就按视频处理，否则只记下已判定（`Outcome::NotVideo`）。
 //!   文档：读取、切片，每片一个片段，向量的参数版本带分段参数（`space::text_version`）。
 //!   PDF、Office 等经 Xberg 提取为 Markdown 后按 Markdown 切片，片段记录标题路径与字符范围，PDF 与演示文稿
@@ -408,16 +408,12 @@ fn image(shared: &Shared, task: Task, qh: Vec<u8>) -> Prep {
     };
     let max_ratio = float(&task.params, "long_image_ratio");
     let max_slices = int(&task.params, "long_image_max_slices").max(0) as u32;
-    // 切片与整图同一档位（实测长截屏上 140 档与 280、560 档相当）
-    let slice_tier = engine.tier;
+    let tier = int(&task.params, "image_tokens") as u32;
+    let slice_tier = int(&task.params, "long_image_tokens") as u32;
     let slice_version = space::image_slice_preprocess(slice_tier, max_ratio, max_slices);
-    let copy = lock(&shared.db).copy_source(
-        &ch,
-        &engine.image_space.id,
-        &slice_version,
-        max_ratio,
-        job.file_id,
-    );
+    let image_space = space_row(&engine.cfg, Some(tier));
+    let copy =
+        lock(&shared.db).copy_source(&ch, &image_space.id, &slice_version, max_ratio, job.file_id);
     match copy {
         Ok(None) => {}
         Ok(Some(from)) => {
@@ -425,7 +421,7 @@ fn image(shared: &Shared, task: Task, qh: Vec<u8>) -> Prep {
                 quick_hash: qh,
                 kind: "image",
                 content_hash: ch,
-                space_id: engine.image_space.id.clone(),
+                space_id: image_space.id.clone(),
                 slice_version,
                 from,
             });
@@ -463,7 +459,7 @@ fn image(shared: &Shared, task: Task, qh: Vec<u8>) -> Prep {
             space: Some(Box::new((slice_space.clone(), slice_version.clone()))),
         });
     }
-    let rgb = match rummage_media::fit(img, engine.tier) {
+    let rgb = match rummage_media::fit(img, tier) {
         Ok(rgb) => rgb,
         Err(err) => return failed(job, Some(&qh), err),
     };
@@ -471,10 +467,7 @@ fn image(shared: &Shared, task: Task, qh: Vec<u8>) -> Prep {
     let mut items = vec![Item {
         locator: "{}".to_string(),
         text: None,
-        input: Input::Image {
-            rgb,
-            tokens: engine.tier,
-        },
+        input: Input::Image { rgb, tokens: tier },
         space: None,
     }];
     items.extend(slices);
@@ -483,7 +476,7 @@ fn image(shared: &Shared, task: Task, qh: Vec<u8>) -> Prep {
         engine: task.engine.clone(),
         generation: task.generation,
         kind: "image",
-        space: engine.image_space.clone(),
+        space: image_space,
         fallback: None,
         quick_hash: qh,
         content_hash: Some(ch),

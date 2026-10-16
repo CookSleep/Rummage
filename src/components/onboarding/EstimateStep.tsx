@@ -2,17 +2,19 @@ import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { Estimate, SelftestStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
-import { deviceName, switchedDevice, switchedText } from '../../lib/device'
+import { cpuName, deviceName, switchedDevice, switchedText } from '../../lib/device'
 import type { Kinds } from '../../lib/kinds'
 import { diskShort, estimateIndex, formatSizeRange, formatTimeRange, pickSpeeds } from '../../lib/estimate'
 import { formatSize } from '../../lib/format'
+import { isAndroid } from '../../lib/platform'
 import { useCoreEvent } from '../../hooks/useCoreEvent'
 import ChangeDataDirButton from '../ChangeDataDirButton'
 import { WarningIcon } from '../icons'
 import LoadError from '../LoadError'
 import { NOTICE_BOX } from '../settings/styles'
 import { HoverTip } from '../Tip'
-import { ERROR_TEXT, SMALL_BUTTON } from './styles'
+import PathText from '../PathText'
+import { ERROR_TEXT, ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
 
 interface Props {
   kinds: Kinds
@@ -55,7 +57,7 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
   const st = selftest
   // 原本要用的设备本次运行中出了问题时，核心已把 selected 改为剩下的设备中最快的（附 failed），这里按实际生效的设备显示
   const sel = st.preferred === 'cpu' || st.selected === null ? undefined : st.devices[st.selected]
-  const device = sel ? deviceName(sel, st.devices) : 'CPU'
+  const device = sel ? deviceName(sel, st.devices) : cpuName(st)
   const switched = switchedDevice(st)
   const r = est && estimateIndex(est, kinds, pickSpeeds(st), preset)
 
@@ -77,8 +79,8 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
             ].filter(Boolean)
             return (
               <li key={root.id} className="rounded-xl bg-black/[0.03] px-3 py-2.5 dark:bg-white/[0.04]">
-                <p data-selectable-text className="truncate text-sm text-gray-700 dark:text-gray-200">
-                  {root.path}
+                <p data-selectable-text className={`text-sm text-gray-700 dark:text-gray-200 ${ROW_LONG_TEXT}`}>
+                  <PathText path={root.path} />
                   <HoverTip label={root.path} wrap />
                 </p>
                 <p className="text-xs text-gray-400 dark:text-gray-500">{parts.join(' · ')}</p>
@@ -91,7 +93,7 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
       {r && (
         <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
           <dt className="text-gray-500 dark:text-gray-400">预计用时</dt>
-          <dd className="text-gray-700 dark:text-gray-200">{formatTimeRange(r.time)}（使用「{device}」）</dd>
+          <dd className="text-gray-700 dark:text-gray-200">{formatTimeRange(r.time)}<span className="whitespace-nowrap">（使用「{device}」）</span></dd>
           <dt className="text-gray-500 dark:text-gray-400">占用空间</dt>
           <dd className="text-gray-700 dark:text-gray-200">{formatSizeRange(r.disk)}</dd>
         </dl>
@@ -105,7 +107,8 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
             <p>
               剩余 {formatSize(est.freeGb * 2 ** 30)}，索引最多约占用 {formatSize(r.disk.high)}。剩余空间低于 {minFreeGb} GB 时，建立索引会自动暂停。
             </p>
-            <ChangeDataDirButton label="更改数据目录" className={`mt-1 ${SMALL_BUTTON}`} onError={setDirError} />
+            {/* Android 上数据目录是应用私有目录，不能更改 */}
+            {!isAndroid && <ChangeDataDirButton label="更改数据目录" className={`mt-1 ${SMALL_BUTTON}`} onError={setDirError} />}
             {dirError && <p data-selectable-text className={ERROR_TEXT}>{dirError}</p>}
           </div>
         </div>

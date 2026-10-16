@@ -5,6 +5,9 @@
 export const MAX_IMAGE_RATIO = 2
 /** 卡片的最小宽度（px），列数由它和容器宽度决定 */
 const MIN_COLUMN_WIDTH = 220
+/** 容器窄于此宽度（px，手机宽度；桌面窗口的最小宽度下容器也有 444）时改用 `NARROW_COLUMN_WIDTH`，排成两列 */
+const NARROW_GRID_WIDTH = 400
+const NARROW_COLUMN_WIDTH = 150
 /** 卡片间距（px） */
 export const GAP = 12
 /** 图片卡片下方文件名、路径区域的高度（px） */
@@ -40,7 +43,7 @@ export function hasThumb(kind: string) {
   return kind === 'image' || kind === 'video'
 }
 
-export function columnCount(width: number, minColumn = MIN_COLUMN_WIDTH, gap = GAP) {
+export function columnCount(width: number, minColumn = width < NARROW_GRID_WIDTH ? NARROW_COLUMN_WIDTH : MIN_COLUMN_WIDTH, gap = GAP) {
   return Math.max(1, Math.floor((width + gap) / (minColumn + gap)))
 }
 

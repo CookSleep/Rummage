@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider（AndroidManifest.xml）能换成 content URI 的目录。“用其他应用打开”（插件的 openFile）要打开被索引的任意文件：
+  手机存储由 external-path 覆盖；存储卡挂载在 /storage/<卷 UUID>，没有对应的专用元素，用 root-path 限定在 /storage 下，
+  不包括应用私有目录（/data）。提供者不导出，其他应用只能读到每次打开时单独授权的那一个 URI
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+  <external-path name="my_images" path="." />
+  <cache-path name="my_cache_images" path="." />
+  <root-path name="storage" path="storage" />
+</paths>

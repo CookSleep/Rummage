@@ -1,5 +1,6 @@
 //! 客户端连接与握手：界面进程与命令行打开核心的管道，先核对服务端进程属于当前用户，
 //! 再发出带令牌的 `Hello`，收到 `Welcome` 后由调用方自行收发 `ClientMsg` / `CoreMsg`。整个过程限时 5 秒。
+//! `connect_local`：后台服务在本进程中时（Android）不经管道，用一对内存流连接同一个 `State`，握手与请求照常
 //! `connect_or_start`（界面与命令行共用）：先连接；核心未运行时拉起
 //! `rummage-core --data-dir <目录>`（不显示窗口、不继承调用方的句柄、尝试脱离调用方的作业对象，见 `spawn`），
 //! 本进程拉起的还没退出时不重复拉起，再每 100 毫秒重试、最多等 10 秒。拉起的核心以 `EXIT_ALREADY_RUNNING` 退出时
@@ -18,20 +19,27 @@ use std::io::{self, ErrorKind};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use std::sync::Arc;
+
 use rummage_proto::{
     ApiError, ClientMsg, CoreMsg, Hello, PROTOCOL_VERSION, Reply, Request, Welcome, decode, encode,
 };
-use tokio::io::{BufReader, ReadHalf, WriteHalf};
+use tokio::io::{AsyncRead, AsyncWrite, BufReader, DuplexStream, ReadHalf, WriteHalf};
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
 
-use crate::{HANDSHAKE_TIMEOUT, MAX_HELLO, MAX_LINE, Stream, platform, read_line, write_line};
+use crate::{
+    HANDSHAKE_TIMEOUT, MAX_HELLO, MAX_LINE, State, Stream, platform, read_line, write_line,
+};
 
-pub struct Client {
-    pub reader: BufReader<ReadHalf<Stream>>,
-    pub writer: WriteHalf<Stream>,
+/// 内存流每个方向的缓冲区大小；写满后写入方等待对方读取
+const LOCAL_BUFFER: usize = 64 * 1024;
+
+pub struct Client<S = Stream> {
+    pub reader: BufReader<ReadHalf<S>>,
+    pub writer: WriteHalf<S>,
     pub welcome: Welcome,
-    /// 核心进程的 PID，用于等它退出
+    /// 核心进程的 PID，用于等它退出；本进程中的后台服务为本进程的 PID
     pub server_pid: u32,
 }
 
@@ -56,12 +64,33 @@ pub async fn connect(pipe: &str, token: &str) -> Result<Client, ConnectError> {
         .unwrap_or_else(|_| Err(io::Error::new(ErrorKind::TimedOut, "连接超时。").into()))
 }
 
+/// 连接本进程中的后台服务：一端交给连接处理（与管道上的连接相同），另一端握手
+pub async fn connect_local(state: &Arc<State>) -> Result<Client<DuplexStream>, ConnectError> {
+    let (ours, theirs) = tokio::io::duplex(LOCAL_BUFFER);
+    tokio::spawn(crate::server::handle(theirs, state.clone()));
+    tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        hello(ours, state.token(), std::process::id()),
+    )
+    .await
+    .unwrap_or_else(|_| Err(io::Error::new(ErrorKind::TimedOut, "连接超时。").into()))
+}
+
 async fn handshake(pipe: &str, token: &str) -> Result<Client, ConnectError> {
     let stream = platform::open(pipe).await.map_err(|err| match err.kind() {
         ErrorKind::NotFound => ConnectError::NotRunning,
         _ => ConnectError::Io(err),
     })?;
     let server_pid = platform::verify_server(&stream).map_err(|_| ConnectError::Untrusted)?;
+    hello(stream, token, server_pid).await
+}
+
+/// 发出带令牌的 `Hello` 并等 `Welcome`
+async fn hello<S: AsyncRead + AsyncWrite>(
+    stream: S,
+    token: &str,
+    server_pid: u32,
+) -> Result<Client<S>, ConnectError> {
     let (rd, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(rd);
     let hello = Hello {
@@ -87,8 +116,8 @@ async fn handshake(pipe: &str, token: &str) -> Result<Client, ConnectError> {
 }
 
 /// 发出一个请求并等到它的回复，期间收到的事件丢弃
-pub async fn request(
-    client: &mut Client,
+pub async fn request<S: AsyncRead + AsyncWrite>(
+    client: &mut Client<S>,
     id: u64,
     body: Request,
 ) -> io::Result<Result<Reply, ApiError>> {
@@ -97,7 +126,11 @@ pub async fn request(
 }
 
 /// 只写出请求。出错时请求没有送到核心
-pub async fn send(client: &mut Client, id: u64, body: Request) -> io::Result<()> {
+pub async fn send<S: AsyncRead + AsyncWrite>(
+    client: &mut Client<S>,
+    id: u64,
+    body: Request,
+) -> io::Result<()> {
     write_line(
         &mut client.writer,
         &encode(&ClientMsg::Request { id, body }),
@@ -106,7 +139,10 @@ pub async fn send(client: &mut Client, id: u64, body: Request) -> io::Result<()>
 }
 
 /// 等请求 `id` 的回复，期间收到的事件丢弃。出错时请求已写出，核心可能已经处理
-pub async fn reply(client: &mut Client, id: u64) -> io::Result<Result<Reply, ApiError>> {
+pub async fn reply<S: AsyncRead + AsyncWrite>(
+    client: &mut Client<S>,
+    id: u64,
+) -> io::Result<Result<Reply, ApiError>> {
     let mut buf = Vec::new();
     loop {
         let Some(line) = read_line(&mut client.reader, &mut buf, MAX_LINE).await? else {
@@ -252,6 +288,26 @@ pub async fn connect_or_start(
                 return res;
             }
         }
+    }
+}
+
+/// 不经管道、各平台都能运行
+#[cfg(test)]
+mod local_tests {
+    use rummage_index::DbError;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn connect_local_handshake_and_request() {
+        let state = State::new("test-token".into(), Err(DbError::Sqlite));
+        let mut client = connect_local(&state).await.unwrap();
+        assert_eq!(client.welcome.protocol, PROTOCOL_VERSION);
+        assert_eq!(client.server_pid, std::process::id());
+        assert_eq!(
+            request(&mut client, 1, Request::Ping).await.unwrap(),
+            Ok(Reply::Pong)
+        );
     }
 }
 

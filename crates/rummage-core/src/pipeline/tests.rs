@@ -403,7 +403,7 @@ fn text_and_image_stored() {
     assert_eq!(e.job("main.rs"), None);
     assert_eq!(s.by_kind["image"].done, 1);
     assert_eq!(s.by_kind["document"].done, 2);
-    assert_eq!(s.backend.as_deref(), Some("CPU"));
+    assert_eq!(s.backend.as_deref(), Some(rummage_embed::cpu_name()));
 
     let cfg = SpaceConfig::current(Backend::Cpu);
     assert_eq!(
@@ -412,7 +412,7 @@ fn text_and_image_stored() {
              ORDER BY preprocess"
         ),
         [
-            format!("{} image-v1-t140 {}", cfg.image(140), space::MMPROJ.sha256),
+            format!("{} image-v1-t280 {}", cfg.image(280), space::MMPROJ.sha256),
             format!("{} text-v1 -", cfg.text()),
         ]
     );
@@ -454,7 +454,7 @@ fn text_and_image_stored() {
              FROM segments s JOIN files f ON f.id = s.file_id JOIN vectors v ON v.segment_id = s.id
              WHERE f.name = '狗.jpg'"
         ),
-        [format!("image{{}}-image-v1-t140{}", cfg.image(140))]
+        [format!("image{{}}-image-v1-t280{}", cfg.image(280))]
     );
     assert_eq!(
         e.count(&format!(
@@ -628,12 +628,10 @@ fn gpu_engine(stub: &Arc<Stub>, cpu: &Engine) -> Arc<Engine> {
         backend: stub.clone(),
         gpu: Some(fake_gpu()),
         device: "测试显卡".into(),
-        tier: cpu.tier,
         images: true,
         audio: true,
         video: true,
         text_space: cpu.text_space.clone(),
-        image_space: cpu.image_space.clone(),
         cfg: cpu.cfg.clone(),
         failed: AtomicBool::new(false),
         driver_failed: AtomicBool::new(false),
@@ -646,6 +644,6 @@ impl Env {
     fn set_and_requeue(&self, key: &str, value: ParamValue) -> BTreeMap<String, usize> {
         let p = self.pipeline.as_ref().unwrap();
         lock(&p.shared.params).insert(key.into(), value);
-        p.requeue(&["image"]).unwrap()
+        p.requeue(&crate::pipeline::void_kinds(key)).unwrap()
     }
 }

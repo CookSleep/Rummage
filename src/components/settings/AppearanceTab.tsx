@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Appearance, CoreStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
-import { CLOSE_ACTION_KEY } from '../../lib/platform'
+import { CLOSE_ACTION_KEY, isAndroid } from '../../lib/platform'
 import { readLocal, writeLocal } from '../../lib/storage'
 import CoreStatusNotice from '../CoreStatusNotice'
 import { ERROR_TEXT } from '../onboarding/styles'
@@ -20,7 +20,7 @@ interface Props {
 
 /**
  * “外观”页：界面与等宽字体，以及关闭窗口时留在托盘还是退出；字体许可的入口在“关于”页。
- * 关闭窗口的行为只关乎界面进程，存在本地（`CLOSE_ACTION_KEY`），由关闭处理读取（`installCloseWatch`）
+ * 关闭窗口的行为只关乎界面进程，存在本地（`CLOSE_ACTION_KEY`），由关闭处理读取（`installCloseWatch`）；Android 上没有这一项
  */
 export default function AppearanceTab({ appearance, onChange, offline, coreStatus }: Props) {
   const [error, setError] = useState('')
@@ -60,29 +60,31 @@ export default function AppearanceTab({ appearance, onChange, offline, coreStatu
           </>
         )}
       </section>
-      <section className="space-y-4">
-        <h4 className={SECTION_TITLE}>窗口</h4>
-        <div>
-          <div className="mb-1 flex items-center justify-between gap-3">
-            <span className={ROW_LABEL}>关闭窗口时</span>
-            <div className="min-w-0 max-w-[60%]">
-              <Select
-                label="关闭窗口时"
-                value={closeAction}
-                options={[
-                  { label: '留在托盘', value: 'tray' },
-                  { label: '退出 Rummage', value: 'quit' },
-                ]}
-                onChange={(v) => {
-                  setCloseAction(v)
-                  writeLocal(CLOSE_ACTION_KEY, v)
-                }}
-              />
+      {!isAndroid && (
+        <section className="space-y-4">
+          <h4 className={SECTION_TITLE}>窗口</h4>
+          <div>
+            <div className="mb-1 flex items-center justify-between gap-3">
+              <span className={ROW_LABEL}>关闭窗口时</span>
+              <div className="min-w-0 max-w-[60%]">
+                <Select
+                  label="关闭窗口时"
+                  value={closeAction}
+                  options={[
+                    { label: '留在托盘', value: 'tray' },
+                    { label: '退出 Rummage', value: 'quit' },
+                  ]}
+                  onChange={(v) => {
+                    setCloseAction(v)
+                    writeLocal(CLOSE_ACTION_KEY, v)
+                  }}
+                />
+              </div>
             </div>
+            <div className={ROW_DESC}>留在托盘时，后台服务继续建立索引；退出时，后台服务一并退出。</div>
           </div>
-          <div className={ROW_DESC}>留在托盘时，后台服务继续建立索引；退出时，后台服务一并退出。</div>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   )
 }

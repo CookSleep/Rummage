@@ -1,6 +1,8 @@
 //! 统一参数表：所有可调参数的默认值、允许范围、是否影响索引和界面文案都登记在 `PARAMS` 中，
 //! 设置界面据此生成，代码中只从这里读取，不另写字面量。
-//! 默认值用函数给出，因为有的默认值要到运行时才能确定（如 `index_threads` 按 CPU 核数决定）。
+//! 默认值用函数给出，因为有的默认值要到运行时才能确定（如 `index_threads` 按 CPU 核数决定），或按平台不同
+//! （函数中用 `cfg!(target_os = "android")` 区分）。只在某个平台上有意义的参数用 `platform` 标出，设置页、命令行与 MCP
+//! 的设置列表在其他平台上不显示它（`shown`）。
 //! 参数定义表见 `table`。代码中按类型用 `int`、`float`、`flag` 读取参数值。
 //! 参数定义不经 IPC 传输，各进程直接读本地的 `PARAMS`（握手已保证两端版本一致）；`ParamDef` 只序列化给前端。
 
@@ -74,6 +76,15 @@ pub struct ParamDef {
     pub help: &'static str,
     /// 默认值的依据
     pub basis: &'static str,
+    /// 只在此平台上显示（`android`、`windows`，同 `std::env::consts::OS`）；为空时各平台都显示
+    pub platform: &'static str,
+}
+
+impl ParamDef {
+    /// 当前平台是否显示此参数
+    pub fn shown(&self) -> bool {
+        self.platform.is_empty() || self.platform == std::env::consts::OS
+    }
 }
 
 fn call_default<S: Serializer>(f: &fn() -> ParamValue, s: S) -> Result<S::Ok, S::Error> {

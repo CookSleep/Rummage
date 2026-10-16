@@ -1,7 +1,7 @@
 // 版本信息：解析、合并与缓存 GitHub Releases API 的版本列表
 
 /**
- * 仓库只在这里和 src-tauri/src/update.rs 的 `RELEASE_REPO`（读取版本列表的地址）定义，两处保持一致；
+ * 仓库只在这里和 src-tauri/src/releases.rs 的 `RELEASE_REPO`（读取版本列表的地址）定义，两处保持一致；
  * tauri.conf.json 中 updater 插件的更新地址也要一起改
  */
 const RELEASE_REPO = 'CookSleep/Rummage'
@@ -9,7 +9,7 @@ export const REPO_URL = `https://github.com/${RELEASE_REPO}`
 export const RELEASES_PAGE_URL = `${REPO_URL}/releases`
 export const ISSUES_URL = `${REPO_URL}/issues`
 export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`
-// 与 src-tauri/src/update.rs 的 `PER_PAGE` 保持一致
+// 与 src-tauri/src/releases.rs 的 `PER_PAGE` 保持一致
 export const RELEASES_PER_PAGE = 10
 // GitHub API 未登录每小时限 60 次，一小时内复用本地缓存
 export const RELEASE_CACHE_TTL_MS = 60 * 60 * 1000

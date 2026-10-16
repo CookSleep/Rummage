@@ -2,13 +2,14 @@ import { useState, type ReactNode } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { DeviceResult, DeviceStatus, SelftestStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
+import { isAndroid } from '../../lib/platform'
 import { deviceName, SELFTEST_TEXT, switchedDevice, switchedText } from '../../lib/device'
 import { AudioIcon, BanIcon, CheckCircleIcon, ClockIcon, CpuIcon, DocumentIcon, GpuIcon, ImageIcon, MinusCircleIcon, SpinnerIcon, VideoIcon, XCircleIcon } from '../icons'
 import { renderMessage } from '../ConfirmDialog'
 import Select from '../Select'
 import Tip, { HoverTip } from '../Tip'
 import { ROW_DESC, ROW_LABEL } from '../settings/styles'
-import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, SMALL_BUTTON } from './styles'
+import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
 
 function ms(v: number) {
   return v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`
@@ -27,7 +28,7 @@ const STATUS: Record<DeviceStatus, { label: string; icon: ReactNode }> = {
 function Timing({ label, icon, value }: { label: string; icon: ReactNode; value: number | null }) {
   if (value === null) return <span />
   return (
-    <Tip label={label} className="gap-1 text-xs text-gray-500 tabular-nums dark:text-gray-400">
+    <Tip label={label} className="gap-1 whitespace-nowrap text-xs text-gray-500 tabular-nums dark:text-gray-400">
       {icon}
       {ms(value)}
     </Tip>
@@ -40,19 +41,22 @@ function Timing({ label, icon, value }: { label: string; icon: ReactNode; value:
  */
 export function DeviceList({ devices }: { devices: DeviceResult[] }) {
   return (
-    <div className={`${CARD} grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] gap-x-3`}>
+    <div className={`${CARD} grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] gap-x-3 max-sm:grid-cols-[auto_minmax(0,1fr)_auto]`}>
       {devices.map((d, i) => (
         <div key={i} className="col-span-full grid grid-cols-subgrid items-center px-4 py-2.5">
           <span className={ICON_TILE}>{d.gpu ? <GpuIcon className="h-4 w-4" /> : <CpuIcon className="h-4 w-4" />}</span>
-          <span className="truncate text-sm text-gray-800 dark:text-gray-100">
+          <span className="truncate text-sm text-gray-800 dark:text-gray-100 max-sm:whitespace-normal">
             {deviceName(d, devices)}
             <HoverTip label={deviceName(d, devices)} wrap />
           </span>
-          <Timing label="处理一段文本的用时" icon={<DocumentIcon className="h-3.5 w-3.5" />} value={d.textMs} />
-          <Timing label="处理一张图片的用时" icon={<ImageIcon className="h-3.5 w-3.5" />} value={d.imageMs} />
-          <Timing label="处理一段音频的用时" icon={<AudioIcon className="h-3.5 w-3.5" />} value={d.audioMs} />
-          <Timing label="处理一个视频片段的用时" icon={<VideoIcon className="h-3.5 w-3.5" />} value={d.videoMs} />
-          <Tip label={STATUS[d.status].label} className="w-full justify-end">{STATUS[d.status].icon}</Tip>
+          {/* 手机宽度下耗时放到名称下面一行 */}
+          <span className="contents max-sm:col-[2/-1] max-sm:row-start-2 max-sm:mt-1 max-sm:flex max-sm:flex-wrap max-sm:gap-x-3">
+            <Timing label="处理一段文本的用时" icon={<DocumentIcon className="h-3.5 w-3.5" />} value={d.textMs} />
+            <Timing label="处理一张图片的用时" icon={<ImageIcon className="h-3.5 w-3.5" />} value={d.imageMs} />
+            <Timing label="处理一段音频的用时" icon={<AudioIcon className="h-3.5 w-3.5" />} value={d.audioMs} />
+            <Timing label="处理一个视频片段的用时" icon={<VideoIcon className="h-3.5 w-3.5" />} value={d.videoMs} />
+          </span>
+          <Tip label={STATUS[d.status].label} className="w-full justify-end max-sm:col-start-3 max-sm:row-start-1">{STATUS[d.status].icon}</Tip>
           {d.reason && <p data-selectable-text className="col-[2/-1] mt-1 whitespace-pre-line text-xs text-gray-500 dark:text-gray-400">{d.reason}</p>}
         </div>
       ))}
@@ -144,7 +148,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
             {selected?.gpu && !cpuOnly ? <GpuIcon className="h-4 w-4" /> : <CpuIcon className="h-4 w-4" />}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm text-gray-800 dark:text-gray-100">
+            <span className={`block text-sm text-gray-800 dark:text-gray-100 ${ROW_LONG_TEXT}`}>
               {st.running
                 ? '正在检测'
                 : cpuOnly
@@ -180,7 +184,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
             )}
           </span>
           {!st.running && (
-            <span className="flex flex-shrink-0 gap-1.5">
+            <span className={`gap-1.5 ${ROW_ACTIONS}`}>
               {offerCpu && (
                 <button type="button" className={SMALL_BUTTON} onClick={() => call('set_preferred_device')}>
                   只用 CPU
@@ -194,7 +198,8 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
         </div>
       </div>
       {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
-      {!st.running && tested && (
+      {/* Android 上只用 CPU，没有可选的设备 */}
+      {!st.running && tested && !isAndroid && (
         <div className="mt-4">
           <DevicePicker st={st} />
         </div>

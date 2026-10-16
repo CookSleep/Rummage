@@ -5,6 +5,7 @@ import { errorMessage } from '../../lib/errors'
 import { setAutoCheck, useReleaseUpdates } from '../../hooks/useReleaseUpdates'
 import { isTauri } from '../../lib/platform'
 import { dismissAllTooltips } from '../../lib/tooltipDismiss'
+import { useBackLayer } from '../../hooks/useBackLayer'
 import { useCoreEvent } from '../../hooks/useCoreEvent'
 import { renderMessage } from '../ConfirmDialog'
 import CoreStatusNotice from '../CoreStatusNotice'
@@ -99,6 +100,9 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
     if (ev.type === 'ParamsChanged') setValues(ev.values)
   })
 
+  // Android 返回键：设置里打开的确认框、下拉菜单等后登记，先关闭它们
+  useBackLayer(onClose)
+
   // 确认框、字体许可、更新日志在捕获阶段处理 Esc 并阻止传播，这里只在它们没有打开时收到
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -189,13 +193,13 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center modal-pad">
       <div className="absolute inset-0 animate-overlay-in bg-black/30 backdrop-blur-sm" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="设置"
-        className="relative z-10 flex h-[85vh] w-full max-w-3xl animate-modal-in flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 sm:h-[600px]"
+        className="relative z-10 flex h-[85vh] max-h-full w-full max-w-3xl animate-modal-in flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 sm:h-[600px]"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-gray-100 p-5 dark:border-white/[0.08]">
           <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-100">

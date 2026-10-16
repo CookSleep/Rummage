@@ -75,14 +75,15 @@ fn spaces(task: &Task) -> (Option<Space>, Space) {
     let opts = video_opts(&task.params);
     let w = opts.windows;
     let cfg = &task.engine.cfg;
+    let t = opts.frame_tokens;
     let v_space = media_space_row(
         cfg,
-        &space::video_preprocess(w.window_s, w.overlap_s, w.frames, false),
+        &space::video_preprocess(w.window_s, w.overlap_s, w.frames, t, false),
     );
     let av_space = opts.audio_tokens.map(|m| {
         media_space_row(
             cfg,
-            &space::video_av_preprocess(w.window_s, w.overlap_s, w.frames, m),
+            &space::video_av_preprocess(w.window_s, w.overlap_s, w.frames, t, m),
         )
     });
     (av_space, v_space)
@@ -116,7 +117,8 @@ pub(in crate::pipeline) fn video_items(
     if info.duration_ms.is_some_and(|d| d > max_ms) {
         return Err(too_long(info));
     }
-    let size = video::frame_size(info.width, info.height).map_err(MediaFail::Size)?;
+    let size =
+        video::frame_size(info.width, info.height, opts.frame_tokens).map_err(MediaFail::Size)?;
     let grid = w.grid();
     // 时长未知时按上限估算额度与时限
     let dur = info.duration_ms.unwrap_or(max_ms);

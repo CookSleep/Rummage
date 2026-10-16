@@ -4,7 +4,7 @@ import type { ProxyMode, ProxySetting } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { EyeIcon, EyeOffIcon } from '../icons'
 import Select from '../Select'
-import { ERROR_TEXT, INPUT, segmentClass } from './styles'
+import { ERROR_TEXT, INPUT, segmentClass, SEGMENTS } from './styles'
 
 export const PROXY_LABEL: Record<ProxyMode, string> = {
   system: '跟随系统',
@@ -67,7 +67,7 @@ export default function ProxyForm({ saved, onSaved, label }: { saved: ProxySetti
           </div>
         </div>
       ) : (
-        <div className="inline-flex rounded-xl bg-black/[0.04] p-1 dark:bg-white/[0.06]">
+        <div className={SEGMENTS}>
           {MODES.map((m) => (
             <button key={m.value} type="button" className={segmentClass(mode === m.value)} onClick={() => pick(m.value)}>
               {m.label}

@@ -1,6 +1,9 @@
 //! 设置改了以后只重建受影响的文件：
 //! - 由参数表算出各种类应有的参数版本（`wanted`），交给 `Db::requeue_stale` 把版本不符的已完成作业放回、标为重建作业。
-//!   启动流水线时与核心修改影响索引的参数、开关文件类型后各做一次（`Pipeline::requeue`）。领取时的档位核对（`claim`）照旧。
+//!   启动流水线时与核心修改影响索引的参数、开关文件类型后各做一次（`Pipeline::requeue`）。
+//!   图片的整图与切片、视频帧的档位各自写在自己的版本中：只改 `long_image_tokens` 时只放回长图，只改 `image_tokens`
+//!   时放回全部图片，只改 `video_frame_tokens` 时只放回视频；后两者也决定文档内嵌媒体的标记（`docmedia::tokens`），
+//!   可能内嵌媒体的文档只重算内嵌媒体。
 //! - 重建与建索引同一套调度：排在新增与内容变化的文件之后（`rummage_index::jobs`），受同样的暂停条件约束。
 //! - 进度：`total` 为这一批的文件数，新的修改加入的文件计入同一批，剩余为 0 时清零（`Shared::rebuild_status`）。
 use std::collections::BTreeMap;
@@ -13,9 +16,18 @@ use rummage_proto::{ParamValue, RebuildStatus, params};
 
 use super::{Pipeline, Shared, docmedia, float, int, lock, video_opts};
 
+/// 改了参数 `key` 后，正在处理的作业中按旧参数计算、要作废的种类：参数影响的种类；文档内嵌媒体的标记
+/// （`docmedia::tokens`）用整图档位与音频、视频的设置，改这些时还有文档。长图切片的设置不影响文档
+pub(crate) fn void_kinds(key: &str) -> Vec<&'static str> {
+    let mut kinds = params::def(key).map_or(&[][..], |d| d.index_kinds).to_vec();
+    if key == "image_tokens" || kinds.iter().any(|k| ["audio", "video"].contains(k)) {
+        kinds.push("document");
+    }
+    kinds
+}
+
 /// 按参数表各种类的向量应有的参数版本；`kinds` 为空，由调用方按开启的种类填写
 pub(super) fn wanted(values: &BTreeMap<String, ParamValue>) -> Wanted {
-    let tier = int(values, "image_tokens") as u32;
     let long_ratio = float(values, "long_image_ratio");
     let chunk = ChunkOpts::from_params(values);
     let seg_s = int(values, "audio_segment_s").max(1) as u32;
@@ -25,18 +37,24 @@ pub(super) fn wanted(values: &BTreeMap<String, ParamValue>) -> Wanted {
     Wanted {
         kinds: Vec::new(),
         text: space::text_version(chunk.target, chunk.overlap_pct, chunk.min),
-        image: space::image_preprocess(tier),
+        image: space::image_preprocess(int(values, "image_tokens") as u32),
         slice: space::image_slice_preprocess(
-            tier,
+            int(values, "long_image_tokens") as u32,
             long_ratio,
             int(values, "long_image_max_slices").max(0) as u32,
         ),
         long_ratio,
         audio: space::audio_preprocess(seg_s, overlap_s, int(values, "audio_silence_db")),
-        video: space::video_preprocess(win.window_s, win.overlap_s, win.frames, false),
-        video_av: w
-            .audio_tokens
-            .map(|m| space::video_av_preprocess(win.window_s, win.overlap_s, win.frames, m)),
+        video: space::video_preprocess(
+            win.window_s,
+            win.overlap_s,
+            win.frames,
+            w.frame_tokens,
+            false,
+        ),
+        video_av: w.audio_tokens.map(|m| {
+            space::video_av_preprocess(win.window_s, win.overlap_s, win.frames, w.frame_tokens, m)
+        }),
         // 由调用方按开启的模态填写（`docmedia::tokens`）
         doc_media: "[]".to_string(),
     }
@@ -95,19 +113,11 @@ impl Shared {
 impl Pipeline {
     /// 影响索引的参数修改、开关文件类型后调用：已完成、但不符合新设置的文件放回重建（旧向量保留到新结果写入）；
     /// `active` 种类中正在处理的作业按旧参数计算，记入 `stale`，结果写入时放回 `pending`。都在数据库锁内，与写库线程的
-    /// 提交互斥：提交在前的已是 `stored`，会按版本判断；在后的会在提交时被改为放回。返回各种类放回的已完成作业数
+    /// 提交互斥：提交在前的已是 `stored`，会按版本判断；在后的会在提交时被改为放回。返回各种类放回的已完成作业数。
+    /// 改参数时 `active` 由 `void_kinds` 给出
     pub fn requeue(&self, active: &[&str]) -> Result<BTreeMap<String, usize>, DbError> {
-        // 图片、音频、视频的设置也决定文档的内嵌媒体：正在处理的文档同样作废、按新设置重算
-        let mut active = active.to_vec();
-        if active
-            .iter()
-            .any(|k| ["image", "audio", "video"].contains(k))
-            && !active.contains(&"document")
-        {
-            active.push("document");
-        }
         let db = lock(&self.shared.db);
-        let ids = db.active_jobs(&active)?;
+        let ids = db.active_jobs(active)?;
         let n = self.shared.requeue_stale(&db)?;
         let mut stale = lock(&self.shared.stale);
         for id in ids {

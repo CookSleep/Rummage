@@ -177,12 +177,12 @@ mod tests {
             Some(ParamValue::Int(280))
         );
         assert_eq!(
-            value_text(def("image_tokens"), ParamValue::Int(140), false),
-            "标准（140 Token）"
+            value_text(def("image_tokens"), ParamValue::Int(280), false),
+            "标准（280 Token）"
         );
         assert_eq!(
-            value_text(def("image_tokens"), ParamValue::Int(140), true),
-            "标准 (140 Token)"
+            value_text(def("image_tokens"), ParamValue::Int(280), true),
+            "标准 (280 Token)"
         );
         assert_eq!(
             value_text(def("video_preset"), ParamValue::Int(1), false),

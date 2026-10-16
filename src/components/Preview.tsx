@@ -110,28 +110,46 @@ function previewSegments(hit: SearchHit) {
 
 /**
  * 图片大图：先显示已缓存的缩略图；停留后再加载原图（WebView 不支持的格式由协议退回缩略图），
- * 原图加载完才替换缩略图，失败时保留缩略图
+ * 原图加载完才替换缩略图，失败时保留缩略图。
+ * 知道原图宽高时，两者放在按原图比例算出的同一尺寸里：缩略图可能截过（很长的图只留上部），贴顶显示，替换时不跳动
  */
 function ImagePreview({ hit }: { hit: SearchHit }) {
   const wantOriginal = useSettled()
   const [original, setOriginal] = useState<'loading' | 'loaded' | 'failed'>('loading')
   const [thumbFailed, setThumbFailed] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [boxWidth, setBoxWidth] = useState(0)
+
+  useLayoutEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const measure = () => setBoxWidth(el.clientWidth)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   if (thumbFailed && original === 'failed') return <Note>无法显示这张图片，可以用系统程序打开</Note>
-  const cls = 'mx-auto max-h-[45vh] rounded-xl object-contain'
+  const w = hit.width ?? 0
+  const h = hit.height ?? 0
+  const scale = w && h && boxWidth ? Math.min(1, boxWidth / w, (window.innerHeight * 0.45) / h) : 0
+  const style = scale ? { width: w * scale, height: h * scale } : undefined
+  const cls = `mx-auto max-h-[45vh] rounded-xl object-contain ${style ? 'object-top' : ''}`
   return (
-    <>
-      {original !== 'loaded' && !thumbFailed && <img src={thumbUrl(hit)} alt={hit.name} onError={() => setThumbFailed(true)} className={cls} />}
+    <div ref={boxRef}>
+      {original !== 'loaded' && !thumbFailed && <img src={thumbUrl(hit)} alt={hit.name} onError={() => setThumbFailed(true)} style={style} className={cls} />}
       {wantOriginal && original !== 'failed' && (
         <img
           src={imageUrl(hit.fileId)}
           alt={hit.name}
           onLoad={() => setOriginal('loaded')}
           onError={() => setOriginal('failed')}
+          style={style}
           className={original === 'loaded' ? cls : 'hidden'}
         />
       )}
-    </>
+    </div>
   )
 }
 

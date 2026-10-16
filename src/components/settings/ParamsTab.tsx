@@ -3,9 +3,11 @@ import type { ParamDef, ParamGroup, ParamValue, ParamValues } from '../../types'
 import { useIndexStatus } from '../../hooks/useIndexStatus'
 import { useSaveParam } from '../../hooks/useSaveParam'
 import { rebuildLabel } from '../../lib/params'
+import { isAndroid } from '../../lib/platform'
 import { rebuildNotice } from '../../lib/rebuild'
 import ConfirmDialog from '../ConfirmDialog'
 import { ResetIcon } from '../icons'
+import BackgroundRunRow from './BackgroundRunRow'
 import DiagnosticsSection from './DiagnosticsSection'
 import HistorySection from './HistorySection'
 import ParamField from './ParamField'
@@ -19,7 +21,7 @@ const SELFTEST_KEY = 'selftest_min_cosine'
 const GROUP_DESC: Record<ParamGroup, string> = {
   Search: '修改后立即生效。',
   Index: '修改后重建受影响的索引，重建期间旧索引仍可搜索。',
-  Resource: '控制建立索引时占用的电脑资源，不影响已建立的索引。',
+  Resource: `控制建立索引时占用的${isAndroid ? '手机' : '电脑'}资源，不影响已建立的索引。`,
   Advanced: '一般不需要修改。',
 }
 
@@ -44,7 +46,8 @@ interface Props {
 /**
  * 由参数表生成的参数页：一页一组，按参数表中的小标题（`section`）分区，小标题为空的不在这里显示。
  * 影响索引的参数提交前先确认；单项与“全部恢复默认”走同一套确认。
- * 文件类型开关在“文件夹”页；“搜索”页下方是搜索历史，“高级”页下方是诊断，各自的参数在那里显示
+ * 文件类型开关在“文件夹”页；“搜索”页下方是搜索历史，“高级”页下方是诊断，各自的参数在那里显示；
+ * Android 的“资源”页顶部是“后台运行”（电池优化白名单）
  */
 export default function ParamsTab({ group, defs, values, setParam, onDevice }: Props) {
   const { errors, save } = useSaveParam(setParam)
@@ -57,7 +60,8 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice }: P
   const indexStatus = useIndexStatus(true)
   const rebuild = defs.some((d) => d.group === group && d.affectsIndex) ? indexStatus?.rebuild : null
   const custom = values.video_preset === 0
-  const list = defs.filter((d) => d.group === group && d.section && (custom || !VIDEO_CUSTOM_KEYS.includes(d.key)))
+  // 只在某个平台显示的参数（`platform`）在其他平台上不显示
+  const list = defs.filter((d) => d.group === group && d.section && (!d.platform || d.platform === (isAndroid ? 'android' : 'windows')) && (custom || !VIDEO_CUSTOM_KEYS.includes(d.key)))
   // 参数表保证同一小标题的参数相邻
   const sections: { title: string; defs: ParamDef[] }[] = []
   for (const d of list) {
@@ -102,6 +106,8 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice }: P
         </div>
         {rebuild && <div className={NOTICE_BOX}>{rebuildNotice(rebuild)}</div>}
       </div>
+
+      {group === 'Resource' && isAndroid && <BackgroundRunRow />}
 
       {sections.map((sec) => (
         <section key={sec.title} className="space-y-4">

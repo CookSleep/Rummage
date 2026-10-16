@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { ParamDef, ParamValue, ParamValues } from '../../types'
 import { errorMessage } from '../../lib/errors'
+import { isAndroid } from '../../lib/platform'
 import { useSaveParam } from '../../hooks/useSaveParam'
 import { renderMessage } from '../ConfirmDialog'
 import { ResetIcon } from '../icons'
@@ -22,7 +23,7 @@ interface Props {
 
 /**
  * “高级”页底部的诊断：写入日志文件、打开日志目录、导出诊断包。
- * 诊断包的保存位置由 Rust 侧的对话框选择，只在本地生成
+ * 诊断包的保存位置由 Rust 侧的对话框选择，只在本地生成。Android 上日志在应用私有目录中，其他应用打不开，不显示“日志目录”
  */
 export default function DiagnosticsSection({ defs, values, setParam }: Props) {
   const param = useSaveParam(setParam)
@@ -66,15 +67,17 @@ export default function DiagnosticsSection({ defs, values, setParam }: Props) {
           onChange={(v) => void param.save(LOG_KEY, v)}
         />
       )}
-      <div>
-        <div className="mb-1 flex items-center justify-between gap-3">
-          <span className={ROW_LABEL}>日志目录</span>
-          <button type="button" className={SMALL_BUTTON} onClick={openLogs}>
-            打开
-          </button>
+      {!isAndroid && (
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <span className={ROW_LABEL}>日志目录</span>
+            <button type="button" className={SMALL_BUTTON} onClick={openLogs}>
+              打开
+            </button>
+          </div>
+          <div className={ROW_DESC}>日志保存在数据目录中的“logs”文件夹，反馈问题时可以附上。</div>
         </div>
-        <div className={ROW_DESC}>日志保存在数据目录中的“logs”文件夹，反馈问题时可以附上。</div>
-      </div>
+      )}
       <div>
         <div className="mb-1 flex items-center justify-between gap-3">
           <span className={ROW_LABEL}>诊断包中保留文件路径</span>

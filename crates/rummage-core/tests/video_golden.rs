@@ -63,13 +63,15 @@ fn ffmpeg_frames_near_golden_vectors() {
     .unwrap();
 
     // 黄金样本：窗口从 1 秒起 6 秒、6 帧，时间戳为 00:01 … 00:07（assets/golden/video/vid01/window.json）
+    // 黄金样本的每帧档位
+    const TOKENS: u32 = 70;
     let opts = WindowOpts {
         window_s: 6,
         overlap_s: 0,
         frames: 6,
     };
     let info = video::probe(&ff, &src, Duration::from_secs(30)).unwrap();
-    let size = video::frame_size(info.width, info.height).unwrap();
+    let size = video::frame_size(info.width, info.height, TOKENS).unwrap();
     let t = Instant::now();
     let frames: Vec<Arc<rummage_media::Rgb>> = video::extract(
         &ff,
@@ -112,7 +114,7 @@ fn ffmpeg_frames_near_golden_vectors() {
     let golden_frames: Vec<Arc<rummage_media::Rgb>> = (0..6)
         .map(|i| {
             let path = dir.join(format!("frame{i}.jpg"));
-            Arc::new(rummage_media::prepare(&path, video::FRAME_TOKENS, 100_000_000).unwrap())
+            Arc::new(rummage_media::prepare(&path, TOKENS, 100_000_000).unwrap())
         })
         .collect();
     // 黄金 WAV 按 x / 32768 读出，与 ffmpeg 解码 16 位 PCM 逐位相同（rummage_media::audio 的测试），首尾相接即窗口音频
@@ -147,7 +149,7 @@ fn ffmpeg_frames_near_golden_vectors() {
         let embed = |parts| {
             let input = Input::Video {
                 parts,
-                preprocess: rummage_embed::space::video_preprocess(6, 0, 6, with_audio),
+                preprocess: rummage_embed::space::video_preprocess(6, 0, 6, TOKENS, with_audio),
                 max_tokens: 1024,
             };
             let t = Instant::now();

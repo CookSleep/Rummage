@@ -304,3 +304,64 @@ fn similar_uses_stored_vector() {
     // 不排除时自己排第一
     assert_eq!(run(&Filter::default())[0], "src.jpg");
 }
+
+/// 长图切片与整图档位不同：以切片找相似改用整图向量，能找到普通图片；档位相同时仍用切片本身
+#[test]
+fn similar_from_slice_uses_whole_image() {
+    let f = Fixture::new();
+    let a = f.root(r"D:\甲");
+    let whole = Space {
+        preprocess: "image-v1-t280".into(),
+        ..space("i280", true)
+    };
+    let slice = space("i140", true);
+    let long = f.file(a, "long.png", "image", 0);
+    f.segment(long, "image", &along(1.0), &whole);
+    let seg = f.segment(long, "image", &unit(5), &slice);
+    let region = |id: i64| {
+        f.db.lock()
+            .unwrap()
+            .conn
+            .execute(
+                r#"UPDATE segments SET locator_json = '{"region":{"x":0,"y":0,"width":10,"height":10}}' WHERE id = ?1"#,
+                [id],
+            )
+            .unwrap();
+    };
+    region(seg);
+    let other = f.file(a, "other.png", "image", 0);
+    f.segment(other, "image", &unit(5), &slice);
+    let photo = f.file(a, "photo.jpg", "image", 0);
+    f.segment(photo, "image", &along(0.9), &whole);
+    let index = f.index();
+
+    let (v, s, m) = stored_vector(&f.db.lock().unwrap(), long, Some(seg))
+        .unwrap()
+        .unwrap();
+    assert_eq!((s.id.as_str(), m.as_str()), ("i280", "image"));
+    let filter = Filter {
+        exclude_file: Some(long),
+        ..Filter::default()
+    };
+    let query = Query {
+        vector: Some((&v, &s)),
+        coarse: &v,
+        kind: QueryKind::Similar,
+        modality: Some(&m),
+        text: None,
+        filter: &filter,
+        params: PARAMS,
+    };
+    assert_eq!(file_names(&f.search(&index, &query)), ["photo.jpg"]);
+
+    // 整图与切片同一档位
+    let same = f.file(a, "same.png", "image", 0);
+    f.segment(same, "image", &along(1.0), &slice);
+    let seg = f.segment(same, "image", &unit(5), &slice);
+    region(seg);
+    let (v, s, _) = stored_vector(&f.db.lock().unwrap(), same, Some(seg))
+        .unwrap()
+        .unwrap();
+    assert_eq!(s.id, "i140");
+    assert!((v[5] - 1.0).abs() < 1e-3);
+}

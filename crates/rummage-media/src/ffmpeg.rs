@@ -2,9 +2,9 @@
 //!
 //! - ffmpeg / ffprobe 是 LGPL 构建的独立可执行文件，以子进程调用、经管道读出结果，不链接其库。
 //!   子进程不弹控制台窗口，超过时限就结束它（`platform::run`）。路径前加 `file:`，文件名不会被当作其他协议。
-//! - 只有 Windows 用 ffmpeg；其他平台（Android 以后用 MediaCodec）目前返回 `Unsupported`。
+//! - 只有 Windows 用 ffmpeg，其他平台返回 `Unsupported`；Android 的音视频不经过这里，改用系统解码器（`android.rs`）。
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "android")))]
 #[path = "ffmpeg/other.rs"]
 mod platform;
 #[cfg(windows)]
@@ -13,6 +13,7 @@ mod platform;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "android"))]
 use std::time::Duration;
 
 use serde_json::Value;
@@ -43,6 +44,7 @@ pub enum MediaError {
     Unsupported,
 }
 
+#[cfg(not(target_os = "android"))]
 pub(crate) fn tool(dir: &Path, name: &str) -> Result<PathBuf, MediaError> {
     let exe = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     if !exe.is_file() {
@@ -62,6 +64,15 @@ pub fn subfile(path: &Path, start: u64, end: u64) -> PathBuf {
     PathBuf::from(s)
 }
 
+/// `subfile` 给出的地址拆回 `(文件, 起点, 终点)`；普通路径返回 `None`
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn parse_subfile(path: &Path) -> Option<(PathBuf, u64, u64)> {
+    let s = path.to_str()?.strip_prefix(SUBFILE)?;
+    let (range, file) = s.split_once(",,:file:")?;
+    let (start, end) = range.strip_prefix("start,")?.split_once(",end,")?;
+    Some((PathBuf::from(file), start.parse().ok()?, end.parse().ok()?))
+}
+
 /// `file:` 加路径，见模块说明；`subfile` 给出的地址原样使用
 pub(crate) fn input(path: &Path) -> OsString {
     if path.as_os_str().to_string_lossy().starts_with(SUBFILE) {
@@ -72,6 +83,7 @@ pub(crate) fn input(path: &Path) -> OsString {
     s
 }
 
+#[cfg(not(target_os = "android"))]
 /// 子进程的结果：退出是否成功、stderr 的末尾、是否因超时被结束
 pub(crate) struct Run {
     pub ok: bool,
@@ -79,6 +91,7 @@ pub(crate) struct Run {
     pub timed_out: bool,
 }
 
+#[cfg(not(target_os = "android"))]
 /// 运行 `exe`，stdout 逐块交给 `sink`；`sink` 返回否时结束子进程、不再读取
 pub(crate) fn run(
     exe: &Path,
@@ -89,6 +102,7 @@ pub(crate) fn run(
     platform::run(exe, args, timeout, sink)
 }
 
+#[cfg(not(target_os = "android"))]
 /// stderr 的最后一行，写日志用
 fn last_line(stderr: &str) -> String {
     stderr
@@ -100,6 +114,7 @@ fn last_line(stderr: &str) -> String {
         .to_string()
 }
 
+#[cfg(not(target_os = "android"))]
 pub(crate) fn check(
     run: Run,
     timeout: Duration,
@@ -123,6 +138,7 @@ pub(crate) fn check(
     Ok(())
 }
 
+#[cfg(not(target_os = "android"))]
 /// 用 `ffmpeg_dir` 中的 ffprobe 读取 `-show_format -show_streams` 的 JSON，超过 `timeout` 就结束它；`what` 用于错误提示
 pub(crate) fn probe_json(
     ffmpeg_dir: &Path,
@@ -200,6 +216,11 @@ pub(crate) mod tests {
             input(Path::new(r"D:\x.mp4")),
             OsString::from(r"file:D:\x.mp4")
         );
+        assert_eq!(
+            parse_subfile(&p),
+            Some((PathBuf::from(r"D:\资料\a,b.pptx"), 10, 20))
+        );
+        assert_eq!(parse_subfile(Path::new(r"D:\x.mp4")), None);
     }
 
     /// 开发缓存中的 ffmpeg（`scripts/fetch-ffmpeg.ps1`）；没有时跳过并提示

@@ -8,13 +8,19 @@
 //! 状态以 `core-status` 推给前端。界面退出时不结束核心，核心要常驻；只有更改数据目录、从“索引数据库无法打开”退出时
 //! 由 `stop` 请它退出，此后不再重启；托盘的“退出”、设置为关闭窗口时退出的关窗由 `quit` 连同核心一起结束，
 //! 核心不按时退出就强制结束；安装更新前同样结束核心（`shutdown`），安装程序没能启动时由 `resume` 重新拉起。
-//! 连上后和参数变化时把日志开关（`write_log_file`）交给 `diagnostics`；连上、断开和索引进度变化时更新托盘
-use std::collections::{HashMap, VecDeque};
+//! 连上后和参数变化时把日志开关（`write_log_file`）交给 `diagnostics`；连上、断开和索引进度变化时更新托盘。
+//! Android 上没有核心进程：后台服务在本进程中（`android::engine`），守护只负责连接，断开后间隔 1 秒重新连接同一个服务，
+//! 不计失败次数
+use std::collections::HashMap;
+#[cfg(not(target_os = "android"))]
+use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(target_os = "android"))]
+use std::time::Instant;
 
 use rummage_core::client::Client;
 use rummage_core::{MAX_LINE, Stream, read_line, write_line};
@@ -24,7 +30,9 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::io::{BufReader, ReadHalf};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{diagnostics, platform, tray};
+#[cfg(desktop)]
+use crate::tray;
+use crate::{diagnostics, platform};
 
 /// 对应前端 `src/types.ts` 的 `CoreStatus`
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -167,6 +175,7 @@ pub async fn quit<R: Runtime>(app: &AppHandle<R>) {
     {
         log::warn!("退出时无法关闭主窗口：{err}");
     }
+    #[cfg(desktop)]
     tray::hide(app);
     shutdown(app).await;
     app.exit(0);
@@ -199,6 +208,7 @@ pub async fn shutdown<R: Runtime>(app: &AppHandle<R>) {
 
 /// `shutdown` 之后界面不退出时（安装程序没能启动）重新拉起核心。
 /// 守护可能还没发现核心已退出，等它结束后再进入；3 秒后仍在运行时它会自行重连
+#[cfg(desktop)]
 pub async fn resume<R: Runtime>(app: &AppHandle<R>) {
     let core = app.state::<Core>();
     core.stopping.store(false, Ordering::Relaxed);
@@ -238,6 +248,7 @@ async fn read_loop<R: Runtime>(
             Ok(CoreMsg::Event { body }) => {
                 match &body {
                     Event::ParamsChanged { values } => diagnostics::apply_params(values),
+                    #[cfg(desktop)]
                     Event::IndexProgress(status) => tray::update(Some(status)),
                     _ => {}
                 }
@@ -277,6 +288,7 @@ async fn session<R: Runtime>(app: &AppHandle<R>, client: Client) {
             if let Ok(Reply::Params { values }) = request(app, Request::GetParams).await {
                 diagnostics::apply_params(&values);
             }
+            #[cfg(desktop)]
             tray::refresh(app).await;
             let _ = reader_task.await;
         }
@@ -288,6 +300,7 @@ async fn session<R: Runtime>(app: &AppHandle<R>, client: Client) {
     // 丢弃连接后，等待中的请求收到 unavailable
     *core.link.lock().expect(LOCK) = None;
     writer_task.abort();
+    #[cfg(desktop)]
     tray::update(None);
 }
 
@@ -314,7 +327,44 @@ pub fn supervise<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
+/// 守护循环（Android，见模块说明）；后台服务无法启动时返回是，界面退出（`stop`）时返回否
+#[cfg(target_os = "android")]
+async fn run<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let Some(dir) = app
+        .state::<crate::data::DataDir>()
+        .dir()
+        .ok()
+        .map(PathBuf::from)
+    else {
+        log::error!("数据目录不可用，无法启动后台服务。");
+        return true;
+    };
+    let state = match crate::android::engine(&dir).await {
+        Ok(state) => state,
+        Err(err) => {
+            log::error!("无法启动后台服务：{err}");
+            return true;
+        }
+    };
+    let stopping = || app.state::<Core>().stopping.load(Ordering::Relaxed);
+    loop {
+        if stopping() {
+            return false;
+        }
+        match rummage_core::client::connect_local(&state).await {
+            Ok(client) => session(app, client).await,
+            Err(err) => log::warn!("后台服务连接失败：{err}"),
+        }
+        if stopping() {
+            return false;
+        }
+        set_status(app, Status::Restarting);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
 /// 守护循环；无法启动、停止重启时返回是，界面退出（`stop`）时返回否
+#[cfg(not(target_os = "android"))]
 async fn run<R: Runtime>(app: &AppHandle<R>) -> bool {
     let Some(dir) = app
         .state::<crate::data::DataDir>()

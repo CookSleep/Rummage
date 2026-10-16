@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { FontMode } from '../../types'
 import { buildFontStack, getFontLabel, type FontSlot } from '../../lib/fonts'
+import { useBackLayer } from '../../hooks/useBackLayer'
 import Select from '../Select'
 import { ROW_DESC, ROW_LABEL } from './styles'
 
@@ -70,6 +71,10 @@ export default function FontSettingField({ slot, label, description, mode, name,
   const keyword = nameInput.trim().toLowerCase()
   const filtered = localFamilies.filter((family) => family.toLowerCase().includes(keyword))
   const showList = listOpen && filtered.length > 0
+  useBackLayer(() => {
+    setListOpen(false)
+    setActiveIdx(-1)
+  }, showList)
 
   const pick = (family: string) => {
     commitName(family)

@@ -306,7 +306,7 @@ fn search_json_output() {
     assert_eq!(
         out,
         format!(
-            r#"{{"protocol":1,"hits":[{}],"tookMs":12,"partial":false,"semanticUnavailable":false,"unavailable":null,"weakOmitted":0}}"#,
+            r#"{{"protocol":{PROTOCOL_VERSION},"hits":[{}],"tookMs":12,"partial":false,"semanticUnavailable":false,"unavailable":null,"weakOmitted":0}}"#,
             ascii_json(&hits[0])
         )
     );
@@ -427,7 +427,7 @@ fn status_output() {
     assert_eq!(
         status_text(&s),
         r"Rummage 0.1.0
-状态：正在建立索引（正在使用电池，已暂停）
+状态：正在建立索引（未接电源，已暂停）
 进度：100 / 400（25%），失败 3，剩余约 13 分钟
   文档 93 / 100
   图片 7 / 300

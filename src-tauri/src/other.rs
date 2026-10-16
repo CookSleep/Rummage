@@ -1,8 +1,9 @@
 //! 非 Windows 平台的占位实现，只用于编译和测试：没有 “edit” 动词，调用方改为在文件管理器中显示；查不到默认程序，按普通方式打开；时间按 UTC 计算；不能强制结束进程。
 use std::io;
-use std::path::Path;
 
-pub fn edit(_path: &Path) -> io::Result<()> {
+/// Android 上打开文件交给其他应用（`android::ui`），不用它
+#[cfg(not(target_os = "android"))]
+pub fn edit(_path: &std::path::Path) -> io::Result<()> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "没有编辑动词"))
 }
 
@@ -30,6 +31,7 @@ pub fn next_midnight() -> io::Result<i64> {
     Ok((now_secs() / 86_400 + 1) as i64 * 86_400_000)
 }
 
+#[cfg(desktop)]
 pub fn local_time_at(ms: i64) -> io::Result<[u16; 6]> {
     Ok(civil(ms.max(0) as u64 / 1000))
 }

@@ -206,12 +206,10 @@ fn wake_low_cosine_restarts_then_falls_back_to_cpu() {
             backend: e.stub.clone(),
             gpu: Some(fake_gpu()),
             device: "测试显卡".into(),
-            tier: cpu.tier,
             images: true,
             audio: true,
             video: true,
             text_space: cpu.text_space.clone(),
-            image_space: cpu.image_space.clone(),
             cfg: cpu.cfg.clone(),
             failed: AtomicBool::new(false),
             driver_failed: AtomicBool::new(false),
@@ -247,5 +245,8 @@ fn wake_low_cosine_restarts_then_falls_back_to_cpu() {
         assert!(Instant::now() < deadline, "没有改用 CPU");
         thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(e.status().backend.as_deref(), Some("CPU"));
+    assert_eq!(
+        e.status().backend.as_deref(),
+        Some(rummage_embed::cpu_name())
+    );
 }

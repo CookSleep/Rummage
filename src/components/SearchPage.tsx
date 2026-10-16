@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import type { Appearance, CoreStatus, ImageQuery, SearchHit, SetupStatus, SimilarQuery } from '../types'
 import { errorMessage } from '../lib/errors'
+import { useBackLayer } from '../hooks/useBackLayer'
 import { useIndexStatus } from '../hooks/useIndexStatus'
 import { useParamValues } from '../hooks/useParamValues'
 import { setUpdateModalOpen, useReleaseUpdates } from '../hooks/useReleaseUpdates'
@@ -13,7 +14,7 @@ import { DEFAULT_FILTERS } from '../lib/filter'
 import { lowRelevanceText, trimPeriod, unavailableText } from '../lib/format'
 import { moveSelection, type Direction, type Masonry } from '../lib/masonry'
 import { hitPosition, hitRegion } from '../lib/media'
-import { isTauri } from '../lib/platform'
+import { isAndroid, isTauri } from '../lib/platform'
 import { shouldShowUpdate } from '../lib/releaseUpdates'
 import { readLocal, writeLocal } from '../lib/storage'
 import { renderMessage } from './ConfirmDialog'
@@ -218,8 +219,9 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
     setShowLow(!showLow)
   }
 
-  // 找相似的只清除标记，回到原来的文字搜索；输入框随之重新出现并自动聚焦
-  const clear = () => {
+  // 找相似的只清除标记，回到原来的文字搜索；输入框随之重新出现并自动聚焦。
+  // 返回键清空时不聚焦，免得手机上弹出键盘
+  const clear = (focus = true) => {
     setOverlayOpen(false)
     setNote('')
     if (similar) {
@@ -228,7 +230,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
     }
     setText('')
     setImage(null)
-    inputRef.current?.focus()
+    if (focus) inputRef.current?.focus()
   }
 
   // 用结果最匹配的片段（视频、长图为命中的那一段，文档为命中的片段）找相似的；普通图片（不是长图切片）可以加文字描述，
@@ -296,6 +298,11 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
 
   // 窄窗口时覆盖整个窗口的详情页打开着；后面的页面不滚动（文档的滚动条也藏起来）
   const overlay = !wide && overlayOpen && selected !== null
+
+  // Android 返回键依次关闭：搜索历史、窄窗口的详情页、搜索（同 Esc）；弹窗与设置在各自的组件中登记
+  useBackLayer(() => clear(false), Boolean(text || image || similar))
+  useBackLayer(() => setOverlayOpen(false), overlay)
+  useBackLayer(() => setHistoryOpen(false), historyShown && history.length > 0)
   useEffect(() => {
     if (!overlay) return
     document.documentElement.style.overflow = 'hidden'
@@ -338,15 +345,17 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
         else clear()
         return
       }
-      // 搜索框里按 Enter 只记下这次搜索，不打开选中的结果
+      // 搜索框里按 Enter 只记下这次搜索，不打开选中的结果；手机上同时收起键盘，露出结果
       if (e.key === 'Enter' && inInput) {
         remember()
+        if (isAndroid) inputRef.current?.blur()
         return
       }
       if (!hits.length) return
       if (e.key === 'Enter' && selected !== null && !onButton) {
         e.preventDefault()
-        run(e.ctrlKey ? 'reveal_file' : 'open_file', hits[selected])
+        // Android 上没有“打开所在位置”
+        run(e.ctrlKey && !isAndroid ? 'reveal_file' : 'open_file', hits[selected])
         return
       }
       const dir = ARROWS[e.key]
@@ -387,35 +396,43 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
   const panelShown = wide ? hasResults && !collapsed : overlayOpen && selectedHit !== undefined
   const unavailable = results?.semanticUnavailable ? unavailableText(results.unavailable, similar !== null ? '找相似' : image !== null ? '以图搜图' : null) : ''
 
+  const settingsControls = (
+    <>
+      {/* 有新版本时在设置按钮左侧显示 NEW，点击打开更新日志 */}
+      {hasUpdate && latestRelease && (
+        <button
+          type="button"
+          onClick={() => setUpdateModalOpen(true)}
+          className="absolute right-full top-1 mr-0.5 animate-overlay-in rounded-[4px] border border-red-500/30 bg-red-500 px-1 py-0.5 text-[9px] font-black leading-none text-white shadow-sm transition-all hover:bg-red-600 before:absolute before:-inset-[9px] before:content-['']"
+        >
+          NEW
+          <HoverTip label={`新版本 ${latestRelease.tag}`} />
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => setSettingsOpen(true)}
+        aria-label="设置"
+        className="rounded-full p-2 text-gray-500 transition duration-200 hover:bg-black/5 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200"
+      >
+        <SettingsIcon className="h-5 w-5" />
+        <HoverTip label="设置" />
+      </button>
+    </>
+  )
+
   return (
     <main className="min-h-screen" style={panelShown && wide ? { paddingRight: PANEL_WIDTH } : undefined}>
       {/* 首页像搜索引擎：项目名在上、搜索框居中；开始搜索后搜索框移到顶部 */}
       <header
         ref={headerRef}
-        style={{ paddingTop: query ? undefined : '28vh' }}
-        className="sticky top-0 z-10 bg-gray-50/85 px-14 pb-3 pt-5 backdrop-blur-xl transition-[padding] duration-300 dark:bg-gray-950/85"
+        style={{ paddingTop: query ? undefined : 'calc(28vh + var(--safe-top))' }}
+        // 手机宽度下左右边距收窄
+        className={`sticky top-0 z-10 bg-gray-50/85 pb-3 pt-[calc(1.25rem+var(--safe-top))] backdrop-blur-xl transition-[padding] duration-300 dark:bg-gray-950/85 px-4 sm:px-14`}
       >
-        <div className={`absolute top-5 ${wide && hasResults && collapsed ? 'right-14' : 'right-3'}`}>
-          {/* 有新版本时在设置按钮左侧显示 NEW，点击打开更新日志 */}
-          {hasUpdate && latestRelease && (
-            <button
-              type="button"
-              onClick={() => setUpdateModalOpen(true)}
-              className="absolute right-full top-1 mr-0.5 animate-overlay-in rounded-[4px] border border-red-500/30 bg-red-500 px-1 py-0.5 text-[9px] font-black leading-none text-white shadow-sm transition-all hover:bg-red-600 before:absolute before:-inset-[9px] before:content-['']"
-            >
-              NEW
-              <HoverTip label={`新版本 ${latestRelease.tag}`} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="设置"
-            className="rounded-full p-2 text-gray-500 transition duration-200 hover:bg-black/5 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200"
-          >
-            <SettingsIcon className="h-5 w-5" />
-            <HoverTip label="设置" />
-          </button>
+        {/* 手机宽度下开始搜索后，设置按钮移到搜索框右侧（见下），上方的提示可以占满整行 */}
+        <div className={`absolute top-[calc(1.25rem+var(--safe-top))] ${query ? 'max-sm:hidden' : ''} ${wide && hasResults && collapsed ? 'right-14' : 'right-3'}`}>
+          {settingsControls}
         </div>
         <div className="mx-auto w-full max-w-2xl">
           {!query && (
@@ -436,22 +453,27 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
                 )}
               </div>
             )}
-            <SearchBox
-              inputRef={inputRef}
-              text={text}
-              onText={setText}
-              note={note}
-              onNote={setNote}
-              image={image}
-              similar={similar}
-              onPickImage={pickImage}
-              onClear={clear}
-              loading={loading}
-              history={historyShown ? history : []}
-              onHistoryOpen={setHistoryOpen}
-              onPickHistory={pickHistory}
-              onRemoveHistory={removeHistory}
-            />
+            <div className="flex items-center gap-1">
+              <div className="min-w-0 flex-1">
+                <SearchBox
+                  inputRef={inputRef}
+                  text={text}
+                  onText={setText}
+                  note={note}
+                  onNote={setNote}
+                  image={image}
+                  similar={similar}
+                  onPickImage={pickImage}
+                  onClear={() => clear()}
+                  loading={loading}
+                  history={historyShown ? history : []}
+                  onHistoryOpen={setHistoryOpen}
+                  onPickHistory={pickHistory}
+                  onRemoveHistory={removeHistory}
+                />
+              </div>
+              {query && <div className="relative -mr-2 flex-shrink-0 sm:hidden">{settingsControls}</div>}
+            </div>
           </div>
           <FilterBar filters={filters} onChange={setFilters} refresh={settingsOpen} connected={coreStatus === 'running'} />
         </div>
@@ -459,14 +481,14 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
 
       {/* 首页的索引进度放在窗口底部，不挤占搜索框下方 */}
       {!query && (
-        <div className="fixed inset-x-0 bottom-0 z-10 px-14 pb-5 pt-2">
+        <div className="fixed inset-x-0 bottom-0 z-10 px-4 pb-[calc(1.25rem+var(--safe-bottom))] pt-2 sm:px-14">
           <div className="mx-auto w-full max-w-2xl">
             <IndexHint status={indexStatus} base={baseRef.current ?? 0} onFailed={() => setFailedOpen(true)} up device={usedDevice} />
           </div>
         </div>
       )}
 
-      <section className="mx-auto w-full max-w-[1600px] px-6 pb-10 pt-2">
+      <section className="mx-auto w-full max-w-[1600px] px-4 pb-[calc(2.5rem+var(--safe-bottom))] pt-2 sm:px-6">
         {/* 后台服务不可用时在结果区居中说明，有结果时放在结果上方；断开前的结果保留，断开时的搜索错误不显示 */}
         {offline && <CoreStatusNotice status={coreStatus} className={allHits.length ? 'pb-6 pt-4' : 'py-20'} />}
         {offline && !allHits.length ? null : error && query ? (
@@ -520,7 +542,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
           connected={coreStatus === 'running'}
           onHide={wide ? toggleCollapsed : () => setOverlayOpen(false)}
           onOpen={() => selectedHit && run('open_file', selectedHit)}
-          onReveal={() => selectedHit && run('reveal_file', selectedHit)}
+          onReveal={isAndroid ? undefined : () => selectedHit && run('reveal_file', selectedHit)}
           onSimilar={() => selected !== null && findSimilar(selected)}
         />
       )}
@@ -530,7 +552,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
           type="button"
           onClick={toggleCollapsed}
           aria-label="展开详情栏"
-          className="fixed right-3 top-5 z-20 rounded-full border border-gray-200/60 bg-white/90 p-2 text-gray-500 shadow-sm backdrop-blur-xl transition duration-200 hover:text-gray-700 dark:border-white/[0.08] dark:bg-gray-900/90 dark:text-gray-400 dark:hover:text-gray-200"
+          className="fixed right-3 top-[calc(1.25rem+var(--safe-top))] z-20 rounded-full border border-gray-200/60 bg-white/90 p-2 text-gray-500 shadow-sm backdrop-blur-xl transition duration-200 hover:text-gray-700 dark:border-white/[0.08] dark:bg-gray-900/90 dark:text-gray-400 dark:hover:text-gray-200"
         >
           <PanelExpandIcon className="h-4 w-4" />
           <HoverTip label="展开详情栏（空格）" />

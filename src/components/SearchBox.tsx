@@ -1,5 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type RefObject } from 'react'
 import type { ImageQuery, SimilarQuery } from '../types'
+import { isAndroid } from '../lib/platform'
 import { ClockIcon, CloseIcon, ImageIcon, SearchIcon, SimilarIcon, SpinnerIcon } from './icons'
 import { HoverTip } from './Tip'
 
@@ -91,9 +92,10 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
               type="text"
               value={note}
               onChange={(e) => onNote(e.target.value)}
-              autoFocus
+              autoFocus={!isAndroid}
               spellCheck={false}
               maxLength={200}
+              enterKeyHint="search"
               placeholder="加一句描述（可选）"
               aria-label="加一句描述"
               className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-gray-400 dark:text-white"
@@ -114,9 +116,12 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
           onClick={() => onHistoryOpen(true)}
           onBlur={() => onHistoryOpen(false)}
           onKeyDown={onKeyDown}
-          autoFocus
+          // 手机上不自动弹出键盘
+          autoFocus={!isAndroid}
           spellCheck={false}
-          placeholder="搜索文件，或拖入图片以图搜图"
+          enterKeyHint="search"
+          // 手机上不能拖入图片
+          placeholder={isAndroid ? '搜索文件' : '搜索文件，或拖入图片以图搜图'}
           aria-label="搜索文件"
           className="w-full rounded-xl border border-transparent bg-black/[0.04] py-2.5 pl-10 pr-20 text-sm outline-none transition duration-200 placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 dark:bg-white/[0.06] dark:text-white"
         />
@@ -162,7 +167,7 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
                   onRemoveHistory(q)
                 }}
                 aria-label={`删除“${q}”`}
-                className={`rounded-full p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 group-hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-gray-200 ${i === active ? 'opacity-100' : 'opacity-0'}`}
+                className={`rounded-full p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 group-hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-gray-200 [@media(hover:none)]:opacity-100 ${i === active ? 'opacity-100' : 'opacity-0'}`}
               >
                 <CloseIcon className="h-3.5 w-3.5" />
                 <HoverTip label="从历史中删除（Delete / Backspace）" />

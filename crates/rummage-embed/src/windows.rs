@@ -3,10 +3,12 @@
 //!   `JOB_OBJECT_LIMIT_JOB_MEMORY`（整个作业的已提交内存上限，超出时分配失败）。
 //!   子进程先启动再放进作业；子进程要等父进程在放进作业之后发来 `Start` 帧才加载运行库（见 `frame`），
 //!   它之后启动的子进程自动属于同一作业。
-//! - 子进程是控制台程序，以 `CREATE_NO_WINDOW` 启动，避免从无控制台的核心进程拉起时弹出窗口。
+//! - 子进程是控制台程序，以 `CREATE_NO_WINDOW` 启动（`spawn`），避免从无控制台的核心进程拉起时弹出窗口；
+//!   去掉继承来的 `GGML_VK_VISIBLE_DEVICES`，由推理进程自己设置（见 `worker`）。
 //! - stdout 保护：推理子进程先复制一份 stdout 句柄专给协议用，再把进程的标准输出（Win32 的 `STD_OUTPUT_HANDLE`
 //!   与 CRT 的 fd 1）都指向 stderr，第三方组件（llama.cpp、ggml、驱动）写 stdout 也不会污染协议。
 //! - `set_runtime_env`：推理子进程在加载运行库之前设置 `GGML_VK_VISIBLE_DEVICES`，用 UCRT 的 `_putenv_s`（见该函数）。
+//! - `cpu_name`：读注册表 `HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0` 的 `ProcessorNameString`，作为 CPU 设备显示的名称。
 //! - 自检用：
 //!   - `driver_version`：用 DXGI 枚举适配器，以 `Description` 与 ggml 的设备描述相等来匹配，
 //!     再用 `CheckInterfaceSupport(IDXGIDevice)` 取用户模式驱动版本。只查询属性，不创建设备。
@@ -17,21 +19,25 @@
 //!     时间窗口用 `timediff(@SystemTime)`（距现在的毫秒数），
 //!     不必换算日期。查询本身失败时返回错误，不能当作没有事件放行。
 
-use std::ffi::{CStr, c_char, c_int};
+use std::ffi::{CStr, OsString, c_char, c_int};
 use std::fs::File;
 use std::io;
 use std::os::windows::io::{AsHandle, AsRawHandle};
 use std::os::windows::process::CommandExt;
-use std::process::{Child, Command};
-use std::ptr::null;
+use std::path::Path;
+pub use std::process::{Child, ChildStdin};
+use std::process::{ChildStderr, ChildStdout, Command, Stdio};
+use std::ptr::{null, null_mut};
+use std::sync::Arc;
 use std::time::Duration;
 
+use rummage_llama::Runtime;
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIDevice, IDXGIFactory1};
 use windows::core::Interface;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_ITEMS, GetLastError, HANDLE,
-    INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, GetLastError,
+    HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::System::Console::{
     GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
@@ -44,9 +50,11 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
 };
+use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-use crate::Adapter;
+use crate::local::VK_VISIBLE_ENV;
+use crate::{Adapter, Error};
 
 pub struct Job(HANDLE);
 
@@ -83,7 +91,7 @@ impl Job {
         Ok(job)
     }
 
-    pub fn assign(&self, child: &Child) -> io::Result<()> {
+    fn assign(&self, child: &Child) -> io::Result<()> {
         // SAFETY: 作业句柄有效；进程句柄由 `Child` 持有，调用期间有效。
         let ok = unsafe { AssignProcessToJobObject(self.0, child.as_raw_handle()) };
         if ok == 0 {
@@ -106,8 +114,35 @@ impl Drop for Job {
     }
 }
 
-pub fn hide_window(cmd: &mut Command) {
-    cmd.creation_flags(CREATE_NO_WINDOW);
+/// 启动推理子进程（标准输入输出都是管道）并放进作业
+pub fn spawn(
+    exe: &Path,
+    args: Vec<OsString>,
+    job: &Job,
+) -> Result<(Child, ChildStdin, ChildStdout, ChildStderr), Error> {
+    let mut child = Command::new(exe)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env_remove(VK_VISIBLE_ENV.to_str().expect("变量名是 ASCII"))
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|err| Error::Spawn(format!("{}：{err}", exe.display())))?;
+    if let Err(err) = job.assign(&child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(Error::Spawn(format!("无法把推理进程放进作业对象：{err}")));
+    }
+    let stdin = child.stdin.take().expect("stdin 已设为管道");
+    let stdout = child.stdout.take().expect("stdout 已设为管道");
+    let stderr = child.stderr.take().expect("stderr 已设为管道");
+    Ok((child, stdin, stdout, stderr))
+}
+
+/// 推理子进程用的运行库：一个进程只加载一次
+pub fn load_runtime(dir: &Path) -> Result<Arc<Runtime>, rummage_llama::Error> {
+    Runtime::load(dir).map(Arc::new)
 }
 
 // MSVC / MinGW 的 C 运行库函数；llama.cpp 等 DLL 与本进程共用同一个 UCRT，fd 表与环境变量表是进程级的。
@@ -186,6 +221,35 @@ pub fn adapters() -> Vec<Adapter> {
         }
     }
     out
+}
+
+/// 处理器型号（如 `12th Gen Intel(R) Core(TM) i7-12700H`）；读不到或为空时为空。
+pub fn cpu_name() -> Option<String> {
+    let key: Vec<u16> = "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0\0"
+        .encode_utf16()
+        .collect();
+    let value: Vec<u16> = "ProcessorNameString\0".encode_utf16().collect();
+    let mut buf = [0u16; 256];
+    let mut size = size_of_val(&buf) as u32;
+    // SAFETY: 键名与值名以 NUL 结尾，调用期间有效；`buf` 可写 `size` 字节，RegGetValueW 只在其中写入以 NUL 结尾的字符串，
+    // 放不下时返回 ERROR_MORE_DATA 而不写越界。
+    let err = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            null_mut(),
+            buf.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if err != ERROR_SUCCESS {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let name = String::from_utf16_lossy(&buf[..len]).trim().to_string();
+    (!name.is_empty()).then_some(name)
 }
 
 /// UMD 版本按 16 位一段拆成四段。

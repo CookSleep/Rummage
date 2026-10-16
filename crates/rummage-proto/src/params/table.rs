@@ -22,6 +22,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "识别文档内容",
         help: "读取文档的内容，可按内容搜索。",
         basis: "由用户在引导中选择。关闭后不再给新文件建内容索引，已建好的向量保留、仍可按内容搜到",
+        platform: "",
     },
     ParamDef {
         key: "index_images",
@@ -34,6 +35,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "识别图片内容",
         help: "识别图片中的内容，可用文字描述找图。",
         basis: "由用户在引导中选择；需要图片与音视频模型（mmproj）。关闭后不再给新图片建内容索引，已建好的向量保留、仍可按内容搜到",
+        platform: "",
     },
     ParamDef {
         key: "index_audio",
@@ -46,6 +48,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "识别音频内容",
         help: "识别音频中的声音和说话内容，可用文字描述找音频。",
         basis: "由用户在引导中选择；需要图片与音视频模型（mmproj）。关闭后不再给新音频建内容索引，已建好的向量保留、仍可按内容搜到",
+        platform: "",
     },
     ParamDef {
         key: "index_video",
@@ -58,6 +61,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "识别视频内容",
         help: "识别视频中的画面和声音，可用文字描述找到视频中的片段。",
         basis: "由用户在引导中选择；需要图片与音视频模型（mmproj）。关闭后不再给新视频建内容索引，已建好的向量保留、仍可按内容搜到",
+        platform: "",
     },
     ParamDef {
         key: "chunk_tokens",
@@ -70,6 +74,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "文本分段长度（Token）",
         help: "长文本分段建立索引，段越短，定位越准。",
         basis: "经验值；分段按标题、段落与句子切分，单段含前缀不超过 512 Token",
+        platform: "",
     },
     ParamDef {
         key: "chunk_overlap_pct",
@@ -82,6 +87,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "分段重叠比例（%）",
         help: "相邻两段重复的部分。越大越不易漏掉跨段的内容，索引也越大。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "chunk_min_tokens",
@@ -94,6 +100,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "最短分段长度（Token）",
         help: "短于此值的分段会并入相邻分段。0 表示不合并。",
         basis: "模型偏好短文本（ACL 2025 “Collapse of Dense Retrievers”），页码、脚注编号等零碎分段容易排到前面",
+        platform: "",
     },
     // 文档的内嵌媒体：只影响文档，改了只重算内嵌媒体（`rummage_index::rebuild` 的标记）
     ParamDef {
@@ -107,6 +114,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "文档内图片的最小边长（像素）",
         help: "文档中短边小于此值的图片多为图标或装饰，不建立索引。",
         basis: "Xberg 1.3.9 把 64×64 以下的图判为图标，取 2 倍",
+        platform: "",
     },
     ParamDef {
         key: "embed_max_per_doc",
@@ -119,6 +127,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "每份文档的图片与音视频上限",
         help: "每份文档中最多为此值个图片、音频和视频建立索引；扫描版 PDF 的整页图不计入。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "embed_repeat_pages",
@@ -131,12 +140,36 @@ pub static PARAMS: &[ParamDef] = &[
         label: "视为重复图片的页数",
         help: "同一张图出现在此值个或更多页面时，视为标志、页眉或背景，不建立索引。",
         basis: "经验值：出现在多页的同一张图多为标志、页眉或背景",
+        platform: "",
     },
     ParamDef {
         key: "image_tokens",
         group: Group::Index,
         section: "图片",
         // 值为每张图的视觉 token 档位
+        kind: ParamKind::Named {
+            options: &[
+                (70, "最低"),
+                (140, "较低"),
+                (280, "标准"),
+                (560, "较高"),
+                (1120, "最高"),
+            ],
+            unit: "Token",
+        },
+        default: || ParamValue::Int(280),
+        affects_index: true,
+        index_kinds: &["image"],
+        label: "图片识别精度",
+        help: "越高识别越细，建立索引也越慢。长图的整图和文档中的图片也按此精度识别。改后匹配度会有变化，“匹配度门槛”按默认精度设定。",
+        basis: "官方默认。4080 SUPER 上评测 140 → 280 档：表格截图 R@10 0.237 → 0.537，扫描页 R@1 0.579 → 0.632，照片 R@1 0.890 → 0.850，文档内嵌图片 R@1 0.662 → 0.593（损失全部在纯扫描的 PDF 上，有正文的文档不变）；建索引约慢 1.2–1.5 倍，CPU 上约 2.6 倍",
+        platform: "",
+    },
+    ParamDef {
+        key: "long_image_tokens",
+        group: Group::Index,
+        section: "图片",
+        // 值为长图每一段的视觉 token 档位
         kind: ParamKind::Named {
             options: &[
                 (70, "低"),
@@ -150,9 +183,10 @@ pub static PARAMS: &[ParamDef] = &[
         default: || ParamValue::Int(140),
         affects_index: true,
         index_kinds: &["image"],
-        label: "图片识别精度",
-        help: "越高识别越细，建立索引也越慢。长图的每一段也按此精度识别。",
-        basis: "黄金样本用 140 档。长截图评测中 140 档与 280、560 档相当（R@1 0.880 / 0.867 / 0.892，建索引 26 / 48 / 125 秒）；1120 档 R@1 0.928，建索引 325 秒（GPU 打开 Flash Attention）",
+        label: "长图每段识别精度",
+        help: "长图分段识别时每一段的精度。越高识别越细，建立索引也越慢。改后匹配度会有变化，“匹配度门槛”按默认精度设定。",
+        basis: "长截图评测中 140 档与 280、560 档相当（R@1 0.880 / 0.867 / 0.892），建索引 26 / 48 / 125 秒",
+        platform: "",
     },
     ParamDef {
         key: "long_image_ratio",
@@ -168,6 +202,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "长图判定比例",
         help: "长边与短边之比超过此值的图按长图分段识别。",
         basis: "经验值；长截图评测中降到 2.0 没有稳定收益，建索引慢 5.7–14.6 倍",
+        platform: "",
     },
     ParamDef {
         key: "long_image_max_slices",
@@ -180,6 +215,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "长图分段上限",
         help: "一张长图最多分成的段数，超出时每段相应加长。",
         basis: "经验值；评测集中没有超过上限的长图，长截图上加大到 24 没有收益",
+        platform: "",
     },
     // 上限 30 秒是模型单个输入的音频上限（rummage_media::audio::MAX_SEGMENT_S）
     ParamDef {
@@ -193,6 +229,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "音频分段长度（秒）",
         help: "长音频分段识别，段越短定位越准，建立索引也越慢。",
         basis: "官方基准用 5 秒和 10 秒片段",
+        platform: "",
     },
     // 不小于分段长度时按分段长度减 1 秒计（rummage_media::audio::effective_overlap）
     ParamDef {
@@ -206,6 +243,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "音频分段重叠（秒）",
         help: "相邻两段重复的时长。越长越不易漏掉跨段的声音，索引也越大。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "audio_silence_db",
@@ -218,6 +256,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "静音判定音量（dB）",
         help: "一段音频的整体音量低于此值时视为静音，不建立索引。",
         basis: "保守值，只跳过近乎无声的段：16 位录音的底噪约 −90 dB，安静房间的录音底噪多在 −60 dB 以上，说话约 −30 到 −15 dB",
+        platform: "",
     },
     // 预设与窗口参数的对应见 rummage-core 的 pipeline::video_opts；“自定义”时用下面几项
     ParamDef {
@@ -237,8 +276,26 @@ pub static PARAMS: &[ParamDef] = &[
         affects_index: true,
         index_kinds: &["video"],
         label: "视频识别方式",
-        help: "“找物体”定位最准；“找动作”能看出动作变化；“找说话内容”还识别声音，画面查找稍差，用时约为“找物体”的 1.4 倍。",
-        basis: "4080 SUPER 上评测：QVHighlights 上“找物体”最好（改为“找说话内容”时 R@1 0.787 → 0.656），VATEX 上相近；“找动作”耗时约为“找物体”的 0.9 倍、“找说话内容”约 1.4 倍",
+        help: "“找物体”定位最准；“找动作”能看出动作；“找说话内容”还识别声音，画面查找稍差，用时约为“找物体”的 1.25 倍。",
+        basis: "4080 SUPER 上评测（每帧 140 档）：QVHighlights 上“找物体”最好（改为“找说话内容”时 R@1 0.852 → 0.705，耗时 490 → 612 秒，约 1.25 倍）；每帧 70 档时 VATEX 上两者相近，“找动作”耗时约为“找物体”的 0.9 倍",
+        platform: "",
+    },
+    // 只开放两档：10 帧 × 280 档会超过推理上下文（2048）
+    ParamDef {
+        key: "video_frame_tokens",
+        group: Group::Index,
+        section: "音频与视频",
+        kind: ParamKind::Named {
+            options: &[(70, "低"), (140, "标准")],
+            unit: "Token",
+        },
+        default: || ParamValue::Int(140),
+        affects_index: true,
+        index_kinds: &["video"],
+        label: "视频画面识别精度",
+        help: "视频每一帧画面的识别精度。越高识别越细，建立索引也越慢。改后匹配度会有变化，“匹配度门槛”按默认精度设定。",
+        basis: "官方视频默认。4080 SUPER 上评测 70 → 140 档（R@1）：QVHighlights “找物体”0.787 → 0.852、“找说话内容”0.656 → 0.705，VATEX 0.850 → 0.867；建索引约慢 1.1–1.9 倍，CPU 上每帧约 2 倍",
+        platform: "",
     },
     ParamDef {
         key: "video_window_s",
@@ -251,6 +308,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "视频片段长度（秒）",
         help: "视频分段识别，段越短定位越准，建立索引也越慢。",
         basis: "“自定义”时使用，默认值同“找物体”",
+        platform: "",
     },
     // 不小于片段长度时按片段长度减 1 秒计（与音频相同，rummage_media::audio::effective_overlap）
     ParamDef {
@@ -264,6 +322,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "视频片段重叠（秒）",
         help: "相邻两段重复的时长。越长越不易漏掉跨段的画面，建立索引也越慢。",
         basis: "“自定义”时使用，默认值同“找物体”：不重叠",
+        platform: "",
     },
     ParamDef {
         key: "video_frames",
@@ -275,7 +334,8 @@ pub static PARAMS: &[ParamDef] = &[
         index_kinds: &["video"],
         label: "每段取几帧画面",
         help: "每段视频中均匀取出画面一起识别，帧数为此值。越多越能看出动作，建立索引也越慢。",
-        basis: "三个预设分别取 2、4、6 帧；每帧 70 档视觉 token，10 帧加时间戳约 700 token",
+        basis: "三个预设分别取 2、4、6 帧；10 帧按 140 档约 1400 token，在推理上下文 2048 以内",
+        platform: "",
     },
     ParamDef {
         key: "video_audio",
@@ -288,6 +348,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "同时听视频的声音",
         help: "识别画面时一并识别说话和声音，能按说话内容找到片段，索引更慢。",
         basis: "只有“找说话内容”带音频",
+        platform: "",
     },
     // 大小上限改了只重新扫描：未完成索引的按新上限判定，已建好的保留（rummage_index::scan 模块说明），不需要重建
     ParamDef {
@@ -301,6 +362,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "文档大小上限（MB）",
         help: "超过此值的文档只按文件名搜索。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "max_image_mb",
@@ -313,6 +375,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "图片大小上限（MB）",
         help: "超过此值的图片只按文件名搜索。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "max_image_mp",
@@ -325,6 +388,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "图片像素上限（百万像素）",
         help: "像素超过此值的图片只按文件名搜索。",
         basis: "防止超大图片耗尽内存；1080×20000 的长截图约 22 百万像素",
+        platform: "",
     },
     // 与大小上限相同，改了只重新扫描：库中已记录时长的音频按新上限重新判定（rummage_index::scan 模块说明）
     ParamDef {
@@ -338,6 +402,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "音视频时长上限（分钟）",
         help: "时长超过此值的音频和视频只按文件名搜索。",
         basis: "经验值；音频与视频不限大小、只限时长",
+        platform: "",
     },
     ParamDef {
         key: "rescan_hours",
@@ -350,6 +415,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "定期检查间隔（小时）",
         help: "每隔此值小时检查一遍所有文件夹，补上漏掉的变化。",
         basis: "经验值；按大小与修改时间快速对账，补上实时监听漏掉的变化（如程序未运行期间）",
+        platform: "",
     },
     // 值是校准后的分数（z 分数），界面不提这个词
     ParamDef {
@@ -362,7 +428,8 @@ pub static PARAMS: &[ParamDef] = &[
         index_kinds: &[],
         label: "匹配度门槛",
         help: "匹配度 50% 对应此值。按内容找到、低于此值的结果折叠到“匹配度较低的结果”中，此值越高折叠越多。",
-        basis: "混合库评测（621 条查询 + 50 条库中没有相关内容的查询）：门槛 3.0 时排第 1 的相关文件 95.7% 仍在门槛以上，负样本查询 30% 仍有结果在门槛以上（2.0 时 100% / 78%，3.5 时 82.7% / 10%）",
+        basis: "按默认识别精度的混合库评测（621 条查询 + 50 条库中没有相关内容的查询）：门槛 3.0 时排第 1 的相关文件 97.5% 仍在门槛以上，负样本查询 28% 仍有结果在门槛以上（2.0 时 100% / 92%，3.5 时 88.3% / 12%）",
+        platform: "",
     },
     ParamDef {
         key: "result_limit",
@@ -375,6 +442,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "结果数量上限",
         help: "一次搜索最多显示的结果数量。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "semantic_candidates",
@@ -387,6 +455,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "候选结果数",
         help: "按内容搜索时，每类文件先取出此值个结果，再从中挑出最相关的。越大越全，也越慢。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "weight_semantic",
@@ -399,6 +468,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "内容匹配权重",
         help: "按内容找到的结果在排序中的分量。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "weight_name",
@@ -411,6 +481,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "文件名匹配权重",
         help: "按文件名找到的结果在排序中的分量。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "weight_text",
@@ -423,6 +494,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "正文匹配权重",
         help: "正文中含有搜索词的结果在排序中的分量。",
         basis: "经验值：排序按 RRF 融合、校准后的分数不参与，三路权重没有单独评测",
+        platform: "",
     },
     ParamDef {
         key: "video_top_windows",
@@ -435,6 +507,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "每个视频显示的匹配片段数",
         help: "每个视频最多列出的匹配片段数，相邻的合并成一段。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "video_merge_gap_ms",
@@ -447,6 +520,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "视频片段合并间隔（毫秒）",
         help: "匹配片段之间的间隔不超过此值时，合并成一段显示。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "save_history",
@@ -459,6 +533,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "保存搜索历史",
         help: "在本机记下最近的文字搜索，以图搜图不记录。",
         basis: "只存在本机，可关闭、可清空",
+        platform: "",
     },
     ParamDef {
         key: "history_limit",
@@ -471,6 +546,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "搜索历史条数",
         help: "最多保留的最近搜索条数。",
         basis: "经验值：搜索框下的列表不必滚动",
+        platform: "",
     },
     ParamDef {
         key: "index_threads",
@@ -483,6 +559,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "建立索引线程数",
         help: "越多建立索引越快，CPU 占用也越高。修改后需重新启动 Rummage 才能完全生效。",
         basis: "留出至少 2 个核心给系统和前台程序，按 CPU 核数减 2",
+        platform: "",
     },
     // 只影响抽帧的速度与 CPU 占用，两种解码得到的画面只有细微差别（rummage-media 的 video 模块测试），改了不需要重建；对之后开始处理的视频生效
     ParamDef {
@@ -499,6 +576,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "视频解码方式",
         help: "硬件解码占用 CPU 更少，但抽帧较慢；硬件不支持时自动改用软件解码。",
         basis: "硬件解码 CPU 时间约为软件的九分之一，抽帧用时约为软件的 1.8 倍（1080p H.264）",
+        platform: "windows",
     },
     ParamDef {
         key: "engine_idle_min",
@@ -511,18 +589,33 @@ pub static PARAMS: &[ParamDef] = &[
         label: "空闲后释放内存（分钟）",
         help: "一段时间没有建立索引或搜索时，释放模型占用的内存，下次使用时重新加载。",
         basis: "经验值",
+        platform: "",
     },
     ParamDef {
         key: "pause_on_battery",
         group: Group::Resource,
         section: "自动暂停",
         kind: ParamKind::Bool,
-        default: || ParamValue::Bool(true),
+        default: || ParamValue::Bool(!cfg!(target_os = "android")),
         affects_index: false,
         index_kinds: &[],
-        label: "使用电池时暂停",
-        help: "未接电源时暂停建立索引，以节省电量。",
-        basis: "节省电量，接上电源后继续",
+        label: "未接电源时暂停",
+        help: "未接电源（未充电）时暂停建立索引，以节省电量。",
+        basis: "电脑默认开启，节省电量；手机默认关闭，后台建立索引另有前台服务额度与温控约束",
+        platform: "",
+    },
+    ParamDef {
+        key: "pause_when_screen_on",
+        group: Group::Resource,
+        section: "自动暂停",
+        kind: ParamKind::Bool,
+        default: || ParamValue::Bool(false),
+        affects_index: false,
+        index_kinds: &[],
+        label: "亮屏时暂停",
+        help: "屏幕亮着时暂停建立索引，息屏后继续。",
+        basis: "默认关闭，首次建立索引不至于过慢",
+        platform: "android",
     },
     ParamDef {
         key: "pause_on_fullscreen",
@@ -535,6 +628,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "全屏时暂停",
         help: "有程序全屏（如游戏、视频）时暂停建立索引，避免卡顿。",
         basis: "避免游戏、全屏视频等卡顿",
+        platform: "windows",
     },
     ParamDef {
         key: "min_free_disk_gb",
@@ -547,6 +641,20 @@ pub static PARAMS: &[ParamDef] = &[
         label: "磁盘剩余空间下限（GB）",
         help: "磁盘剩余空间低于此值时暂停建立索引。",
         basis: "经验值",
+        platform: "",
+    },
+    ParamDef {
+        key: "thermal_slow_headroom",
+        group: Group::Resource,
+        section: "自动暂停",
+        kind: ParamKind::Float { min: 0.5, max: 1.0 },
+        default: || ParamValue::Float(0.8),
+        affects_index: false,
+        index_kinds: &[],
+        label: "降温阈值",
+        help: "手机发热程度达到此值时放慢建立索引（1 为过热暂停），每处理一个文件休息同样长的时间。",
+        basis: "经验值，待真机调整",
+        platform: "android",
     },
     ParamDef {
         key: "rrf_k",
@@ -559,6 +667,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "综合排序平衡值",
         help: "搜索会按内容、文件名和正文分别查找再合并。越小越看重某一项排在最前的结果，越大越看重几项都靠前的结果。",
         basis: "RRF 常用值",
+        platform: "",
     },
     ParamDef {
         key: "selftest_min_cosine",
@@ -571,6 +680,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "设备检测通过标准",
         help: "检测设备时，结果与参考值的相似度不低于此值才算通过。越高越严格。",
         basis: "经验值；正常的显卡与参考值的最小余弦约 0.9994",
+        platform: "",
     },
     ParamDef {
         key: "gpu_selftest_timeout_s",
@@ -583,6 +693,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "显卡检测时限（秒）",
         help: "检测显卡的用时超过此值，就不使用这块显卡。",
         basis: "实测核显（Iris Xe）首次检测含 Flash Attention 着色器编译，全程约 20 秒（缓存后约 14 秒），4080 SUPER 首次编译多 6–17 秒；留 3 倍以上余量",
+        platform: "windows",
     },
     ParamDef {
         key: "worker_mem_gb",
@@ -595,6 +706,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "内容识别进程内存上限（GB）",
         help: "内容识别进程最多能用的内存。使用显卡时，显存也计算在内。",
         basis: "Windows 上 Vulkan 分配的显存计入进程的已提交内存。GPU 打开 Flash Attention 后 1120 档峰值约 1.7 GB（4080 SUPER）、2.9 GB（核显共享显存），8 GB 留足余量",
+        platform: "windows",
     },
     ParamDef {
         key: "worker_init_timeout_s",
@@ -607,6 +719,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "内容识别启动时限（秒）",
         help: "加载模型的用时超过此值，就判定启动失败。",
         basis: "核显与 4080 SUPER 加载模型约 2 秒，着色器编译多在首次推理时发生；与显卡检测时限同样留足余量",
+        platform: "",
     },
     ParamDef {
         key: "infer_timeout_s",
@@ -619,6 +732,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "单次识别时限（秒）",
         help: "单次识别的用时超过此值，就结束内容识别进程。",
         basis: "核显 Iris Xe 上 1120 档单张约 17 秒，更弱的核显可能慢数倍，留余量",
+        platform: "",
     },
     ParamDef {
         key: "file_timeout_s",
@@ -631,6 +745,7 @@ pub static PARAMS: &[ParamDef] = &[
         label: "单个文件处理时限（秒）",
         help: "处理一个文件的用时超过此值，就记为失败并跳过。",
         basis: "经验值；等待推理与 ffmpeg 解码的时间不计入",
+        platform: "",
     },
     // 上限 2048 是推理上下文的长度
     ParamDef {
@@ -641,12 +756,13 @@ pub static PARAMS: &[ParamDef] = &[
             min: 256,
             max: 2048,
         },
-        default: || ParamValue::Int(1024),
+        default: || ParamValue::Int(1152),
         affects_index: true,
         index_kinds: &["video"],
         label: "带声音片段的长度上限（Token）",
         help: "带声音的视频片段超过此值时，整段视频改为只看画面。",
-        basis: "经验值，也保证交互查询不会被一次长推理卡住",
+        basis: "容纳“找说话内容”（6 秒 6 帧，每帧 140 档）：16:9 视频实测 956 token，最不利的长宽比约 1064 token；也保证交互查询不会被一次长推理卡住",
+        platform: "",
     },
     ParamDef {
         key: "write_log_file",
@@ -659,5 +775,6 @@ pub static PARAMS: &[ParamDef] = &[
         label: "写入日志文件",
         help: "记录警告和错误，便于排查问题。",
         basis: "警告和错误写入 app.log 与 core.log，便于排查问题",
+        platform: "",
     },
 ];

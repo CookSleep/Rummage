@@ -137,13 +137,13 @@ function UpdateModalContent() {
         : { label: '当前已是最新版本', text: 'text-gray-500 dark:text-gray-400', dot: 'bg-emerald-500 ring-emerald-500/20' }
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center modal-pad" onClick={onClose}>
       <div className="absolute inset-0 animate-overlay-in bg-black/30 backdrop-blur-sm" />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="版本更新"
-        className="relative z-10 flex h-[85vh] max-h-[720px] w-full max-w-2xl animate-modal-in flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
+        className="relative z-10 flex h-[85vh] max-h-[min(720px,100%)] w-full max-w-2xl animate-modal-in flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-start gap-3 border-b border-gray-100 px-5 py-4 dark:border-white/[0.08]">

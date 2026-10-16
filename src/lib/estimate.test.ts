@@ -82,12 +82,12 @@ describe('estimateIndex', () => {
     const objects = estimateIndex(est, kinds, CPU_FALLBACK)
     expect(objects.videoFiles).toBe(3)
     expect(objects.nameOnly).toBe(172)
-    // 找物体：180 秒、每 2 秒一段 2 帧，90 段 × 6000 ms × 2/6 × 1.2
-    expect(objects.time.low).toBeCloseTo(90 * 6 * (2 / 6) * 1.2, 1)
-    expect(objects.time.high).toBeCloseTo((2880 / 2) * 6 * (2 / 6) * 2, 1)
+    // 找物体：180 秒、每 2 秒一段 2 帧，90 段 × 6000 ms × 2/6 × 1.2，再按 140 档帧 × 1.1
+    expect(objects.time.low).toBeCloseTo(90 * 6 * (2 / 6) * 1.2 * 1.1, 1)
+    expect(objects.time.high).toBeCloseTo((2880 / 2) * 6 * (2 / 6) * 2 * 2, 1)
     // 找说话内容：每 6 秒一段 6 帧
     const speech = estimateIndex(est, kinds, CPU_FALLBACK, 3)
-    expect(speech.time.low).toBeCloseTo(30 * 6 * 1.2, 1)
+    expect(speech.time.low).toBeCloseTo(30 * 6 * 1.2 * 1.1, 1)
     expect(speech.disk.low).toBeLessThan(objects.disk.low)
   })
 })

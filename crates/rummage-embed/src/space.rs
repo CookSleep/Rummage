@@ -44,7 +44,7 @@ pub fn image_preprocess(tier: u32) -> String {
 }
 
 /// 长图切片的版本，只出现在切片向量的 `vectors.params_version` 中（`image_slice_preprocess`）。
-/// 切片按切片档位缩放、编码，与同档位的普通图片完全相同，所以放在同一空间，空间 ID 不变；
+/// 切片按切片档位（参数 `long_image_tokens`）缩放、编码，与同档位的普通图片完全相同，所以放在该档位的图像空间；
 /// 普通比例的图片与长图的整图向量都不受切片影响，不必重算。修改 `rummage_media::slices` / `crop` 时必须提升它。
 pub const IMAGE_SLICE: &str = "slice-v1";
 
@@ -69,28 +69,34 @@ pub fn audio_preprocess(segment_s: u32, overlap_s: u32, silence_db: i64) -> Stri
 /// 视频预处理参数版本。修改 `rummage_media::video` 的窗口、抽帧、缩放或组装规则时必须提升它
 pub const VIDEO_PREPROCESS: &str = "video-v2";
 
-/// 视频窗口向量的预处理参数版本，含窗口秒数、实际使用的重叠、每窗口帧数、每帧视觉 token 档位，以及带音频（`av`）
-/// 还是纯画面（`v`），如 `video-v2-w2-o0-f2-t70-v`；也写入 `vectors.params_version`。带音频与纯画面是两个子空间
-/// （`video_av` / `video_v`），分数分布不同，分开检索
-pub fn video_preprocess(window_s: u32, overlap_s: u32, frames: u32, audio: bool) -> String {
+/// 视频窗口向量的预处理参数版本，含窗口秒数、实际使用的重叠、每窗口帧数、每帧视觉 token 档位（参数 `video_frame_tokens`），
+/// 以及带音频（`av`）还是纯画面（`v`），如 `video-v2-w2-o0-f2-t140-v`；也写入 `vectors.params_version`。
+/// 带音频与纯画面是两个子空间（`video_av` / `video_v`），分数分布不同，分开检索
+pub fn video_preprocess(
+    window_s: u32,
+    overlap_s: u32,
+    frames: u32,
+    frame_tokens: u32,
+    audio: bool,
+) -> String {
     format!(
-        "{VIDEO_PREPROCESS}-w{window_s}-o{overlap_s}-f{frames}-t{}-{}",
-        rummage_media::video::FRAME_TOKENS,
+        "{VIDEO_PREPROCESS}-w{window_s}-o{overlap_s}-f{frames}-t{frame_tokens}-{}",
         if audio { "av" } else { "v" }
     )
 }
 
-/// 建索引时带音频的视频窗口的版本：再加上片段长度上限（参数 `video_max_tokens`），如 `video-v2-w6-o0-f6-t70-av-m1024`。
+/// 建索引时带音频的视频窗口的版本：再加上片段长度上限（参数 `video_max_tokens`），如 `video-v2-w6-o0-f6-t140-av-m1152`。
 /// 上限决定哪些视频整段改为只看画面，改了它这些视频要重建；参考向量不受上限约束，用 `video_preprocess`
 pub fn video_av_preprocess(
     window_s: u32,
     overlap_s: u32,
     frames: u32,
+    frame_tokens: u32,
     max_tokens: usize,
 ) -> String {
     format!(
         "{}-m{max_tokens}",
-        video_preprocess(window_s, overlap_s, frames, true)
+        video_preprocess(window_s, overlap_s, frames, frame_tokens, true)
     )
 }
 
@@ -195,7 +201,7 @@ impl SpaceConfig {
         self.id(&self.model_sha256, TEXT_PREPROCESS)
     }
 
-    /// `tier` 为视觉 token 档位（参数表 `image_tokens`），档位决定向量。
+    /// `tier` 为视觉 token 档位（参数 `image_tokens`，长图切片为 `long_image_tokens`），档位决定向量。
     pub fn image(&self, tier: u32) -> SpaceId {
         self.id(
             &format!("{}+{}", self.model_sha256, self.mmproj_sha256),
@@ -257,16 +263,23 @@ mod tests {
         assert_ne!(cfg.media(&audio), cfg.image(140));
         assert_ne!(cfg.media(&audio), text);
         let (av, v) = (
-            video_preprocess(6, 0, 6, true),
-            video_preprocess(6, 0, 6, false),
+            video_preprocess(6, 0, 6, 70, true),
+            video_preprocess(6, 0, 6, 70, false),
         );
         assert_eq!(v, "video-v2-w6-o0-f6-t70-v");
         assert_eq!(av, "video-v2-w6-o0-f6-t70-av");
         assert_ne!(cfg.media(&av), cfg.media(&v));
-        assert_ne!(cfg.media(&v), cfg.media(&video_preprocess(2, 0, 2, false)));
+        assert_ne!(
+            cfg.media(&v),
+            cfg.media(&video_preprocess(2, 0, 2, 70, false))
+        );
+        assert_ne!(
+            cfg.media(&v),
+            cfg.media(&video_preprocess(6, 0, 6, 140, false))
+        );
         assert_eq!(
-            video_av_preprocess(6, 0, 6, 1024),
-            "video-v2-w6-o0-f6-t70-av-m1024"
+            video_av_preprocess(6, 0, 6, 140, 1152),
+            "video-v2-w6-o0-f6-t140-av-m1152"
         );
     }
 

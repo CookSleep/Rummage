@@ -1,10 +1,10 @@
 //! 搜索请求：计算查询向量后交给 `rummage_index::search`，在阻塞线程中执行。
 //! - 文本查询：去掉首尾空白，为空时返回空结果；查询向量用 `Input::Query` 计算，按“文本 + 查询空间”缓存（LRU），
 //!   同时走文件名通道。分数校准用 `text` 类型的背景分布，以图搜图与“找相似的”用 `similar`（`rummage_index::calib`）。
-//! - 找相似的：直接取索引中该片段已存的向量与空间，只检索同一模态，排除该文件本身；不推理，推理引擎不可用时也能用。
+//! - 找相似的：直接取索引中该片段已存的向量与空间（长图切片与整图档位不同时取同一文件的整图向量），只检索同一模态，排除该文件本身；不推理，推理引擎不可用时也能用。
 //!   文件没有向量（还没建好索引、不做内容索引）时回 `bad_request`。附了文字描述时（只限图片）改为重新读取这张图片，
 //!   与以图搜图一样计算查询向量，只检索图片、排除该文件本身。
-//! - 以图搜图：先检查网盘占位文件（`ensure_local`），再按当前的视觉 token 档位缩放（`rummage_media::prepare`），
+//! - 以图搜图：先检查网盘占位文件（`ensure_local`），再按图片识别精度（`image_tokens`）缩放（`rummage_media::prepare`），
 //!   与文字描述（`text`，可为空）一起用 `Input::ImageQuery` 计算查询向量，按“图片路径、大小、修改时间 + 文字”与图像空间缓存；
 //!   不走文件名与正文通道。路径只用于计算查询向量。
 //! - 推理引擎不可用（没有模型、创建失败、推理出错）时只返回文件名结果，并标记 `semantic_unavailable` 与原因
@@ -36,9 +36,9 @@ use crate::pipeline::{self, Pipeline, QueryEngine};
 /// 查询向量缓存的容量
 const CACHE_SIZE: usize = 256;
 
-/// 文字查询匹配度 90% 处比门槛高出的校准分数：门槛默认值 3.0 时为 3.8，即评测中混合库相关文件 z 的中位数 3.82
-/// （569 条）。50% 处就是门槛（参数 `min_relevance`），同一门槛也用来折叠结果
-const Z_SPAN_90: f64 = 0.8;
+/// 文字查询匹配度 90% 处比门槛高出的校准分数：门槛默认值 3.0 时为 4.2，即评测中混合库相关文件 z 的中位数 4.20
+/// （599 条）。50% 处就是门槛（参数 `min_relevance`），同一门槛也用来折叠结果
+const Z_SPAN_90: f64 = 1.2;
 /// 以图搜图与“找相似的”的两个锚点：z 按本次查询自身的分数分布换算，与文字查询不是同一尺度，也不折叠，所以不跟随门槛。
 /// 评测（混合库）中其他子集结果 z 的 90% 分位 2.54 处为 50%，第 1 名 z 的中位数 3.56 处为 90%
 const SIMILAR_Z_AT_50: f64 = 2.5;
@@ -140,12 +140,15 @@ fn image_vector(
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_nanos());
     let key = format!("{}\n{}\n{mtime}\n{text}", path.display(), meta.len());
-    let space_key = |e: &QueryEngine| e.image_space().map(|s| s.id.clone()).unwrap_or_default();
+    let values = state.params();
+    // 与库中普通图片的整图向量同一档位
+    let tier = params::int(&values, "image_tokens") as u32;
+    let space_key = |e: &QueryEngine| e.image_space(tier).map(|s| s.id).unwrap_or_default();
     if let Some(v) = lock(&state.queries).get(&key, &space_key(e)) {
-        return Ok(e.image_space().map(|s| (v, s.clone())));
+        return Ok(e.image_space(tier).map(|s| (v, s)));
     }
-    let rgb = rummage_media::prepare(path, e.tier(), params::max_image_pixels(&state.params()))
-        .map_err(|err| {
+    let rgb =
+        rummage_media::prepare(path, tier, params::max_image_pixels(&values)).map_err(|err| {
             let msg = match err {
                 // 错误本身说“不识别内容”，是给建立索引用的
                 rummage_media::Error::TooLarge { .. } => format!(
@@ -158,14 +161,14 @@ fn image_vector(
         })?;
     let input = Input::ImageQuery {
         rgb,
-        tokens: e.tier(),
+        tokens: tier,
         text: text.to_string(),
     };
     // GPU 失效时 embed_query 换用新引擎，向量空间从调用后的引擎取
     match p.embed_query(e, input) {
         Ok(v) => {
             lock(&state.queries).put(&key, &space_key(e), v.clone());
-            Ok(e.image_space().map(|s| (v, s.clone())))
+            Ok(e.image_space(tier).map(|s| (v, s)))
         }
         Err(err) => {
             log::warn!("以图搜图的查询向量计算失败：{err}");
@@ -236,7 +239,7 @@ pub(super) fn respond(
                 filter.exclude_file = Some(sim.file_id);
                 modality = Some("image".to_string());
                 let mut engine = query_engine();
-                let target = engine.as_mut().filter(|e| e.image_space().is_some());
+                let target = engine.as_mut().filter(|e| e.images());
                 let Some((p, e)) = pipeline.zip(target) else {
                     return Ok(empty(
                         start,
@@ -266,7 +269,7 @@ pub(super) fn respond(
             (None, Some(path)) => {
                 let path = Path::new(path);
                 let mut engine = query_engine();
-                let target = engine.as_mut().filter(|e| e.image_space().is_some());
+                let target = engine.as_mut().filter(|e| e.images());
                 let Some((p, e)) = pipeline.zip(target) else {
                     return Ok(empty(
                         start,
@@ -476,13 +479,13 @@ mod tests {
     fn match_pct_follows_threshold() {
         // 门槛默认值处为 50%，相关文件的中位数处为 90%，之间线性换算
         assert_eq!(match_pct(Some(3.0), false, 3.0), Some(50));
-        assert_eq!(match_pct(Some(3.8), false, 3.0), Some(90));
-        assert_eq!(match_pct(Some(3.4), false, 3.0), Some(70));
-        assert_eq!(match_pct(Some(2.8), false, 3.0), Some(40));
-        // 50% 跟随门槛，90% 为门槛加 0.8
+        assert_eq!(match_pct(Some(4.2), false, 3.0), Some(90));
+        assert_eq!(match_pct(Some(3.6), false, 3.0), Some(70));
+        assert_eq!(match_pct(Some(2.7), false, 3.0), Some(40));
+        // 50% 跟随门槛，90% 为门槛加 1.2
         assert_eq!(match_pct(Some(3.5), false, 3.5), Some(50));
-        assert_eq!(match_pct(Some(4.3), false, 3.5), Some(90));
-        assert_eq!(match_pct(Some(3.0), false, 3.5), Some(25));
+        assert_eq!(match_pct(Some(4.7), false, 3.5), Some(90));
+        assert_eq!(match_pct(Some(3.0), false, 3.5), Some(33));
         // 略低于门槛的已被折叠，不显示 50%
         assert_eq!(match_pct(Some(2.99), false, 3.0), Some(49));
         // 以图搜图与找相似的用另一组锚点，不跟随门槛

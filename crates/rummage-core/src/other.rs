@@ -1,11 +1,13 @@
 //! 非 Windows 平台的占位实现：只用于编译和测试。核心进程目前只在 Windows 上作为独立进程运行，
-//! Android 上引擎在应用进程内运行，这里一律返回“不支持”；资源占用控制的检测与通知都不做
+//! Android 上引擎在应用进程内运行，这里一律返回“不支持”；资源占用控制的通知不做。
+//! Android 上本文件作为 `android.rs` 的子模块使用，检测（`sense`、`free_gb`）由 `android.rs` 实现
 use std::convert::Infallible;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(not(target_os = "android"))]
 use crate::resource::Sensed;
 use crate::{BindError, Power, State};
 
@@ -75,11 +77,13 @@ pub fn lower_priority() -> io::Result<()> {
 }
 
 /// 不检测：不按全屏、电池、磁盘空间暂停
+#[cfg(not(target_os = "android"))]
 pub(crate) fn sense(_dir: &Path) -> Sensed {
     Sensed::default()
 }
 
 /// 不查询剩余空间
+#[cfg(not(target_os = "android"))]
 pub(crate) fn free_gb(_dir: &Path) -> Option<f64> {
     None
 }

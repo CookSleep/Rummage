@@ -1,7 +1,5 @@
-//! 引擎的挂起与重建：绑定旧引擎的作业放回、自检期间挂起与 `reload`、引导未完成时挂起、关闭图片索引、
-//! 档位改变后领到的作业放回。
+//! 引擎的挂起与重建：绑定旧引擎的作业放回、自检期间挂起与 `reload`、引导未完成时挂起、关闭图片索引。
 use super::*;
-use crate::pipeline::schedule::{Claim, claim};
 
 #[test]
 fn stale_engine_jobs_released() {
@@ -64,7 +62,7 @@ fn selftest_hold_and_reload() {
     p.reload();
     p.hold(Hold::Selftest, false);
     let s = e.wait_idle(0);
-    assert_eq!(s.backend.as_deref(), Some("CPU"));
+    assert_eq!(s.backend.as_deref(), Some(rummage_embed::cpu_name()));
     assert_eq!(e.builds.load(Ordering::Relaxed), builds + 1);
     assert!(e.stored("c.txt"));
 }
@@ -113,38 +111,4 @@ fn reload_records_released_engine() {
     assert!(p.held());
     p.hold(Hold::Models, false);
     assert!(!p.held());
-}
-
-#[test]
-fn claim_releases_job_for_stale_tier() {
-    let corgi = fs::read(CORGI).unwrap();
-    let mut e = env(&[("a.jpg", &corgi)]);
-    // 引导未完成，调度线程不领取，由测试直接调用 claim
-    lock(&e.db).meta_set(ONBOARDED_KEY, "0").unwrap();
-    e.start(true, true);
-    let p = e.pipeline.as_ref().unwrap();
-    let cfg = SpaceConfig::current(Backend::Cpu);
-    let engine = |tier: u32| Engine {
-        backend: e.stub.clone(),
-        gpu: None,
-        device: "CPU".into(),
-        tier,
-        images: true,
-        audio: true,
-        video: true,
-        text_space: space_row(&cfg, None),
-        image_space: space_row(&cfg, Some(tier)),
-        cfg: cfg.clone(),
-        failed: AtomicBool::new(false),
-        driver_failed: AtomicBool::new(false),
-        released: Released(Arc::new(AtomicBool::new(false))),
-    };
-    // 参数是默认的 140 档，引擎还是旧的 70 档：放回、不计失败
-    let res = claim(&lock(&e.db), &p.shared, &engine(70)).unwrap();
-    assert!(matches!(res, Claim::Stale));
-    assert_eq!(e.job("a.jpg"), Some(("pending".into(), 0, None)));
-    let res = claim(&lock(&e.db), &p.shared, &engine(140)).unwrap();
-    assert!(matches!(res, Claim::Job(ref j) if j.name == "a.jpg"));
-    assert_eq!(e.job("a.jpg").unwrap().0, "preprocessing");
-    lock(&e.db).release_jobs().unwrap();
 }

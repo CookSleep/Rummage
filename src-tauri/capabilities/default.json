@@ -14,6 +14,8 @@
     "pause",
     "failures",
     "setup",
+    "storage",
+    "background",
     "settings",
     "data",
     "diagnostics",

@@ -2,19 +2,23 @@
 //!
 //! 目标是与生成黄金样本的 PIL 流程（`scripts/golden/llama_embed.py` 的 `to_rgb`、`target_size` 与 `dump_golden_inputs.py`）
 //! 逐像素一致，解码器本身的差异（主要是 JPEG 的 IDCT 与色度上采样）除外：
-//! - 解码：Windows 先用 WIC（`windows.rs`），失败再用 `image` crate；GIF 和其他平台只用 `image`。只取第一帧，
+//! - 解码：Windows 先用 WIC（`windows.rs`），Android 先用 `AImageDecoder`（`android.rs`），失败再用 `image` crate；
+//!   GIF 和其他平台只用 `image`。只取第一帧，
 //!   带透明通道的图按 `Image.alpha_composite(白底, 图).convert("RGB")` 的整数算法合成到白底，不做色彩管理。
 //! - 像素数超过调用方给的上限（参数表 `max_image_mp`）时，在分配像素内存之前报错。
 //! - 文档的内嵌图片在内存中，用 `decode_bytes` 解码（只走 `image`），近乎纯色的由 `is_flat` 判断后跳过。
 //! - 每通道 16 位的图两条路径都取高字节（`>> 8`）转 8 位，与 PIL 处理 16 位 RGB PNG 相同；
 //!   PIL 对 16 位灰度图是把大于 255 的值截成 255，这里不照搬。
 //! - EXIF 方向：transformers 的 `load_image` 会做 `exif_transpose`，这里同样转正（上述脚本没有做，黄金样本没有 EXIF，不受影响）。
+//!   Android 上 API 31 起 AImageDecoder 按 EXIF 方向转正，API 30 上 `image` 能解的格式交给它。
 //! - 尺寸：`target_size` 移植 transformers Gemma 4 的 `get_aspect_ratio_preserving_size`，边长为 48 的倍数。
 //! - 缩放：`resize_bicubic` 移植 Pillow 的双三次缩放（`resample.rs`），两端共用。
 //! - 缩略图见 `thumb.rs`；长图切片的几何见 `slice.rs`；音频的解码与切段见 `audio`；
-//!   视频的窗口、抽帧与组装见 `video`；两者调用 ffmpeg 的方式见 `ffmpeg`。
+//!   视频的窗口、抽帧与组装见 `video`；两者调用 ffmpeg 的方式见 `ffmpeg`（Android 的音视频改用系统解码器，见 `android.rs`）。
 //!   结果预览中视频命中时刻的画面见 `frame`。
 
+#[cfg(target_os = "android")]
+mod android;
 pub mod audio;
 pub mod ffmpeg;
 mod frame;
@@ -71,6 +75,14 @@ pub fn decode(path: &Path, max_pixels: u64) -> Result<Rgb, Error> {
         Ok(None) => {}
         Err(err @ Error::TooLarge { .. }) => return Err(err),
         // WIC 的报错已在 windows.rs 写调试日志，改用 image
+        Err(_) => {}
+    }
+    #[cfg(target_os = "android")]
+    match android::decode(path, max_pixels) {
+        Ok(Some(img)) => return Ok(img),
+        Ok(None) => {}
+        Err(err @ Error::TooLarge { .. }) => return Err(err),
+        // 报错已在 android.rs 写调试日志，改用 image
         Err(_) => {}
     }
     decode_image(path, max_pixels)
@@ -371,13 +383,17 @@ mod tests {
     /// 两条解码路径的结果；非 Windows 只有 image 一条。
     fn both_paths(name: &str) -> Vec<(&'static str, Rgb)> {
         let path = fixtures().join(name);
-        let mut out = vec![("image", decode_image(&path, MAX_PIXELS).unwrap())];
+        let image = ("image", decode_image(&path, MAX_PIXELS).unwrap());
         #[cfg(windows)]
-        out.push((
-            "wic",
-            from_frame(windows::decode(&path, MAX_PIXELS).unwrap().unwrap()),
-        ));
-        out
+        return vec![
+            image,
+            (
+                "wic",
+                from_frame(windows::decode(&path, MAX_PIXELS).unwrap().unwrap()),
+            ),
+        ];
+        #[cfg(not(windows))]
+        vec![image]
     }
 
     /// 16 位图按高字节转 8 位，两条路径都与 gen.py 写出的期望值逐字节相同。

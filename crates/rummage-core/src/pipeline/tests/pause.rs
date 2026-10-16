@@ -1,4 +1,5 @@
-//! 暂停与空闲卸载：暂停时不领取新作业但查询照常、暂停期间不显示剩余时间、空闲卸载时限的修改立即生效。
+//! 暂停、降温与空闲卸载：暂停时不领取新作业但查询照常、暂停期间不显示剩余时间、降温时处理中的作业完成前不再领取、
+//! 空闲卸载时限的修改立即生效。
 use super::*;
 
 fn txt_files(n: usize) -> Vec<(String, Vec<u8>)> {
@@ -103,6 +104,35 @@ fn eta_hidden_while_paused_and_reset_after() {
 }
 
 #[test]
+fn slow_waits_for_inflight_jobs() {
+    let files = txt_files(8);
+    let refs: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
+    let mut e = env(&refs);
+    e.threads = Some(1);
+    *lock(&e.stub.hold) = true;
+    e.start(true, true);
+    wait_entered(&e);
+    let p = e.pipeline.as_ref().unwrap();
+    p.set_slow(true);
+    // 调度线程交出手头的作业后停在降温等待中，处理中的作业没完成就不再领取
+    thread::sleep(Duration::from_millis(500));
+    let claimed = e.count("SELECT COUNT(*) FROM jobs WHERE stage <> 'pending'");
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        e.count("SELECT COUNT(*) FROM jobs WHERE stage <> 'pending'"),
+        claimed
+    );
+    release_hold(&e);
+    // 关闭降温后不再等完休息时间
+    p.set_slow(false);
+    let s = e.wait_idle(0);
+    assert_eq!(s.done, 8);
+}
+
+#[test]
 fn engine_idle_applied() {
     #[derive(Default)]
     struct Idle(Mutex<Vec<Duration>>);
@@ -127,12 +157,10 @@ fn engine_idle_applied() {
         backend: idle.clone(),
         gpu: None,
         device: "CPU".into(),
-        tier: cpu.tier,
         images: true,
         audio: true,
         video: true,
         text_space: cpu.text_space.clone(),
-        image_space: cpu.image_space.clone(),
         cfg: cpu.cfg.clone(),
         failed: AtomicBool::new(false),
         driver_failed: AtomicBool::new(false),

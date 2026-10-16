@@ -37,6 +37,7 @@
 //! 领取作业与退出时放回作业都在数据库锁内，并在锁内检查停止标志：放回之后不会再领出新作业。
 //! 停止：`stop` 让各线程在手头的文件处理完后退出，并把处理中的作业放回 `pending`（不计失败）；
 //! 核心崩溃时没有这一步，下次启动由 `Db::recover_jobs` 计一次失败。
+//! 降温：`set_slow` 打开时调度线程一次只处理一个作业，完成后休息与它处理时长相同的时间再领取下一个（`schedule`）。
 //! 暂停：`set_paused` 给出原因（`resource`）时调度线程不再领取新作业，已领取的照常处理完；原因变化时立即广播一次
 //! `IndexProgress`。系统睡眠与唤醒验证期间同样不领取新作业，报为 `sleeping`（`wake`）。查询不受暂停影响，
 //! 暂停期间照常创建推理引擎；只有唤醒验证进行中时查询先等它结束。
@@ -86,6 +87,7 @@ pub use options::PREFERRED_DEVICE_KEY;
 pub use options::{Config, Disabled, DisabledGpus, DriverEvents, EngineSpec, Factory, Options};
 pub(crate) use options::{ONBOARDED_KEY, ONBOARDING_STEP_KEY};
 pub(crate) use prep::reason::label;
+pub(crate) use rebuild::void_kinds;
 // 参数表中的值；缺少或不合法时用默认值
 pub(crate) use rummage_proto::params::{float, int, value as param};
 use schedule::schedule;
@@ -105,7 +107,9 @@ const VIDEO_PRESETS: [(i64, u32, u32, bool); 3] =
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VideoOpts {
     pub windows: WindowOpts,
-    /// 带音频时的 token 上限（`video_max_tokens`）；纯画面不设上限，窗口最多 10 帧，远小于推理上下文
+    /// 每帧的视觉 token 档位（`video_frame_tokens`）
+    pub frame_tokens: u32,
+    /// 带音频时的 token 上限（`video_max_tokens`）；纯画面不设上限，窗口最多 10 帧 140 档约 1400 token，在推理上下文以内
     pub audio_tokens: Option<usize>,
 }
 
@@ -132,11 +136,13 @@ pub fn video_opts(values: &BTreeMap<String, ParamValue>) -> VideoOpts {
             overlap_s,
             frames,
         },
+        frame_tokens: int(values, "video_frame_tokens") as u32,
         audio_tokens: audio.then(|| int(values, "video_max_tokens").max(1) as usize),
     }
 }
 
-/// 一个推理后端及其向量空间
+/// 一个推理后端及其文本空间。图片、长图切片与视频帧的档位不属于引擎：推理进程接受任意档位的输入（mtmd 的视觉 token
+/// 上限取模型允许的最大值），各输入按领取作业时的参数（`Task::params`）缩放，向量空间也按它算出
 struct Engine {
     /// 不得克隆到 Engine 之外，否则 wait_released 失效
     backend: Arc<dyn EmbeddingBackend>,
@@ -144,17 +150,15 @@ struct Engine {
     gpu: Option<selftest::CandidateReport>,
     /// 状态中显示的设备名称
     device: String,
-    tier: u32,
     /// 处理图片（mmproj 可用且 `index_images` 开启）
     images: bool,
     /// 处理音频（mmproj 可用且 `index_audio` 开启）
     audio: bool,
     /// 处理视频（mmproj 可用且 `index_video` 开启）
     video: bool,
-    /// 长图切片、音频与视频的空间按切片档位、切段与窗口参数由它算出
+    /// 图片、音频与视频的空间按档位、切段与窗口参数由它算出
     cfg: SpaceConfig,
     text_space: Space,
-    image_space: Space,
     /// 出现过设备丢失或后端失效；还绑定它的已预处理作业放回 `pending`
     failed: AtomicBool,
     /// 出现过驱动类错误（已停用所有显卡并下过结论）
@@ -270,6 +274,8 @@ struct Shared {
     woken: Mutex<bool>,
     wake_cv: Condvar,
     stop: AtomicBool,
+    /// 降温：一次只处理一个作业，完成后休息同样长的时间（`schedule`）
+    slow: AtomicBool,
     /// 暂停领取新作业的原因（不含睡眠）。广播进度时在这把锁内读取状态，事件顺序与修改顺序一致
     paused: Mutex<Option<PauseReason>>,
     /// 睡眠与唤醒验证的状态（`wake`）
@@ -460,14 +466,14 @@ impl QueryEngine {
         &self.0.text_space
     }
 
-    /// 没有加载 mmproj 时为空
-    pub fn image_space(&self) -> Option<&Space> {
-        self.0.images.then_some(&self.0.image_space)
+    /// 加载了 mmproj 且开启了图片
+    pub fn images(&self) -> bool {
+        self.0.images
     }
 
-    /// 视觉 token 档位
-    pub fn tier(&self) -> u32 {
-        self.0.tier
+    /// 档位为 `tier` 的图像空间；没有加载 mmproj 或没有开启图片时为空
+    pub fn image_space(&self, tier: u32) -> Option<Space> {
+        self.0.images.then(|| space_row(&self.0.cfg, Some(tier)))
     }
 }
 
@@ -530,6 +536,7 @@ impl Pipeline {
             woken: Mutex::new(false),
             wake_cv: Condvar::new(),
             stop: AtomicBool::new(false),
+            slow: AtomicBool::new(false),
             paused: Mutex::new(paused),
             sleep: Mutex::new(wake::Sleep::default()),
             sleep_cv: Condvar::new(),
@@ -610,6 +617,20 @@ impl Pipeline {
         self.shared.send_status(reason);
     }
 
+    /// 打开或关闭降温；关闭后调度线程不再等完剩下的休息时间
+    pub fn set_slow(&self, slow: bool) {
+        if self.shared.slow.swap(slow, Ordering::Relaxed) != slow {
+            log::info!(
+                "{}",
+                if slow {
+                    "手机发热，放慢建立索引"
+                } else {
+                    "结束降温"
+                }
+            );
+        }
+    }
+
     /// 参数 `engine_idle_min` 修改后交给当前的推理引擎，立即生效
     pub fn apply_engine_idle(&self) {
         let min = int(&lock(&self.shared.params), "engine_idle_min").max(0) as u64;
@@ -662,8 +683,7 @@ impl Pipeline {
         let Some(next) = self.query_engine() else {
             return Err(err);
         };
-        // 只换引擎不换档位：图像已按旧引擎的档位缩放
-        if Arc::ptr_eq(&next.0, &engine.0) || next.tier() != engine.tier() {
+        if Arc::ptr_eq(&next.0, &engine.0) {
             return Err(err);
         }
         log::warn!("查询改用 {} 重新计算：{err}", next.0.device);

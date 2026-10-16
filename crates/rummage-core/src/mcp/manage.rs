@@ -334,7 +334,7 @@ pub fn settings_text(values: &BTreeMap<String, ParamValue>, only: Option<&ParamD
         Group::Advanced,
     ] {
         let _ = write!(out, "\n{}:", group_text(g));
-        for d in params::PARAMS.iter().filter(|d| d.group == g) {
+        for d in params::PARAMS.iter().filter(|d| d.group == g && d.shown()) {
             setting_text(&mut out, d, current(values, d));
         }
     }

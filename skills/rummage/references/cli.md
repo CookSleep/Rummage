@@ -27,7 +27,7 @@ rummage-core search [<查询>] [--image <图片>] [--type <类型,…>] [--folde
 `--json` 输出一行：
 
 ```json
-{"protocol":1,"hits":[…],"tookMs":12,"partial":false,"semanticUnavailable":false,"unavailable":null,"weakOmitted":0}
+{"protocol":2,"hits":[…],"tookMs":12,"partial":false,"semanticUnavailable":false,"unavailable":null,"weakOmitted":0}
 ```
 
 - `hits[]` 的常用字段：`path`、`name`、`kind`、`size`（字节）、`mtime`（Unix 毫秒）、`matchPct`（0–100，可能为 null）、`lowRelevance`、`cloud`（仅在云端）、`offline`（设备未连接）、`segments[]`（`segmentId`、`locatorJson`）、`nameHit`、`textSegments`、`snippet`（`segmentId` 即命中 ID，`text`）。
@@ -42,7 +42,7 @@ rummage-core status [--json]
 ```
 
 显示版本、首次设置是否完成、索引状态与暂停原因、进度（各类型）、失败数、推理设备、已索引的文件夹。
-JSON：`{"protocol":1,"coreVersion":…,"onboarded":…,"index":{…},"roots":[{"id","path","offline","files","excludes"}]}`。
+JSON：`{"protocol":2,"coreVersion":…,"onboarded":…,"index":{…},"roots":[{"id","path","offline","files","excludes"}]}`。
 
 ## context
 
@@ -51,7 +51,7 @@ rummage-core context <命中 ID> [--json]
 ```
 
 输出命中所在文件、位置，以及已索引的前文、命中段、后文。命中已失效（文件重新建立过索引）或没有文字内容时退出码为 1。
-JSON：`{"protocol":1,"file":{…}|null,"segment":{"fileId","locatorJson","text","before","after"}}`。
+JSON：`{"protocol":2,"file":{…}|null,"segment":{"fileId","locatorJson","text","before","after"}}`。
 
 ## folders
 
@@ -70,7 +70,7 @@ rummage-core folders remove <文件夹> [--json]
 | `--no-exclude` | 清空排除规则（Windows PowerShell 5.1 不会把空字符串参数传给程序，不要用 `--exclude ""`） |
 
 `folders` 列出识别内容的文件类型、索引进度和每个文件夹的文件数与排除规则；没有已索引的文件夹时退出码为 1。`remove` 只移除索引，不删除文件。
-JSON：`folders` 为 `{"protocol":1,"kinds":[…],"roots":[{"id","path","offline","files","excludes"}],"index":{…}|null}`；`add`、`set` 为 `{"protocol":1,"message":…,"root":{…}}`，`remove` 为 `{"protocol":1,"message":…}`。
+JSON：`folders` 为 `{"protocol":2,"kinds":[…],"roots":[{"id","path","offline","files","excludes"}],"index":{…}|null}`；`add`、`set` 为 `{"protocol":2,"message":…,"root":{…}}`，`remove` 为 `{"protocol":2,"message":…}`。
 
 ## settings
 
@@ -81,7 +81,7 @@ rummage-core settings set <键> <值> [--json]
 
 列出参数的键、当前值、默认值、允许范围或选项、是否修改后重建索引，以及名称与说明。值的写法：开关写 `true` / `false`；有名称的选项写数值或名称（如 `settings set video_preset 找动作`）。超出范围时退出码为 2。
 改了标明“修改后重建索引”的参数后，Rummage 在后台重建受影响类型的索引，期间旧索引仍可搜索。
-JSON：`settings` 为 `{"protocol":1,"settings":[{"key","group","section","kind","default","affectsIndex","indexKinds","label","help","basis","value"}]}`；`settings set` 为 `{"protocol":1,"key","value","changed","rebuild":[…],"message"}`。
+JSON：`settings` 为 `{"protocol":2,"settings":[{"key","group","section","kind","default","affectsIndex","indexKinds","label","help","basis","platform","value"}]}`；`settings set` 为 `{"protocol":2,"key","value","changed","rebuild":[…],"message"}`。
 
 设备选择、模型下载与删除、清空索引、数据目录不能在命令行中修改。
 
@@ -92,7 +92,7 @@ rummage-core pause [--minutes <分钟>] [--json]
 rummage-core resume [--json]
 ```
 
-暂停建立索引，`--minutes` 为 1–10080，到时自动恢复；不给时一直暂停到 `resume`。暂停期间照常可以搜索，重新启动 Rummage 后仍然有效。`resume` 只取消手动暂停，使用电池、全屏、磁盘空间不足时的自动暂停仍按设置生效。JSON：`{"protocol":1,"message":…}`。
+暂停建立索引，`--minutes` 为 1–10080，到时自动恢复；不给时一直暂停到 `resume`。暂停期间照常可以搜索，重新启动 Rummage 后仍然有效。`resume` 只取消手动暂停，未接电源、全屏、磁盘空间不足时的自动暂停仍按设置生效。JSON：`{"protocol":2,"message":…}`。
 
 ## failed
 
@@ -103,7 +103,7 @@ rummage-core failed retry [--json]
 
 `failed` 列出最近 100 个建立索引失败的文件与原因，以及总数和其中能重试的数量（加密文档不能重试）；没有失败的文件时退出码为 1。
 `failed retry` 把能重试的全部重新排队；没有能重试的时退出码为 1。
-JSON：`failed` 为 `{"protocol":1,"total","retryable","files":[{"fileId","name","path","kind","reason","failedAt","retryable"}]}`；`failed retry` 为 `{"protocol":1,"message":…}`。
+JSON：`failed` 为 `{"protocol":2,"total","retryable","files":[{"fileId","name","path","kind","reason","failedAt","retryable"}]}`；`failed retry` 为 `{"protocol":2,"message":…}`。
 
 ## 退出码
 

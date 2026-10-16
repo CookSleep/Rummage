@@ -157,19 +157,20 @@ fn parse(manifest: &str, vectors: &str) -> Result<Parsed, Error> {
     for vid in m.videos {
         for (audio, inputs) in [(true, vid.inputs_av), (false, vid.inputs_v)] {
             let id = format!("{}_{}", vid.id, if audio { "av" } else { "v" });
-            let version =
-                space::video_preprocess(vid.window_seconds.round() as u32, 0, vid.frames, audio);
+            // 黄金样本按自己的档位计算，不受参数 `video_frame_tokens` 影响
+            let version = space::video_preprocess(
+                vid.window_seconds.round() as u32,
+                0,
+                vid.frames,
+                v.video_vision_tokens_per_image,
+                audio,
+            );
             items.push(Item {
                 want: want(&id)?,
                 id,
                 source: Source::Video(inputs, version),
             });
         }
-    }
-    if v.video_vision_tokens_per_image != rummage_media::video::FRAME_TOKENS
-        && items.iter().any(|i| matches!(i.source, Source::Video(..)))
-    {
-        return Err(bad("参考向量的视频帧档位与程序不同。".to_string()));
     }
     Ok(Parsed {
         items,
@@ -373,6 +374,7 @@ mod tests {
             ),
             (15, 5, 3, 2)
         );
+        // 黄金样本始终按自己的档位（视频帧 70）
         assert_eq!(p.video_tokens, 70);
         let Source::Video(inputs, version) = &p.items[23].source else {
             panic!("第 24 项应为视频窗口")

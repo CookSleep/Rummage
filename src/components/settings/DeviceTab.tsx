@@ -2,17 +2,18 @@ import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { BlockedGpu, SelftestStatus, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
-import { blockedName, CPU_FALLBACK_TEXT, cpuFallbackReason, cpuFaster, deviceName, SELFTEST_TEXT, switchedDevice, switchedText } from '../../lib/device'
+import { isAndroid } from '../../lib/platform'
+import { blockedName, CPU_FALLBACK_TEXT, cpuFallbackReason, cpuFaster, cpuName, deviceName, SELFTEST_TEXT, switchedDevice, switchedText } from '../../lib/device'
 import { CpuIcon, GpuIcon, ResetIcon, WarningIcon } from '../icons'
 import ConfirmDialog, { renderMessage } from '../ConfirmDialog'
 import { HoverTip } from '../Tip'
 import { DeviceList, DevicePicker } from '../onboarding/SelftestStep'
-import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, SMALL_BUTTON } from '../onboarding/styles'
+import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, SMALL_BUTTON } from '../onboarding/styles'
 import { HEADER_BUTTON, NOTICE_BOX, ROW_DESC, SECTION_TITLE } from './styles'
 
 /** 实际生效的设备及原因：与核心选择后端的规则一致，选了 CPU、没有检测过或选中的显卡不能用时都用 CPU */
 function effective(st: SelftestStatus): { gpu: boolean; name: string; reason: string } {
-  const cpu = (reason: string) => ({ gpu: false, name: 'CPU', reason })
+  const cpu = (reason: string) => ({ gpu: false, name: cpuName(st), reason })
   if (st.preferred === 'cpu') return cpu('已选择使用 CPU')
   if (!st.devices.length) return cpu('还没有检测过设备')
   const d = st.selected !== null ? st.devices[st.selected] : undefined
@@ -42,7 +43,8 @@ function effective(st: SelftestStatus): { gpu: boolean; name: string; reason: st
  * 选了的显卡之后不能用时核心按自动选择，下拉菜单显示“自动”并说明原因。
  * 结果过期时后台服务自动重新检测（显示与手动检测相同）；检测未通过而用 CPU、或原本要用的设备出了问题而改用别的设备时提示，可手动重新检测；
  * 检测通过但 CPU 更快时只在当前设备下说明，不提示。
- * 被屏蔽的显卡单独列出（本次测过未通过的同时留在检测结果中），可以解除屏蔽（确认后删除它的全部屏蔽记录，后台服务随即只重测它）；重新检测不清除屏蔽与未通过记录
+ * 被屏蔽的显卡单独列出（本次测过未通过的同时留在检测结果中），可以解除屏蔽（确认后删除它的全部屏蔽记录，后台服务随即只重测它）；重新检测不清除屏蔽与未通过记录。
+ * Android 上只用 CPU，只显示检测结果与“重新检测”
  */
 export default function DeviceTab({ setup }: { setup: SetupStatus }) {
   const [error, setError] = useState('')
@@ -87,42 +89,44 @@ export default function DeviceTab({ setup }: { setup: SetupStatus }) {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-3">
-        <h4 className={SECTION_TITLE}>使用的设备</h4>
-        <DevicePicker st={st} />
-        {(fallback === 'failed' || fallback === 'blocked' || fallback === 'gpusOff') && (
-          <div className={NOTICE_BOX}>
-            <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
-            <span>{CPU_FALLBACK_TEXT[fallback]}，已改用 CPU 建立索引，速度较慢。</span>
-          </div>
-        )}
-        {switched && (
-          <div className={NOTICE_BOX}>
-            <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
-            <span>{switchedText(switched)}</span>
-          </div>
-        )}
-        {st.preferredError && !st.running && (
-          <div className={NOTICE_BOX}>
-            <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
-            <span data-selectable-text>{st.preferredError}</span>
-          </div>
-        )}
-        <div className={CARD}>
-          <div className={CARD_ROW}>
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white">
-              {cur.gpu ? <GpuIcon className="h-4 w-4" /> : <CpuIcon className="h-4 w-4" />}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm text-gray-800 dark:text-gray-100">
-                {st.running ? '正在检测' : cur.name}
-                {!st.running && <HoverTip label={cur.name} wrap />}
+      {!isAndroid && (
+        <section className="space-y-3">
+          <h4 className={SECTION_TITLE}>使用的设备</h4>
+          <DevicePicker st={st} />
+          {(fallback === 'failed' || fallback === 'blocked' || fallback === 'gpusOff') && (
+            <div className={NOTICE_BOX}>
+              <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
+              <span>{CPU_FALLBACK_TEXT[fallback]}，已改用 CPU 建立索引，速度较慢。</span>
+            </div>
+          )}
+          {switched && (
+            <div className={NOTICE_BOX}>
+              <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
+              <span>{switchedText(switched)}</span>
+            </div>
+          )}
+          {st.preferredError && !st.running && (
+            <div className={NOTICE_BOX}>
+              <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
+              <span data-selectable-text>{st.preferredError}</span>
+            </div>
+          )}
+          <div className={CARD}>
+            <div className={CARD_ROW}>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white">
+                {cur.gpu ? <GpuIcon className="h-4 w-4" /> : <CpuIcon className="h-4 w-4" />}
               </span>
-              {!st.running && <span data-selectable-text className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{cur.reason}</span>}
-            </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-gray-800 dark:text-gray-100">
+                  {st.running ? '正在检测' : cur.name}
+                  {!st.running && <HoverTip label={cur.name} wrap />}
+                </span>
+                {!st.running && <span data-selectable-text className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{cur.reason}</span>}
+              </span>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -132,7 +136,7 @@ export default function DeviceTab({ setup }: { setup: SetupStatus }) {
             {st.running ? '正在检测' : st.devices.length ? '重新检测' : '开始检测'}
           </button>
         </div>
-        <p className={ROW_DESC}>{SELFTEST_TEXT}期间暂停建立索引。未通过或已屏蔽的显卡在更新显卡驱动或 Rummage 后，再次重新检测才会参与测试。</p>
+        <p className={ROW_DESC}>{SELFTEST_TEXT}期间暂停建立索引。{isAndroid ? '' : '未通过或已屏蔽的显卡在更新显卡驱动或 Rummage 后，再次重新检测才会参与测试。'}</p>
         {st.devices.length ? <DeviceList devices={st.devices} /> : <p className="text-sm text-gray-500 dark:text-gray-400">还没有检测过</p>}
         {st.error && <p data-selectable-text className={ERROR_TEXT}>{renderMessage(st.error, 'font-semibold')}</p>}
         {unblockNote && !st.running && <p data-selectable-text className={ROW_DESC}>{unblockNote}</p>}
@@ -141,7 +145,7 @@ export default function DeviceTab({ setup }: { setup: SetupStatus }) {
         {error && <p data-selectable-text className={ERROR_TEXT}>{error}</p>}
       </section>
 
-      {st.blocked.length > 0 && (
+      {!isAndroid && st.blocked.length > 0 && (
         <section className="space-y-3">
           <h4 className={SECTION_TITLE}>已屏蔽的显卡</h4>
           <p className={ROW_DESC}>出现过驱动错误的显卡会被屏蔽，自动检测不再测试它，也不会使用它。</p>
@@ -159,7 +163,7 @@ export default function DeviceTab({ setup }: { setup: SetupStatus }) {
                   <span data-selectable-text className="mt-0.5 block whitespace-pre-line text-xs text-gray-500 dark:text-gray-400">{b.reason ?? '这块显卡出现过驱动错误。'}</span>
                 </span>
                 {/* 禁用的按钮收不到悬停，气泡挂在外层 */}
-                <span className="shrink-0">
+                <span className={ROW_ACTIONS}>
                   <button type="button" className={SMALL_BUTTON} disabled={st.running} onClick={() => setUnblocking(b)}>
                     解除屏蔽
                   </button>

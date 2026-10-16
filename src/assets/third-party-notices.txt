@@ -1,11 +1,11 @@
 Rummage 第三方许可清单 / Third-Party Notices
 
-Rummage 以 MIT 协议发布。本文件列出 Rummage 使用的第三方组件及其许可原文，其中 Rust 依赖按 Windows 版统计。
-Rummage is released under the MIT License. This file lists the third-party components used by Rummage and their license texts. Rust dependencies are those of the Windows version.
+Rummage 以 MIT 协议发布。本文件列出 Rummage 使用的第三方组件及其许可原文，其中 Rust 依赖按 Windows 版与 Android 版统计。
+Rummage is released under the MIT License. This file lists the third-party components used by Rummage and their license texts. Rust dependencies are those of the Windows and Android versions.
 
 
 ================================================================================
-llama.cpp / ggml（安装目录中的 llama\cpu\、llama\vulkan\）
+llama.cpp / ggml（安装目录中的 llama\cpu\、llama\vulkan\，Android 版 APK 中的 lib/arm64-v8a/）
 ================================================================================
 
 MIT License
@@ -673,7 +673,7 @@ litigation is filed.
 
 
 ================================================================================
-Rust 依赖（共 494 个包）
+Rust 依赖（共 531 个包）
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -2987,6 +2987,44 @@ pub(super) mod x86_64;
 
 --------------------------------------------------------------------------------
 ISC License（ISC）
+使用者：inotify-sys 0.1.8
+--------------------------------------------------------------------------------
+
+Copyright (c) Hanno Braun and contributors
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+
+--------------------------------------------------------------------------------
+ISC License（ISC）
+使用者：inotify 0.11.5
+--------------------------------------------------------------------------------
+
+Copyright (c) Hanno Braun and contributors
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+
+--------------------------------------------------------------------------------
+ISC License（ISC）
 使用者：ring 0.17.14
 --------------------------------------------------------------------------------
 
@@ -3511,6 +3549,37 @@ THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
+使用者：errno 0.3.14
+--------------------------------------------------------------------------------
+
+Copyright (c) 2014 Chris Wong
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
 使用者：mime 0.3.17
 --------------------------------------------------------------------------------
 
@@ -4005,6 +4074,31 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
+使用者：jni-sys 0.3.1、jni-sys 0.4.1
+--------------------------------------------------------------------------------
+
+Copyright (c) 2015 The rust-jni-sys Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
 使用者：fallible-iterator 0.3.0
 --------------------------------------------------------------------------------
 
@@ -4232,6 +4326,56 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
+使用者：android_log-sys 0.3.2
+--------------------------------------------------------------------------------
+
+Copyright (c) 2016 The android_log_sys Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
+使用者：android_logger 0.15.1
+--------------------------------------------------------------------------------
+
+Copyright (c) 2016 The android_logger Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
@@ -4743,6 +4887,37 @@ MIT License（MIT）
 --------------------------------------------------------------------------------
 
 Copyright (c) 2017 quininer kel
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
+使用者：signal-hook-registry 1.4.8
+--------------------------------------------------------------------------------
+
+Copyright (c) 2017 tokio-jsonrpc developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -5683,6 +5858,37 @@ DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
+使用者：iana-time-zone 0.1.65
+--------------------------------------------------------------------------------
+
+Copyright (c) 2020 Andrew D. Straw
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
 使用者：document-features 0.2.12
 --------------------------------------------------------------------------------
 
@@ -5830,6 +6036,31 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
+使用者：num_threads 0.1.7
+--------------------------------------------------------------------------------
+
+Copyright (c) 2021 Jacob Pratt
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
@@ -6365,7 +6596,7 @@ DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
-使用者：serde_spanned 0.6.9、serde_spanned 1.1.2、toml 0.8.2、toml 1.1.8+spec-1.1.0、toml_datetime 1.1.2+spec-1.1.0、toml_edit 0.20.2、toml_parser 1.1.5+spec-1.1.0、toml_writer 1.1.3+spec-1.1.0
+使用者：env_filter 0.1.4、serde_spanned 0.6.9、serde_spanned 1.1.2、toml 0.8.2、toml 1.1.8+spec-1.1.0、toml_datetime 1.1.2+spec-1.1.0、toml_edit 0.20.2、toml_edit 0.25.17+spec-1.1.0、toml_parser 1.1.5+spec-1.1.0、toml_writer 1.1.3+spec-1.1.0
 --------------------------------------------------------------------------------
 
 Copyright (c) Individual contributors
@@ -7651,6 +7882,33 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
+使用者：tao-macros 0.1.4
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2022 - Present Tauri Apps Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
 使用者：rustls-platform-verifier 0.7.1
 --------------------------------------------------------------------------------
 
@@ -7792,6 +8050,33 @@ developed by Chen Jiaju, licensed under the MIT License and the Apache License 2
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
+使用者：is-docker 0.2.0、is-wsl 0.4.0
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2023 Sean Larkin
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
 使用者：web-time 1.1.0
 --------------------------------------------------------------------------------
 
@@ -7873,7 +8158,7 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
-使用者：brotli-decompressor 5.0.3、brotli-decompressor 6.0.1、bufrw 0.2.0、cargo_toml 1.0.1、chrono 0.4.45、dpi 0.1.2、html-to-markdown-rs 3.17.2、libm 0.2.16、libwebp-sys 0.9.6、minisign-verify 0.3.0、qcms 0.3.0、tauri-plugin 2.7.1、tauri-plugin-dialog 2.8.2、tauri-plugin-fs 2.7.0、tauri-plugin-log 2.10.1、tauri-plugin-opener 2.7.1、tauri-plugin-single-instance 2.5.3、tauri-plugin-updater 2.13.3、tauri-plugin-window-state 2.5.0、webview2-com 0.39.1、webview2-com-macros 0.8.1、webview2-com-sys 0.39.1、windows 0.62.2、windows-collections 0.3.2、windows-core 0.62.2、windows-future 0.3.2、windows-implement 0.60.2、windows-interface 0.59.3、windows-link 0.2.1、windows-numerics 0.3.1、windows-registry 0.6.1、windows-result 0.4.1、windows-strings 0.5.1、windows-sys 0.60.2、windows-sys 0.61.2、windows-targets 0.53.5、windows-threading 0.2.1、windows-version 0.1.7、windows_x86_64_msvc 0.53.1、xberg 1.3.9
+使用者：brotli-decompressor 5.0.3、brotli-decompressor 6.0.1、bufrw 0.2.0、cargo_toml 1.0.1、cesu8 1.1.0、chrono 0.4.45、dpi 0.1.2、html-to-markdown-rs 3.17.2、jni 0.22.4、jni-macros 0.22.4、jni-sys-macros 0.4.1、libm 0.2.16、libwebp-sys 0.9.6、minisign-verify 0.3.0、ndk 0.9.0、ndk-context 0.1.1、ndk-sys 0.6.0+11769913、qcms 0.3.0、rustls-platform-verifier-android 0.2.0、tauri-plugin 2.7.1、tauri-plugin-dialog 2.8.2、tauri-plugin-fs 2.7.0、tauri-plugin-log 2.10.1、tauri-plugin-opener 2.7.1、tauri-plugin-single-instance 2.5.3、tauri-plugin-updater 2.13.3、tauri-plugin-window-state 2.5.0、webview2-com 0.39.1、webview2-com-macros 0.8.1、webview2-com-sys 0.39.1、windows 0.62.2、windows-collections 0.3.2、windows-core 0.62.2、windows-future 0.3.2、windows-implement 0.60.2、windows-interface 0.59.3、windows-link 0.2.1、windows-numerics 0.3.1、windows-registry 0.6.1、windows-result 0.4.1、windows-strings 0.5.1、windows-sys 0.45.0、windows-sys 0.60.2、windows-sys 0.61.2、windows-targets 0.42.2、windows-targets 0.53.5、windows-threading 0.2.1、windows-version 0.1.7、windows_x86_64_msvc 0.42.2、windows_x86_64_msvc 0.53.1、xberg 1.3.9
 --------------------------------------------------------------------------------
 
 MIT License
@@ -8182,7 +8467,7 @@ DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
-使用者：adler2 2.0.1、anyhow 1.0.104、async-trait 0.1.92、atomic-waker 1.1.2、biblatex 0.12.0、camino 1.2.6、cargo-platform 0.1.9、cargo_metadata 0.19.2、displaydoc 0.2.7、dtoa 1.0.11、dyn-clone 1.0.20、erased-serde 0.4.10、fast-float2 0.2.4、fastrand 2.5.0、finl_unicode 1.5.0、itoa 1.0.18、lazy_static 1.5.1、once_cell 1.21.4、paste 1.0.15、pastey 0.2.3、pin-project-lite 0.2.17、portable-atomic 1.15.0、proc-macro2 1.0.107、quote 1.0.47、ref-cast 1.0.27、ref-cast-impl 1.0.27、rustversion 1.0.23、semver 1.0.28、serde 1.0.229、serde-untagged 0.1.9、serde_core 1.0.229、serde_derive 1.0.229、serde_derive_internals 0.29.1、serde_derive_internals 0.30.0、serde_json 1.0.154、serde_repr 0.1.21、servo_arc 0.4.3、smol_str 0.3.6、syn 2.0.119、syn 3.0.9、thin-vec 0.2.21、thiserror 2.0.21、thiserror-impl 2.0.21、typed-path 0.12.3、typeid 1.0.3、unicode-ident 1.0.27、unsafe-libyaml 0.2.11、zmij 1.0.23
+使用者：adler2 2.0.1、anyhow 1.0.104、async-trait 0.1.92、atomic-waker 1.1.2、biblatex 0.12.0、camino 1.2.6、cargo-platform 0.1.9、cargo_metadata 0.19.2、displaydoc 0.2.7、dtoa 1.0.11、dyn-clone 1.0.20、erased-serde 0.4.10、fast-float2 0.2.4、fastrand 2.5.0、finl_unicode 1.5.0、itoa 1.0.18、lazy_static 1.5.1、linux-raw-sys 0.12.1、num_enum 0.7.6、num_enum_derive 0.7.6、once_cell 1.21.4、paste 1.0.15、pastey 0.2.3、pin-project-lite 0.2.17、portable-atomic 1.15.0、proc-macro-crate 3.5.0、proc-macro2 1.0.107、quote 1.0.47、ref-cast 1.0.27、ref-cast-impl 1.0.27、rustix 1.1.5、rustversion 1.0.23、semver 1.0.28、serde 1.0.229、serde-untagged 0.1.9、serde_core 1.0.229、serde_derive 1.0.229、serde_derive_internals 0.29.1、serde_derive_internals 0.30.0、serde_json 1.0.154、serde_repr 0.1.21、servo_arc 0.4.3、simd_cesu8 1.2.0、smol_str 0.3.6、syn 2.0.119、syn 3.0.9、thin-vec 0.2.21、thiserror 1.0.69、thiserror 2.0.21、thiserror-impl 1.0.69、thiserror-impl 2.0.21、typed-path 0.12.3、typeid 1.0.3、unicode-ident 1.0.27、unsafe-libyaml 0.2.11、zmij 1.0.23
 --------------------------------------------------------------------------------
 
 Permission is hereby granted, free of charge, to any
@@ -8333,6 +8618,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
+使用者：android_system_properties 0.1.6
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2013 Nicolas Silva
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
@@ -8529,6 +8840,33 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License（MIT）
+使用者：combine 4.6.8
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Markus Westerlind
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
 使用者：shlex 2.0.1
 --------------------------------------------------------------------------------
 
@@ -8645,6 +8983,33 @@ MIT License（MIT）
 The MIT License (MIT)
 
 Copyright (c) 2016 PistonDevelopers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+MIT License（MIT）
+使用者：jni 0.21.1
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2016 Prevoty, Inc. and jni-rs contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

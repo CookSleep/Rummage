@@ -8,12 +8,18 @@ describe('abbreviateDir', () => {
     expect(abbreviateDir('D:\\资料\\工作\\a.md')).toBe('D:\\资料\\工作')
     expect(abbreviateDir('D:\\资料\\工作\\2025\\总结\\a.md')).toBe('D:\\…\\2025\\总结')
   })
+
+  it('Android 路径保留斜杠', () => {
+    expect(abbreviateDir('/storage/emulated/0/DCIM/Camera/a.jpg')).toBe('/storage/…/DCIM/Camera')
+    expect(abbreviateDir('/sdcard/DCIM/a.jpg')).toBe('/sdcard/DCIM')
+  })
 })
 
 describe('abbreviatePath', () => {
   it('不超长时原样显示，超长时保留开头和尽量多的末尾几级', () => {
     expect(abbreviatePath('D:\\资料\\工作')).toBe('D:\\资料\\工作')
     expect(abbreviatePath('D:\\资料\\工作\\2025\\总结', 12)).toBe('D:\\…\\2025\\总结')
+    expect(abbreviatePath('/storage/emulated/0/Documents/工作', 24)).toBe('/storage/…/Documents/工作')
   })
 })
 

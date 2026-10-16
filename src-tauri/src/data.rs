@@ -64,6 +64,7 @@ pub struct StorageInfo {
 }
 
 /// 对应前端 `src/types.ts` 的 `DataDirChange`
+#[cfg(desktop)]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DataDirChange {
@@ -167,6 +168,7 @@ async fn indexed<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
 }
 
 /// 选择新数据目录：所选目录不能使用时 `blocked` 为原因；取消选择时返回空
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn data_dir_pick<R: Runtime>(
     app: AppHandle<R>,

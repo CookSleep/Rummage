@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/rummage-core", "crates/rummage-datadir", "crates/rummage-embed", "crates/rummage-extract", "crates/rummage-index", "crates/rummage-llama", "crates/rummage-media", "crates/rummage-proto", "src-tauri"]
+members = ["crates/rummage-core", "crates/rummage-datadir", "crates/rummage-embed", "crates/rummage-extract", "crates/rummage-index", "crates/rummage-llama", "crates/rummage-media", "crates/rummage-proto", "crates/tauri-plugin-rummage-android", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

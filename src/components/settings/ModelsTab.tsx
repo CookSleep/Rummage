@@ -49,15 +49,22 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
     if (task.message) showToast(task.message, task.state === 'done' ? 'success' : task.state === 'failed' ? 'error' : 'info')
   }, [task])
 
+  // `import_models` 还没返回
+  const [picking, setPicking] = useState(false)
   const blocked = running || setup.selftest.running
 
   const call = (cmd: string, args?: Record<string, unknown>) => {
     setError('')
     onAct()
-    invoke(cmd, args).catch((err) => {
+    return invoke(cmd, args).catch((err) => {
       console.warn(`${cmd} 失败：`, err)
       setError(errorMessage(err, '操作失败，请重试。'))
     })
+  }
+
+  const importModels = () => {
+    setPicking(true)
+    call('import_models').then(() => setPicking(false))
   }
 
   // 删除确认中的模型
@@ -70,7 +77,7 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
 
   const actions = (file: ModelFileStatus, mmproj: boolean) => {
     const download = (text: string) => (
-      <button type="button" className={SMALL_PRIMARY_BUTTON} disabled={blocked} onClick={() => call('download_models', { source: toSource(source), mmproj })}>
+      <button type="button" className={SMALL_PRIMARY_BUTTON} disabled={blocked || picking} onClick={() => call('download_models', { source: toSource(source), mmproj })}>
         {text}
       </button>
     )
@@ -119,7 +126,7 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
           })}
           {/* 两个模型都可用且没有校验出问题时不需要导入 */}
           {[setup.model, setup.mmproj].some((f) => !f.ready || f.verified === false) && (
-            <ImportRow disabled={blocked} onImport={() => call('import_models')} />
+            <ImportRow disabled={blocked} picking={picking} onImport={importModels} />
           )}
         </div>
 

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
+use tauri::{Emitter, Manager, Runtime, Window};
 
 /// 保留的令牌数
 const KEEP: usize = 16;
@@ -30,7 +30,7 @@ pub struct ImageQuery {
 pub struct ImageTokens(Mutex<(u64, HashMap<u64, PathBuf>)>);
 
 impl ImageTokens {
-    fn insert(&self, path: PathBuf) -> ImageQuery {
+    pub(crate) fn insert(&self, path: PathBuf) -> ImageQuery {
         let mut g = self.0.lock().unwrap_or_else(|err| err.into_inner());
         g.0 += 1;
         let token = g.0;
@@ -61,9 +61,10 @@ fn is_image(path: &Path) -> bool {
         .is_some_and(|e| IMAGE_EXTS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-/// 选择以图搜图的图片；取消时为空
+/// 选择以图搜图的图片；取消时为空（Android 上见 `android::storage`）
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
-pub async fn pick_image<R: Runtime>(app: AppHandle<R>) -> Option<ImageQuery> {
+pub async fn pick_image<R: Runtime>(app: tauri::AppHandle<R>) -> Option<ImageQuery> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let dialog = crate::file_dialog(&app, "选择图片").add_filter("图片", IMAGE_EXTS);
     dialog.pick_file(move |file| {

@@ -62,14 +62,14 @@ fn document_media_by_part() {
     );
     assert_eq!(
         e.strings("SELECT DISTINCT v.params_version FROM vectors v JOIN segments s ON s.id = v.segment_id WHERE s.modality = 'image'"),
-        ["image-v1-t140"]
+        ["image-v1-t280"]
     );
     let marker = e.strings("SELECT meta_json FROM files");
     assert!(
         marker[0].contains("docmedia-v1-p128-n100-r3-mp100-mb200"),
         "{marker:?}"
     );
-    assert!(marker[0].contains("image-v1-t140"), "{marker:?}");
+    assert!(marker[0].contains("image-v1-t280"), "{marker:?}");
 
     // 只算内嵌媒体：只推理两张图，正文片段原样保留
     assert_eq!(e.redo(PART_MEDIA), 2);

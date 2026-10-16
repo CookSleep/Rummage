@@ -168,14 +168,22 @@ fn settings_output() {
         all.starts_with("Search (applies immediately):\n  "),
         "{all}"
     );
+    // 每个在当前平台显示的参数都列出，其余不列出
     for d in params::PARAMS {
-        assert!(all.contains(&format!("\n  {} = ", d.key)), "{}", d.key);
+        let listed = all.contains(&format!("\n  {} = ", d.key));
+        assert_eq!(listed, d.shown(), "{}", d.key);
     }
     let one = settings_text(&values, params::def("image_tokens"));
     assert!(
         one.starts_with(
-            "image_tokens = 标准 (140 Token) | default 标准 (140 Token) | one of 低 (70 Token), 标准 (140 Token), 较高 (280 Token), 高 (560 Token), 最高 (1120 Token) | changing it rebuilds the image index\n    图片识别精度: "
+            "image_tokens = 标准 (280 Token) | default 标准 (280 Token) | one of 最低 (70 Token), 较低 (140 Token), 标准 (280 Token), 较高 (560 Token), 最高 (1120 Token) | changing it rebuilds the image index
+    图片识别精度: "
         ),
+        "{one}"
+    );
+    let one = settings_text(&values, params::def("long_image_tokens"));
+    assert!(
+        one.starts_with("long_image_tokens = 标准 (140 Token) | default 标准 (140 Token) |"),
         "{one}"
     );
     let d = params::def("chunk_tokens").unwrap();

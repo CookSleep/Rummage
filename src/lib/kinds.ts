@@ -40,5 +40,5 @@ export function needsMmproj(kinds: Kinds) {
 export const VIDEO_PRESETS = [
   { value: 1, title: '找物体', desc: '找画面里出现过的人和东西，定位最准，用时最短', windowS: 2, frames: 2 },
   { value: 2, title: '找动作', desc: '能看出动作和前后变化，用时与“找物体”相近', windowS: 4, frames: 4 },
-  { value: 3, title: '找说话内容', desc: '还能按说话内容找，画面查找稍差，用时约为“找物体”的 1.4 倍', windowS: 6, frames: 6 },
+  { value: 3, title: '找说话内容', desc: '还能按说话内容找，画面查找稍差，用时约为“找物体”的 1.25 倍', windowS: 6, frames: 6 },
 ]

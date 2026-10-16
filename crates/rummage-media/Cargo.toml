@@ -15,6 +15,11 @@ thiserror = "=2.0.21"
 # libwebp 本身为 BSD-3-Clause，许可文本见 third-party-licenses/libwebp-LICENSE.txt）。不开 img，不依赖 image
 webp = { version = "=0.3.1", default-features = false }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# AImageDecoder（bitmap，链接 libjnigraphics）与 AMediaExtractor / AMediaCodec（media，链接 libmediandk），见 src/android.rs；
+# 版本同锁文件中 ndk 0.9.0 带进来的（0.6.0+11769913），MIT OR Apache-2.0
+ndk-sys = { version = "=0.6.0", features = ["bitmap", "media"] }
+
 [target.'cfg(windows)'.dependencies]
 # WIC 是 COM 接口，windows-sys 没有接口绑定；windows 0.62.2 已随 Tauri 进入 Cargo.lock，见 src/windows.rs
 # 系统缩略图接口 IShellItemImageFactory 与读取其位图的 GDI 函数；启动 ffmpeg 不弹窗口的 CREATE_NO_WINDOW

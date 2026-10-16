@@ -1,0 +1,16 @@
+[package]
+name = "tauri-plugin-rummage-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+# tauri-plugin 的构建脚本要求 links 与包名相同，src-tauri 的构建脚本据此把 android/ 加进 Gradle 工程
+links = "tauri-plugin-rummage-android"
+
+[build-dependencies]
+# 版本同锁文件中 tauri-plugin-dialog 等带进来的
+tauri-plugin = { version = "=2.7.1", features = ["build"] }
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+tauri = "=2.12.3"

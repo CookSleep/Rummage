@@ -29,6 +29,8 @@ export interface ParamDef {
   label: string
   help: string
   basis: string
+  /** 只在此平台上显示（`android`、`windows`）；为空时各平台都显示 */
+  platform: string
 }
 
 /** 核心进程的连接状态，对应 Rust `src-tauri/src/core.rs` 的 `Status` */
@@ -128,7 +130,10 @@ export type PauseReason =
   | { type: 'manual'; until: number | null }
   | { type: 'sleeping' }
   | { type: 'disk_low'; freeGb: number }
+  | { type: 'quota' }
+  | { type: 'hot' }
   | { type: 'battery' }
+  | { type: 'screen_on' }
   | { type: 'fullscreen' }
 
 /** 手动暂停建索引的时长，对应 Rust `src-tauri/src/pause.rs` 的 `PauseFor` */

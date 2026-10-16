@@ -17,12 +17,17 @@ thiserror = "=2.0.21"
 [target.'cfg(windows)'.dependencies]
 # 自检时用 DXGI 查显卡驱动版本（COM 接口，windows-sys 没有接口绑定；0.62.2 已随 Tauri 进入 Cargo.lock），见 src/windows.rs
 windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dxgi"] }
-# 推理子进程的 Job Object、隐藏控制台窗口与 stdout 重定向，自检时查系统日志中的驱动事件，见 src/windows.rs
+# 推理子进程的 Job Object、隐藏控制台窗口与 stdout 重定向，自检时查系统日志中的驱动事件，从注册表读处理器型号，见 src/windows.rs
 windows-sys = { version = "=0.61.2", features = [
   "Win32_Foundation",
   "Win32_Security",
   "Win32_System_Console",
   "Win32_System_EventLog",
   "Win32_System_JobObjects",
+  "Win32_System_Registry",
   "Win32_System_Threading",
 ] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# 读系统属性中的处理器型号（src/android.rs），版本同锁文件中已有的，MIT OR Apache-2.0
+libc = "=0.2.190"

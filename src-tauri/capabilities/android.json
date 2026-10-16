@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/android-schema.json",
+  "identifier": "android",
+  "description": "主窗口在 Android 上另外需要的权限：返回键（onBackButtonPress 注册与取消 app 插件的事件监听）、退到后台与安全区",
+  "windows": ["main"],
+  "platforms": ["android"],
+  "permissions": [
+    "core:app:allow-register-listener",
+    "core:app:allow-remove-listener",
+    "mobile"
+  ]
+}

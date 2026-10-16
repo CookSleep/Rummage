@@ -52,7 +52,7 @@ export default function Toaster() {
   if (!toast) return null
 
   return (
-    <div key={toast.id} role="status" className="toast-enter pointer-events-none fixed bottom-24 left-1/2 z-[120]">
+    <div key={toast.id} role="status" className="toast-enter pointer-events-none fixed bottom-[calc(6rem+var(--safe-bottom))] left-1/2 z-[120]">
       <div className="flex w-max max-w-[calc(100vw-32px)] items-center gap-2.5 rounded-full border border-gray-200/60 bg-white/95 px-5 py-3.5 text-sm font-medium text-gray-700 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:text-gray-300 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 sm:max-w-[min(44rem,80vw)]">
         <span className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${ICON_TILE[toast.type]}`}>
           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>

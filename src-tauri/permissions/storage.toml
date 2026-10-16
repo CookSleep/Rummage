@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "storage"
+description = "允许主窗口查询是否已有“所有文件访问”权限，以及打开系统的授权页面（仅 Android）"
+commands.allow = ["storage_access", "request_storage_access"]

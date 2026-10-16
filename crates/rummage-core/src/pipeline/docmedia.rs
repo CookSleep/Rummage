@@ -10,7 +10,7 @@
 //!   与单独的文件一样只写日志、不算失败。列出媒体时超时、出错或无法解析，记 1 个失败，已有的内嵌片段保留，重试时从头算。
 //! - 读取：文档的字节由 `read_bytes` 读出（含占位文件检查）；音视频交给 ffmpeg 之前再检查一次。不压缩的 zip 条目
 //!   用 `subfile` 直接读文档，压缩的写入数据目录的 `tmp\embed\`（`Options::embed_tmp`），解码完即删除，后台服务启动时清空该目录。
-//! - 图片只算整图、不切长图，档位与单独的图片相同（`image_tokens`）；近乎纯色的跳过（`rummage_media::is_flat`）。
+//! - 图片只算整图、不切长图，档位与单独的图片相同（`image_tokens`）；视频帧的档位同样跟随单独的视频（`video_frame_tokens`）；近乎纯色的跳过（`rummage_media::is_flat`）。
 //! - 分批：图片解码后的像素与音视频一样计入内存额度（`MediaMem`）。额度要等整份文档推理完才归还，所以这份文档已持有额度时
 //!   不再等待：下一个媒体会超额，或超时后仍在运行的任务线程达到 `index_threads` 时，停止收集，只把已解码的这一批交去识别，
 //!   在 `meta_json` 中记下进度（`media_partial` 为所用设置的各项，`media_next` 为下一个序号），作业放回、只算内嵌媒体，
@@ -34,7 +34,7 @@ use rummage_proto::{ParamValue, params};
 use super::prep::{
     Clock, Decoded, Limit, MediaFail, MediaLease, audio_items, file_limit, run_limited, video_items,
 };
-use super::{Engine, Item, Shared, Task, int, lock, rebuild};
+use super::{Engine, Item, Shared, Task, int, lock, rebuild, space_row};
 
 /// 一个内嵌媒体的片段，推理时作为一组（`embed`）
 pub(super) struct Media {
@@ -397,20 +397,18 @@ fn load(
         if rummage_media::is_flat(&rgb) {
             return Ok(None);
         }
-        let rgb = rummage_media::fit(rgb, engine.tier).map_err(|err| err.to_string())?;
+        let tier = int(&task.params, "image_tokens") as u32;
+        let rgb = rummage_media::fit(rgb, tier).map_err(|err| err.to_string())?;
         if let Some(l) = &mut lease {
             l.shrink_to(rgb.data.len() as u64);
         }
-        let sp = engine.image_space.clone();
+        let sp = space_row(&engine.cfg, Some(tier));
         return Ok(Some(Media {
             modality: "image",
             items: vec![Item {
                 locator: base.to_string(),
                 text: None,
-                input: Input::Image {
-                    rgb,
-                    tokens: engine.tier,
-                },
+                input: Input::Image { rgb, tokens: tier },
                 space: Some(Box::new((sp.clone(), sp.preprocess.clone()))),
             }],
             space: sp,

@@ -8,7 +8,9 @@ use serde::Deserialize;
 use tauri::{AppHandle, Runtime};
 
 use crate::search::error;
-use crate::{core, platform, tray};
+#[cfg(desktop)]
+use crate::tray;
+use crate::{core, platform};
 
 /// 对应前端 `src/types.ts` 的 `PauseFor`
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -22,6 +24,7 @@ pub enum PauseFor {
 async fn send<R: Runtime>(app: &AppHandle<R>, body: Request) -> Result<(), ApiError> {
     let res = core::done(app, body).await;
     // 暂停原因没有变化（或请求失败）时核心不广播进度，托盘自己取一次
+    #[cfg(desktop)]
     tray::refresh(app).await;
     res
 }

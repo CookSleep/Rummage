@@ -17,14 +17,10 @@ tauri = { version = "=2.12.3", features = ["devtools", "tray-icon"] }
 tauri-plugin-dialog = "=2.8.2"
 tauri-plugin-log = "=2.10.1"
 tauri-plugin-opener = "=2.7.1"
-tauri-plugin-single-instance = "=2.5.3"
-# 应用内更新（src/update.rs），只供 Rust 侧的更新命令使用
-tauri-plugin-updater = "=2.13.3"
-tauri-plugin-window-state = "=2.5.0"
 # 诊断包的 Deflate 压缩与 CRC（src/zip.rs），已是 png、tiff 的依赖
 flate2 = "=1.1.10"
 log = "=0.4.34"
-# 检查更新时读取 GitHub Releases（src/update.rs），版本与特性同核心进程的模型下载
+# 检查更新时读取 GitHub Releases（src/releases.rs），版本与特性同核心进程的模型下载
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider", "http2", "system-proxy"] }
 rummage-core = { path = "../crates/rummage-core" }
 rummage-datadir = { path = "../crates/rummage-datadir" }
@@ -39,10 +35,33 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 # 已下载更新包的校验值
 sha2 = "=0.10.9"
-tokio = { version = "=1.53.2", features = ["io-util", "sync", "time"] }
+# fs：Android 上边下载边写入更新包（src/android/update.rs）
+tokio = { version = "=1.53.2", features = ["fs", "io-util", "sync", "time"] }
 
 [dev-dependencies]
 tempfile = "=3.27.0"
+
+# 只有桌面平台能用的插件
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "=2.5.3"
+# 应用内更新（src/update.rs），只供 Rust 侧的更新命令使用
+tauri-plugin-updater = "=2.13.3"
+tauri-plugin-window-state = "=2.5.0"
+
+# Android 的启动准备与进程内后台服务（src/android.rs）
+[target.'cfg(target_os = "android")'.dependencies]
+# 调用 Java 取应用的目录、安装时间与 AssetManager；与 rustls-platform-verifier 0.7.1 用同一版本，MIT OR Apache-2.0
+jni = "=0.22.4"
+# 从 APK 的 assets 拷出黄金样本（AssetManager），MIT OR Apache-2.0
+ndk = { version = "=0.9.0", default-features = false }
+# 启动时忽略 SIGPIPE（src/android.rs），版本同锁文件中已有的，MIT OR Apache-2.0
+libc = "=0.2.190"
+# tao 初始化的 JavaVM 与应用 Context，MIT OR Apache-2.0
+ndk-context = "=0.1.1"
+# 启动时初始化系统证书校验，版本同 reqwest 带进来的，MIT OR Apache-2.0
+rustls-platform-verifier = "=0.7.1"
+# 存储权限、选择文件夹与文件（src/android/storage.rs）
+tauri-plugin-rummage-android = { path = "../crates/tauri-plugin-rummage-android" }
 
 [target.'cfg(windows)'.dependencies]
 # 读取系统主题，创建主窗口时设置背景色；诊断包中的系统版本

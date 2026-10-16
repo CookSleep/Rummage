@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { isTauri, setBeforeClose } from '../lib/platform'
+import { isAndroid, isTauri, setBeforeClose } from '../lib/platform'
 import { readLocal, writeLocal } from '../lib/storage'
 import ConfirmDialog from './ConfirmDialog'
 
 /** 已提示过“仍在后台运行”的本地存储键 */
 const SHOWN_KEY = 'rummage.trayHintShown'
 
-/** 第一次关闭窗口时提示 Rummage 仍在后台运行（关闭窗口后界面留在托盘，核心继续建索引），确认后才关闭 */
+/** 第一次关闭窗口时提示 Rummage 仍在后台运行（关闭窗口后界面留在托盘，核心继续建索引），确认后才关闭；Android 上没有托盘，不提示 */
 export default function TrayHint() {
   const [open, setOpen] = useState(false)
   const pending = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null)
 
   useEffect(() => {
-    if (!isTauri) return
+    if (!isTauri || isAndroid) return
     setBeforeClose(() => {
       if (pending.current) return pending.current.promise
       // 存储不可用时不提示，免得每次关闭都弹出

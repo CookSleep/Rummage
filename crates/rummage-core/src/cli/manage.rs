@@ -299,7 +299,7 @@ pub fn settings_text(values: &BTreeMap<String, ParamValue>) -> String {
         Group::Advanced,
     ] {
         let _ = write!(out, "\n{}", group_text(g));
-        for d in params::PARAMS.iter().filter(|d| d.group == g) {
+        for d in params::PARAMS.iter().filter(|d| d.group == g && d.shown()) {
             setting_text(&mut out, d, current(values, d));
         }
         out.push('\n');
@@ -529,7 +529,7 @@ pub(super) async fn run(s: &mut Session, cmd: Cmd, json: bool) -> Result<Outcome
                     params::def(k)
                         .ok_or_else(|| format!("没有名为“{k}”的参数，可用 settings 查看全部。"))?,
                 ],
-                None => params::PARAMS.iter().collect(),
+                None => params::PARAMS.iter().filter(|d| d.shown()).collect(),
             };
             let text = if json {
                 ascii_json(&SettingsOut {
@@ -603,7 +603,7 @@ pub(super) async fn run(s: &mut Session, cmd: Cmd, json: bool) -> Result<Outcome
         }
         Cmd::Resume => {
             s.request(Request::ResumeIndexing).await?;
-            let msg = "已恢复建立索引。使用电池、全屏或磁盘空间不足时仍会按设置自动暂停。";
+            let msg = "已恢复建立索引。未接电源、全屏或磁盘空间不足时仍会按设置自动暂停。";
             print(&if json {
                 done_json(msg, None)
             } else {

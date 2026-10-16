@@ -1,6 +1,7 @@
 //! 搜索页的命令与 `media` 自定义协议。
 //! - 命令把请求转给核心进程，拆开回复后返回；错误为核心的 `ApiError`（`code` 与中文 `message`）。
 //! - 打开、在资源管理器中显示只接受索引中的文件 ID，路径由核心从索引中查出；不提供按任意路径打开的命令。
+//!   Android 上的打开在 `android::ui` 中（界面不显示“在资源管理器中显示”）。
 //!   网盘占位文件照常交给系统打开，由系统负责下载。
 //! - 打开时不执行文件：`SCRIPT_EXTS` 中的脚本（含注册表文件与驱动安装信息）用 “edit” 动词在编辑器中打开，没有编辑动词时改为在资源管理器中显示；
 //!   `EXEC_EXTS` 中的程序、安装包、快捷方式等（没有可看的文本内容）直接改为在资源管理器中显示。
@@ -46,6 +47,7 @@ pub struct Results {
 /// 用默认程序打开时可能被直接执行的脚本扩展名（小写）。Enter 或“打开”是为了查看内容，执行用户磁盘上的脚本
 /// 可能造成破坏，所以这些文件改用 “edit” 动词在编辑器中打开：常见的脚本语言，系统默认会执行的几种 Windows 脚本，
 /// 以及打开就会导入或安装的注册表文件与驱动安装信息（文本，用编辑器查看）
+#[cfg(not(target_os = "android"))]
 const SCRIPT_EXTS: &[&str] = &[
     "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "mjs", "cjs", "wsf", "wsh", "py",
     "pyw", "sh", "bash", "rb", "pl", "php", "lua", "reg", "inf",
@@ -54,6 +56,7 @@ const SCRIPT_EXTS: &[&str] = &[
 /// 用默认程序打开就会运行、安装或导入的扩展名（小写）：程序与屏幕保护、控制面板项、安装包与补丁、应用包、
 /// 管理单元、HTML 应用、Java 程序、快捷方式与网址快捷方式、ClickOnce、
 /// 已编译的帮助（可执行脚本）、诊断包、扩展包等。打开它们只在资源管理器中显示
+#[cfg(not(target_os = "android"))]
 const EXEC_EXTS: &[&str] = &[
     "exe",
     "com",
@@ -214,7 +217,10 @@ pub async fn file_details<R: Runtime>(
     file_info(&app, file_id).await
 }
 
-async fn file_info<R: Runtime>(app: &AppHandle<R>, file_id: i64) -> Result<FileInfo, ApiError> {
+pub(crate) async fn file_info<R: Runtime>(
+    app: &AppHandle<R>,
+    file_id: i64,
+) -> Result<FileInfo, ApiError> {
     match core::request(app, Request::FileInfo { file_id }).await? {
         Reply::File(info) => Ok(info),
         other => Err(unexpected(&other)),
@@ -248,6 +254,7 @@ async fn shell<R: Runtime>(
 }
 
 /// 扩展名（小写）在 `list` 中
+#[cfg(not(target_os = "android"))]
 fn ext_in(path: &Path, list: &[&str]) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -259,6 +266,7 @@ fn reveal(path: &Path) -> Result<(), String> {
 }
 
 /// 程序类文件在资源管理器中显示；脚本用 “edit” 动词打开，没有时在资源管理器中显示；其他文件用默认程序打开
+#[cfg(not(target_os = "android"))]
 fn open(path: &Path) -> Result<(), String> {
     if ext_in(path, EXEC_EXTS) {
         return reveal(path);
@@ -276,6 +284,7 @@ fn open(path: &Path) -> Result<(), String> {
 }
 
 /// 默认程序能跳到 `at` 时带参数启动并返回真；不能跳或启动失败时返回假，由调用方按普通方式打开
+#[cfg(not(target_os = "android"))]
 fn open_jump(info: &FileInfo, at: OpenAt) -> bool {
     let path = Path::new(&info.path);
     let Some(to) = open_at::target(&info.kind, &info.ext, at) else {
@@ -297,6 +306,7 @@ fn open_jump(info: &FileInfo, at: OpenAt) -> bool {
 }
 
 /// `at` 为命中位置（音视频的起点、PDF 的页码），默认程序支持时打开到那里
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub async fn open_file<R: Runtime>(
     app: AppHandle<R>,
@@ -603,6 +613,7 @@ pub async fn media<R: Runtime>(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "android"))]
     #[test]
     fn scripts_not_executed() {
         for name in [

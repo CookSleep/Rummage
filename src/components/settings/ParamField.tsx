@@ -105,10 +105,11 @@ export default function ParamField({ def, value, error, onChange }: Props) {
 
   return (
     <div className="block">
-      <div className="mb-1 flex items-center justify-between gap-3">
-        <span className={`min-w-0 truncate ${ROW_LABEL}`}>{def.label}</span>
+      {/* 手机宽度下输入框与下拉菜单一律放到名称下方，同一页的各项对齐；开关窄，留在名称右侧 */}
+      <div className="mb-1 flex items-center justify-between gap-3 max-sm:flex-wrap max-sm:gap-y-1.5">
+        <span className={`min-w-0 truncate max-sm:whitespace-normal ${kind === 'Bool' ? '' : 'max-sm:basis-full'} ${ROW_LABEL}`}>{def.label}</span>
         {/* 控件最多占六成宽，过长的选项在下拉菜单中截断 */}
-        <div className="flex min-w-0 max-w-[60%] items-center gap-1.5">
+        <div className="flex min-w-0 max-w-[60%] items-center gap-1.5 max-sm:max-w-full">
           {control}
           <button
             type="button"

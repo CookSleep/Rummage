@@ -1,7 +1,8 @@
 //! 缩略图：宽不超过 `THUMB_WIDTH`，高不超过宽 × `THUMB_MAX_RATIO`（更长的图只保留顶部，
 //! 与瀑布流卡片的最大显示高度一致），编码为有损 WebP。
 //! - Windows 先用系统缩略图接口 `IShellItemImageFactory::GetImage`（`windows.rs`）：先只读系统缓存，未命中再正常生成；
-//!   系统给不出缩略图时（没有对应的缩略图处理程序等）退回自己解码，非 Windows 平台只自己解码。
+//!   系统给不出缩略图时（没有对应的缩略图处理程序等）退回自己解码。
+//! - Android 先用 `AImageDecoder` 在解码时直接缩到缩略图宽度（`android.rs`），失败再自己解码；其他平台只自己解码。
 //! - **调用方必须先确认不是网盘占位文件**（`rummage_index::ensure_local`），这里不再检查：
 //!   系统缩略图接口和解码都会读取文件内容。
 use std::path::Path;
@@ -29,7 +30,12 @@ pub fn thumbnail(path: &Path, aspect: Option<f64>, max_pixels: u64) -> Result<Ve
         let cy = (f64::from(THUMB_WIDTH) * ratio).round().max(1.0) as i32;
         crate::windows::shell_thumbnail(path, THUMB_WIDTH as i32, cy)
     };
-    #[cfg(not(windows))]
+    #[cfg(target_os = "android")]
+    let shell = {
+        let _ = (aspect, REQUEST_MAX_RATIO);
+        crate::android::thumbnail(path, THUMB_WIDTH, THUMB_MAX_RATIO, max_pixels)
+    };
+    #[cfg(not(any(windows, target_os = "android")))]
     let shell: Result<Rgb, String> = {
         let _ = (aspect, REQUEST_MAX_RATIO);
         Err("没有系统缩略图接口".into())

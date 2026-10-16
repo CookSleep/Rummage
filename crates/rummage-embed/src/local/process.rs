@@ -1,19 +1,21 @@
 //! 一个运行中的推理子进程：启动并放进作业对象、发 `Start`，由两个线程分别读取 stdout 上的帧与 stderr 末尾，
 //! 结束时连同作业一起结束并读完 stderr；结束不了时最多等 `KILL_GRACE`，不让调用方永久卡住。监督与重启规则见上级模块 `local`。
+//! 启动与结束的平台差异在 `platform::spawn` 与 `platform::Job` 中（Android 上是应用进程内的线程，没有 stderr）。
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::{VK_VISIBLE_ENV, lock};
+use super::lock;
 use crate::frame::{self, FromWorker, ToWorker};
-use crate::{Error, KILL_GRACE, platform};
+use crate::platform::{self, Child, ChildStdin};
+use crate::{Error, KILL_GRACE};
 
 /// 父进程保留的子进程 stderr 行数，用于错误信息和设备丢失判断。
 const STDERR_LINES: usize = 200;
@@ -42,28 +44,9 @@ impl Proc {
         let job = platform::Job::new(mem_bytes)
             .map_err(|err| Error::Spawn(format!("无法创建作业对象：{err}")))?;
         let job = Arc::new(job);
-        let mut cmd = Command::new(exe);
-        cmd.args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env_remove(VK_VISIBLE_ENV.to_str().expect("变量名是 ASCII"));
-        platform::hide_window(&mut cmd);
-        let mut child = cmd
-            .spawn()
-            .map_err(|err| Error::Spawn(format!("{}：{err}", exe.display())))?;
-        if let Err(err) = job.assign(&child) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(Error::Spawn(format!("无法把推理进程放进作业对象：{err}")));
-        }
-        let mut stdin = child.stdin.take();
+        let (child, mut stdin, stdout, stderr) = platform::spawn(exe, args, &job)?;
         // 已在作业中，通知子进程开始加载运行库。写失败说明子进程已退出，交给下面的读取线程报告。
-        if let Some(w) = stdin.as_mut() {
-            let _ = frame::write(w, &ToWorker::Start, &[]);
-        }
-        let stdout = child.stdout.take().expect("stdout 已设为管道");
-        let stderr = child.stderr.take().expect("stderr 已设为管道");
+        let _ = frame::write(&mut stdin, &ToWorker::Start, &[]);
 
         let (tx, frames) = mpsc::channel();
         thread::spawn(move || {
@@ -100,7 +83,7 @@ impl Proc {
         Ok(Proc {
             child,
             job,
-            stdin,
+            stdin: Some(stdin),
             frames,
             stderr: Some(stderr),
             tail,

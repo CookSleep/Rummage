@@ -184,7 +184,7 @@ fn folders_output() {
     assert_eq!(
         folders_text(&["document", "image"], &roots, Some(&index)),
         "识别内容的文件类型：文档、图片（所有文件夹共用）
-索引进度：160 / 200（80%），失败 10，正在使用电池，已暂停
+索引进度：160 / 200（80%），失败 10，未接电源，已暂停
 已索引的文件夹：
   D:\\照片（1234 个文件）
     排除：*.tmp、/草稿
@@ -211,13 +211,20 @@ fn settings_output() {
     );
     assert!(
         text.contains(
-            "\n  image_tokens = 标准（140 Token）（默认 标准（140 Token），可选 低（70 Token）、标准（140 Token）"
+            "\n  image_tokens = 标准（280 Token）（默认 标准（280 Token），可选 最低（70 Token）、较低（140 Token）"
         ),
         "{text}"
     );
-    // 每个参数都列出
+    assert!(
+        text.contains(
+            "\n  video_frame_tokens = 标准（140 Token）（默认 标准（140 Token），可选 低（70 Token）、标准（140 Token），修改后重建视频的索引）"
+        ),
+        "{text}"
+    );
+    // 每个在当前平台显示的参数都列出，其余不列出
     for d in params::PARAMS {
-        assert!(text.contains(&format!("\n  {} = ", d.key)), "{}", d.key);
+        let listed = text.contains(&format!("\n  {} = ", d.key));
+        assert_eq!(listed, d.shown(), "{}", d.key);
     }
     assert_eq!(
         range_text(params::def("save_history").unwrap().kind),

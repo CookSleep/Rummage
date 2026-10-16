@@ -16,8 +16,12 @@
   /* 字体由 src/lib/fonts.ts 按字体模式覆盖并按需加载字体文件，这里是脚本运行前的初始值 */
   --font-ui-sans: 'HarmonyOS Sans SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'Maple Mono NF CN', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
-  /* 内容变长出现滚动条时不挤动布局 */
-  scrollbar-gutter: stable;
+  /* 安全区（Android 全面屏下的状态栏、导航栏与挖孔）：Android WebView 140 以前 env(safe-area-inset-*) 拿不到正确的值，
+     插件按 WindowInsets 注入的 --safe-area-inset-* 优先（src/lib/safeArea.ts）；桌面上都是 0 */
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
 }
 
 html {
@@ -40,11 +44,6 @@ select,
   user-select: text;
 }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
-}
-
 img {
   -webkit-user-drag: none;
   user-select: none;
@@ -64,20 +63,38 @@ img {
     --sidebar: 240 5% 12%;
     --sidebar-foreground: 0 0% 98%;
   }
+}
 
+/* 细滚动条只用于鼠标：触摸屏（手机）用系统的悬浮滚动条，不占宽度、不滚动时隐藏 */
+@media (pointer: fine) {
+  :root {
+    /* 内容变长出现滚动条时不挤动布局 */
+    scrollbar-gutter: stable;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@media (pointer: fine) and (prefers-color-scheme: dark) {
   * {
     scrollbar-color: #3f3f46 transparent;
   }
-}
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-::-webkit-scrollbar-track { background: transparent; }
-
-@media (prefers-color-scheme: dark) {
   ::-webkit-scrollbar-thumb { background: #3f3f46; }
   ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+}
+
+/* 弹窗外层的留白（同 p-4），再让出安全区 */
+.modal-pad {
+  padding: calc(1rem + var(--safe-top)) calc(1rem + var(--safe-right)) calc(1rem + var(--safe-bottom)) calc(1rem + var(--safe-left));
 }
 
 /* 弹窗与下拉菜单的动画 */

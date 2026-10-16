@@ -5,7 +5,7 @@ import { openExternal } from '../../lib/platform'
 import { DocumentIcon, FileIcon, ImageIcon } from '../icons'
 import { HoverTip } from '../Tip'
 import ProxyForm, { PROXY_LABEL } from './ProxyForm'
-import { CARD_ROW, ICON_TILE, INPUT, SMALL_BUTTON, segmentClass } from './styles'
+import { CARD_ROW, ICON_TILE, INPUT, ROW_ACTIONS, ROW_LONG_TEXT, SMALL_BUTTON, segmentClass, SEGMENTS } from './styles'
 
 // 引导的“下载模型”与设置的“模型”页共用的部分：模型行、导入行、下载源选择、代理状态、任务进度
 
@@ -40,7 +40,7 @@ export function ModelRow({ info, url, file, running, actions }: { info: (typeof 
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-gray-800 dark:text-gray-100">{info.label}</span>
         <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{info.desc}</span>
-        <span className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs">
+        <span className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs max-sm:flex-wrap">
           <a
             href={href}
             target="_blank"
@@ -53,7 +53,7 @@ export function ModelRow({ info, url, file, running, actions }: { info: (typeof 
           >
             {info.model}
           </a>
-          <span data-selectable-text className="min-w-0 truncate text-gray-400 dark:text-gray-500">
+          <span data-selectable-text className={`min-w-0 text-gray-400 dark:text-gray-500 ${ROW_LONG_TEXT}`}>
             {file.name}
             <HoverTip label={file.name} />
           </span>
@@ -65,13 +65,16 @@ export function ModelRow({ info, url, file, running, actions }: { info: (typeof 
           {file.ready && file.verified === null && ' · 未校验'}
         </span>
       </span>
-      {actions && <span className="flex flex-shrink-0 gap-1.5">{actions}</span>}
+      {actions && <span className={`gap-1.5 ${ROW_ACTIONS}`}>{actions}</span>}
     </div>
   )
 }
 
-/** “导入已下载的文件”的行 */
-export function ImportRow({ disabled, onImport }: { disabled: boolean; onImport: () => void }) {
+/**
+ * “导入已下载的文件”的行。`picking`：`import_models` 还没返回（选择文件中，Android 上还可能在复制所选文件），
+ * 显示状态并禁用导入
+ */
+export function ImportRow({ disabled, picking, onImport }: { disabled: boolean; picking: boolean; onImport: () => void }) {
   return (
     <div className={CARD_ROW}>
       <span className={ICON_TILE}>
@@ -79,11 +82,15 @@ export function ImportRow({ disabled, onImport }: { disabled: boolean; onImport:
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-gray-800 dark:text-gray-100">导入已下载的文件</span>
-        <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">点击上面的模型名称打开下载页，下载列出的 .gguf 文件后导入。自动识别是哪个模型，校验通过后使用。</span>
+        <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+          {picking ? '正在读取所选文件' : '点击上面的模型名称打开下载页，下载列出的 .gguf 文件后导入。自动识别是哪个模型，校验通过后使用。'}
+        </span>
       </span>
-      <button type="button" className={`flex-shrink-0 ${SMALL_BUTTON}`} disabled={disabled} onClick={onImport}>
-        导入
-      </button>
+      <span className={ROW_ACTIONS}>
+        <button type="button" className={SMALL_BUTTON} disabled={disabled || picking} onClick={onImport}>
+          导入
+        </button>
+      </span>
     </div>
   )
 }
@@ -108,7 +115,7 @@ export function SourcePicker({ value, onChange, disabled }: { value: SourceChoic
   return (
     <div>
       <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">下载源</p>
-      <div className="inline-flex flex-wrap rounded-xl bg-black/[0.04] p-1 dark:bg-white/[0.06]">
+      <div className={SEGMENTS}>
         {SOURCES.map((s) => (
           <button key={s.value} type="button" disabled={disabled} className={segmentClass(value.type === s.value)} onClick={() => onChange({ ...value, type: s.value })}>
             {s.label}
@@ -163,8 +170,8 @@ function taskText(t: ModelTask, label: (file: string) => string) {
 export function TaskProgress({ task, label = (f) => ` ${f}`, className = '' }: { task: ModelTask; label?: (file: string) => string; className?: string }) {
   return (
     <div className={className}>
-      <div className="flex items-baseline justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
-        <span className="truncate">{taskText(task, label)}</span>
+      <div className="flex items-baseline justify-between gap-x-3 text-xs text-gray-500 dark:text-gray-400 max-sm:flex-wrap max-sm:gap-y-0.5">
+        <span className="truncate max-sm:whitespace-normal">{taskText(task, label)}</span>
         {task.total > 0 && (
           <span className="flex-shrink-0">
             {formatSize(task.done)} / {formatSize(task.total)}

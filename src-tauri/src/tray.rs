@@ -275,7 +275,10 @@ fn auto_text(reason: PauseReason) -> &'static str {
         PauseReason::Manual { .. } => "已手动暂停",
         PauseReason::Sleeping => "系统即将睡眠或刚唤醒，稍后继续",
         PauseReason::DiskLow { .. } => "磁盘空间不足，已暂停",
-        PauseReason::Battery => "正在使用电池，已暂停",
+        PauseReason::Quota => "已达到系统每天 6 小时的后台运行上限",
+        PauseReason::Hot => "手机温度过高，已暂停",
+        PauseReason::Battery => "未接电源，已暂停",
+        PauseReason::ScreenOn => "屏幕亮着，已暂停",
         PauseReason::Fullscreen => "有全屏程序在运行，已暂停",
     }
 }

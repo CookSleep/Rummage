@@ -1,7 +1,7 @@
 //! 推理引擎的创建与失效处理。
 //! - 创建：按用户选择的设备（`preferred_device`）与自检记录选设备（`selftest::preferred_gpu`）：选了的显卡不能用时按自动选择，
 //!   自动选择按性能顺序取第一个能用的设备，跳过本次运行中停用的显卡（`Shared::disabled`）；本次运行所有显卡都停用时、
-//!   后台自动检测设备期间（`cpu_only`）只用 CPU。视觉 token 档位或图片、音频、视频的开关变化时重建。`hold` 期间不建引擎，
+//!   后台自动检测设备期间（`cpu_only`）只用 CPU。图片、音频、视频的开关变化时重建；视觉 token 档位不属于引擎（`Engine`），改了不重建。`hold` 期间不建引擎，
 //!   检查与设置都在引擎槽的锁内。
 //! - 失效（`engine_failed`）：设备丢失、后端失效、推理进程结束不了、显存不足，或显卡算出无效结果（NaN 等）时丢弃该引擎。
 //!   换哪个设备按驱动证据门槛在丢弃时同步决定，新引擎建好之前不会初始化别的显卡：
@@ -77,9 +77,7 @@ impl Shared {
         let images = has_mmproj && params::flag(&values, "index_images");
         let audio = has_mmproj && params::flag(&values, "index_audio");
         let video = has_mmproj && params::flag(&values, "index_video");
-        let tier = int(&values, "image_tokens") as u32;
         if let Some(e) = &*slot
-            && e.tier == tier
             && e.images == images
             && e.audio == audio
             && e.video == video
@@ -134,16 +132,15 @@ impl Shared {
         });
         let engine = Arc::new(Engine {
             backend,
-            device: gpu
-                .as_ref()
-                .map_or_else(|| "CPU".to_string(), |r| r.description.clone()),
+            device: gpu.as_ref().map_or_else(
+                || rummage_embed::cpu_name().to_string(),
+                |r| r.description.clone(),
+            ),
             gpu: gpu.filter(|_| spec.gpu.is_some()),
-            tier,
             images,
             audio,
             video,
             text_space: space_row(&cfg, None),
-            image_space: space_row(&cfg, Some(tier)),
             cfg,
             failed: AtomicBool::new(false),
             driver_failed: AtomicBool::new(false),

@@ -1,12 +1,14 @@
 //! 暂停建索引与睡眠唤醒在核心状态上的部分：
-//! - 判定：手动暂停（到期时清除，含 `meta` 表）、检测到的系统状态与参数交给 `resource::reason`，结果交给流水线
-//!   （`Pipeline::set_paused`，有变化时立即广播）。判定与设置的全过程持有 `State::manual`，并发的判定不会用旧结果覆盖新结果。
+//! - 判定：手动暂停（到期时清除，含 `meta` 表）、后台额度（`State::quota`）、检测到的系统状态与参数交给 `resource::reason`，
+//!   结果交给流水线（`Pipeline::set_paused`，有变化时立即广播）；同一次检测的结果也决定是否降温（`resource::slow`，
+//!   `Pipeline::set_slow`）。判定与设置的全过程持有 `State::manual`，并发的判定不会用旧结果覆盖新结果。
 //! - 检测线程（`start_monitor`）每 5 秒判定一次，随后检查是否要自动重新检测设备（`State::auto_selftest`）；手动暂停、取消，以及修改相关参数后立即判定一次。
 //!   线程只持有 `State` 的 `Weak`，`State` 释放后退出。
 //! - 进入任何暂停（判定出暂停原因，或系统即将睡眠）时中止进行中的自动设备检测（`State::stop_auto_selftest`）。
 //! - 睡眠与唤醒：`suspend_indexing` 让流水线不再领取作业；`resume_indexing` 读取黄金文本样本，验证推理引擎后恢复
 //!   （`pipeline::wake`），再判定一次暂停（睡眠期间可能拔了电源）。
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use rummage_embed::selftest;
@@ -19,10 +21,13 @@ use crate::resource::{self, MANUAL_KEY};
 const MONITOR_EVERY: Duration = Duration::from_secs(5);
 
 impl State {
-    /// 当前的暂停原因；`manual` 是持有中的 `State::manual`，手动暂停到期时清除它
-    pub(super) fn pause_reason(&self, manual: &mut Option<Option<i64>>) -> Option<PauseReason> {
+    /// 当前的暂停原因与是否降温；`manual` 是持有中的 `State::manual`，手动暂停到期时清除它
+    pub(super) fn pause_reason(
+        &self,
+        manual: &mut Option<Option<i64>>,
+    ) -> (Option<PauseReason>, bool) {
         let Ok(core) = &self.db else {
-            return None;
+            return (None, false);
         };
         if let Some(Some(until)) = *manual
             && until <= (self.sys.now)()
@@ -34,17 +39,23 @@ impl State {
             *manual = None;
         }
         let sensed = (self.sys.sense)(&core.dir);
-        resource::reason(*manual, &sensed, &self.params())
+        let values = self.params();
+        let quota = self.quota.load(Ordering::Relaxed);
+        (
+            resource::reason(*manual, quota, &sensed, &values),
+            resource::slow(&sensed, &values),
+        )
     }
 
     /// 重新判定暂停原因并交给流水线；暂停时中止进行中的自动设备检测
     pub fn refresh_pause(&self) {
         let paused = {
             let mut manual = lock(&self.manual);
-            let reason = self.pause_reason(&mut manual);
+            let (reason, slow) = self.pause_reason(&mut manual);
             let paused = reason.is_some();
             if let Some(p) = self.pipeline.get() {
                 p.set_paused(reason);
+                p.set_slow(slow);
             }
             paused
         };
@@ -287,6 +298,39 @@ mod tests {
         );
         assert_eq!(respond(Request::ResumeIndexing, &state), Ok(Reply::Done));
         assert_eq!(status(&state).paused, Some(PauseReason::Battery));
+        state.close();
+    }
+
+    #[test]
+    fn background_quota_pauses_until_cleared() {
+        let dir = crate::test_dir();
+        let (sys, _, sensed) = fake();
+        let state = start(dir.path(), sys);
+        let quota = |state: &Arc<State>, exhausted| {
+            let body = Request::BackgroundQuota { exhausted };
+            assert_eq!(respond(body, state), Ok(Reply::Done));
+        };
+        quota(&state, true);
+        assert_eq!(status(&state).paused, Some(PauseReason::Quota));
+        // 过热排在额度之后
+        sensed.lock().unwrap().thermal = resource::THERMAL_SEVERE;
+        state.refresh_pause();
+        assert_eq!(status(&state).paused, Some(PauseReason::Quota));
+        quota(&state, false);
+        assert_eq!(status(&state).paused, Some(PauseReason::Hot));
+        sensed.lock().unwrap().thermal = 0;
+        state.refresh_pause();
+        assert_eq!(status(&state).paused, None);
+        state.close();
+
+        // 不持久化：重启后不再暂停
+        let (sys, _, _) = fake();
+        let state = start(dir.path(), sys);
+        quota(&state, true);
+        state.close();
+        let (sys, _, _) = fake();
+        let state = start(dir.path(), sys);
+        assert_eq!(status(&state).paused, None);
         state.close();
     }
 }

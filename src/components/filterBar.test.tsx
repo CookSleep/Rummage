@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { RootInfo } from '../types'
 
@@ -71,5 +72,27 @@ describe('FilterBar', () => {
     roots = [root(2, 'D:\\文档')]
     await emitEvent('core-event', { type: 'RootsChanged' })
     expect(await folderOptions()).toEqual(['文档'])
+  })
+
+  it('还没有添加文件夹时文件夹筛选不可展开，悬停说明原因；添加后恢复', async () => {
+    let roots: RootInfo[] = []
+    mockCore({ list_roots: () => roots })
+    render(<FilterBar filters={DEFAULT_FILTERS} onChange={vi.fn()} refresh={false} connected />)
+    await flush()
+    const trigger = button('文件夹')
+    expect(trigger.getAttribute('aria-disabled')).toBe('true')
+    await click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    // jsdom 没有 elementFromPoint，气泡定位时用到
+    document.elementFromPoint = () => trigger
+    act(() => {
+      trigger.dispatchEvent(new MouseEvent('mouseenter'))
+    })
+    expect(document.body.textContent).toContain('还没有添加文件夹')
+
+    roots = [root(1, 'D:\\照片')]
+    await emitEvent('core-event', { type: 'RootsChanged' })
+    expect(button('文件夹').getAttribute('aria-disabled')).toBeNull()
+    expect(await folderOptions()).toEqual(['照片'])
   })
 })

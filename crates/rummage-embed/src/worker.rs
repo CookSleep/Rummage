@@ -1,6 +1,7 @@
-//! 推理子进程 `rummage-core worker` 的主体。参数由 rummage-core 的 main.rs 解析。
+//! 推理子进程 `rummage-core worker` 的主体，参数格式见 `WorkerArgs::parse`。
+//! Android 上不启动子进程，同一主体在应用进程内的线程中运行（`platform` 的 `spawn`），收发同样的帧。
 //!
-//! 启动时先保护 stdout（`platform::protocol_stdout`），再等父进程发来 `Start`（父进程已把本进程放进
+//! 作为子进程时先保护 stdout（`platform::protocol_stdout`，见 `run_worker_stdio`），再等父进程发来 `Start`（父进程已把本进程放进
 //! Job Object）才加载运行库；推理、列出设备两种模式都如此。
 //!
 //! 推理模式：加载运行库 → 选定设备 → 加载模型 → 发 `Ready` → 逐个处理 stdin 上的请求（推理或计数），stdin 关闭即退出。
@@ -22,13 +23,14 @@
 //! 加载 ggml-vulkan 只创建 Vulkan 实例、查询物理设备属性，不创建逻辑设备，不在 GPU 上计算；默认只列出独显和核显，
 //! 并按 UUID / LUID 去重（b11461 `ggml_vk_instance_init`）。
 
-use std::ffi::CString;
-use std::fs::File;
-use std::io::{self, Read};
+use std::ffi::{CString, OsString};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use rummage_llama::vulkan::{self, PhysicalDevice};
-use rummage_llama::{Device, DeviceKind, Embedder, Part, Runtime};
+use rummage_llama::{Device, DeviceKind, Embedder, Part};
 
 use crate::frame::{self, DeviceInfo, FromWorker, GpuInfo, MediaPart, ToWorker};
 use crate::local::VK_VISIBLE_ENV;
@@ -51,8 +53,58 @@ pub enum WorkerArgs {
     },
 }
 
-/// 返回进程退出码。
-pub fn run_worker(args: WorkerArgs) -> i32 {
+impl WorkerArgs {
+    /// 解析 `worker` 子命令的参数（`worker` 本身已去掉）；格式与 `local` 中拼出的参数对应
+    pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Self, String> {
+        let mut args = args.into_iter();
+        let mut runtime_dir = None;
+        let mut model = None;
+        let mut mmproj = None;
+        let mut threads = None;
+        let mut gpu = None;
+        let mut gpu_pci = None;
+        let mut list_devices = false;
+        while let Some(arg) = args.next() {
+            let flag = arg.to_string_lossy().into_owned();
+            if flag == "--list-devices" {
+                list_devices = true;
+                continue;
+            }
+            let mut value = || args.next().ok_or_else(|| format!("{flag} 后面缺少值。"));
+            match flag.as_str() {
+                "--runtime-dir" => runtime_dir = Some(PathBuf::from(value()?)),
+                "--model" => model = Some(PathBuf::from(value()?)),
+                "--mmproj" => mmproj = Some(PathBuf::from(value()?)),
+                "--threads" => {
+                    let v = value()?;
+                    let n = v
+                        .to_str()
+                        .and_then(|v| v.parse::<i32>().ok())
+                        .filter(|&n| n > 0);
+                    threads = Some(n.ok_or("--threads 应为正整数。")?);
+                }
+                "--gpu" => gpu = Some(value()?.to_string_lossy().into_owned()),
+                "--gpu-pci" => gpu_pci = Some(value()?.to_string_lossy().into_owned()),
+                _ => return Err(format!("无法识别的参数：{flag}。")),
+            }
+        }
+        let runtime_dir = runtime_dir.ok_or("缺少 --runtime-dir。")?;
+        if list_devices {
+            return Ok(WorkerArgs::ListDevices { runtime_dir });
+        }
+        Ok(WorkerArgs::Embed {
+            runtime_dir,
+            model: model.ok_or("缺少 --model。")?,
+            mmproj,
+            threads: threads.ok_or("缺少 --threads。")?,
+            gpu,
+            gpu_pci,
+        })
+    }
+}
+
+/// 作为推理子进程运行：协议走 stdin 与受保护的 stdout。返回进程退出码
+pub fn run_worker_stdio(args: WorkerArgs) -> i32 {
     let mut out = match platform::protocol_stdout() {
         Ok(out) => out,
         Err(err) => {
@@ -60,8 +112,18 @@ pub fn run_worker(args: WorkerArgs) -> i32 {
             return 1;
         }
     };
-    let mut inp = io::stdin().lock();
-    let res = wait_start(&mut inp)
+    run_worker(args, None, &mut io::stdin().lock(), &mut out)
+}
+
+/// 从 `inp` 读请求、向 `out` 写回复，直到 `inp` 关闭；返回退出码。
+/// `abort` 置位时正在进行的加载或推理尽快停下（`rummage_llama::Embedder::new`），推理在应用进程内运行时用；子进程传 `None`
+pub fn run_worker(
+    args: WorkerArgs,
+    abort: Option<Arc<AtomicBool>>,
+    inp: &mut impl Read,
+    out: &mut impl Write,
+) -> i32 {
+    let res = wait_start(inp)
         .map_err(Failure::from)
         .and_then(|()| match &args {
             WorkerArgs::Embed {
@@ -72,8 +134,9 @@ pub fn run_worker(args: WorkerArgs) -> i32 {
                 gpu,
                 gpu_pci,
             } => serve(
-                &mut inp,
-                &mut out,
+                inp,
+                out,
+                abort.clone(),
                 runtime_dir,
                 model,
                 mmproj.as_deref(),
@@ -82,7 +145,7 @@ pub fn run_worker(args: WorkerArgs) -> i32 {
                 gpu_pci.as_deref(),
             ),
             WorkerArgs::ListDevices { runtime_dir } => {
-                list(&mut out, runtime_dir).map_err(Failure::from)
+                list(out, runtime_dir).map_err(Failure::from)
             }
         });
     let Err(err) = res else {
@@ -91,7 +154,7 @@ pub fn run_worker(args: WorkerArgs) -> i32 {
     eprintln!("{}", err.message);
     // 父进程可能已经断开，这时只能靠 stderr 与退出码。
     let _ = frame::write(
-        &mut out,
+        out,
         &FromWorker::Error {
             message: err.message,
             input: false,
@@ -147,7 +210,8 @@ fn is_gpu(kind: DeviceKind) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn serve(
     inp: &mut impl Read,
-    out: &mut File,
+    out: &mut impl Write,
+    abort: Option<Arc<AtomicBool>>,
     runtime_dir: &Path,
     model: &Path,
     mmproj: Option<&Path>,
@@ -167,7 +231,7 @@ fn serve(
         platform::set_runtime_env(VK_VISIBLE_ENV, &value)
             .map_err(|err| format!("无法设置 GGML_VK_VISIBLE_DEVICES：{err}"))?;
     }
-    let rt = Runtime::load(runtime_dir).map_err(|err| err.to_string())?;
+    let rt = platform::load_runtime(runtime_dir).map_err(|err| err.to_string())?;
     let used = match gpu {
         Some(want) => verify(rt.devices(), want, gpu_pci)?,
         None => rt
@@ -192,7 +256,7 @@ fn serve(
     // Flash Attention 显式设置：CPU 关闭，打开会把 K、V 转成 F16，与黄金向量（按关闭计算）的余弦下降；
     // GPU 打开，不打开时 1120 档的注意力矩阵超过 4 GiB、Vulkan 静默算错，且更慢、更占显存
     let flash_attn = device.is_some();
-    let mut emb = Embedder::new(&rt, model, mmproj, threads, device, flash_attn)
+    let mut emb = Embedder::new(&rt, model, mmproj, threads, device, flash_attn, abort)
         .map_err(|err| err.to_string())?;
 
     frame::write(out, &ready, &[]).map_err(io_err)?;
@@ -382,8 +446,8 @@ fn verify<'a>(devices: &'a [Device], want: &str, pci: Option<&str>) -> Result<&'
     })
 }
 
-fn list(out: &mut File, runtime_dir: &Path) -> Result<(), String> {
-    let rt = Runtime::load(runtime_dir).map_err(|err| err.to_string())?;
+fn list(out: &mut impl Write, runtime_dir: &Path) -> Result<(), String> {
+    let rt = platform::load_runtime(runtime_dir).map_err(|err| err.to_string())?;
     let gpus: Vec<GpuInfo> = rt
         .devices()
         .iter()
@@ -424,6 +488,105 @@ mod tests {
             pci_id: pci.map(str::to_string),
             uuid: Some([name.len() as u8; 16]),
         }
+    }
+
+    fn parse(args: &[&str]) -> Result<WorkerArgs, String> {
+        WorkerArgs::parse(args.iter().map(OsString::from))
+    }
+
+    #[test]
+    fn parse_args() {
+        assert_eq!(
+            parse(&["--runtime-dir", "rt", "--model", "m", "--threads", "6"]),
+            Ok(WorkerArgs::Embed {
+                runtime_dir: PathBuf::from("rt"),
+                model: PathBuf::from("m"),
+                mmproj: None,
+                threads: 6,
+                gpu: None,
+                gpu_pci: None,
+            })
+        );
+        assert_eq!(
+            parse(&[
+                "--runtime-dir",
+                "rt",
+                "--model",
+                "m",
+                "--mmproj",
+                "p",
+                "--threads",
+                "2",
+                "--gpu",
+                NV,
+                "--gpu-pci",
+                "0000:06:00.0",
+            ]),
+            Ok(WorkerArgs::Embed {
+                runtime_dir: PathBuf::from("rt"),
+                model: PathBuf::from("m"),
+                mmproj: Some(PathBuf::from("p")),
+                threads: 2,
+                gpu: Some(NV.to_string()),
+                gpu_pci: Some("0000:06:00.0".to_string()),
+            })
+        );
+        assert_eq!(
+            parse(&["--list-devices", "--runtime-dir", "rt"]),
+            Ok(WorkerArgs::ListDevices {
+                runtime_dir: PathBuf::from("rt"),
+            })
+        );
+        assert!(parse(&["--runtime-dir", "rt", "--threads", "6"]).is_err());
+        assert!(parse(&["--runtime-dir", "rt", "--model", "m", "--threads", "0"]).is_err());
+        assert!(
+            parse(&[
+                "--runtime-dir",
+                "rt",
+                "--model",
+                "m",
+                "--threads",
+                "6",
+                "--device",
+                "x"
+            ])
+            .is_err()
+        );
+        assert!(parse(&["--model", "m", "--threads", "6"]).is_err());
+        assert!(parse(&["--runtime-dir"]).is_err());
+        assert!(parse(&["--runtime-dir", "rt", "--verbose"]).is_err());
+    }
+
+    /// 在内存中的输入输出上运行：先等 `Start`，运行库加载失败时回一帧 `Error` 并以 1 结束
+    #[test]
+    fn run_worker_on_any_stream() {
+        let dir = std::env::temp_dir().join("rummage-no-such-runtime");
+        let args = WorkerArgs::ListDevices {
+            runtime_dir: dir.clone(),
+        };
+        let mut inp = Vec::new();
+        frame::write(&mut inp, &ToWorker::Start, &[]).unwrap();
+        let mut out = Vec::new();
+        assert_eq!(
+            run_worker(args.clone(), None, &mut inp.as_slice(), &mut out),
+            1
+        );
+        let Some((FromWorker::Error { message, .. }, _)) =
+            frame::read::<FromWorker>(&mut out.as_slice()).unwrap()
+        else {
+            panic!("应回一帧 Error");
+        };
+        assert!(message.contains("rummage-no-such-runtime"), "{message}");
+
+        // 没有收到 Start 就关闭了输入：不加载运行库
+        let mut out = Vec::new();
+        assert_eq!(run_worker(args, None, &mut io::empty(), &mut out), 1);
+        let Some((FromWorker::Error { message, .. }, _)) =
+            frame::read::<FromWorker>(&mut out.as_slice()).unwrap()
+        else {
+            panic!("应回一帧 Error");
+        };
+        assert!(message.contains("Start"), "{message}");
     }
 
     #[test]

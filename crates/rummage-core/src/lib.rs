@@ -5,7 +5,8 @@
 //! 认证之后单行上限才放宽到 16 MiB。
 //! 令牌在核心每次启动时随机生成，写入数据目录的 `core.token`，文件同样只授予当前用户。
 //! 单实例：第一个管道实例以 `FILE_FLAG_FIRST_PIPE_INSTANCE` 创建，已有核心在运行时创建失败（`BindError::AlreadyRunning`）。
-//! 库部分同时供界面进程使用（管道名、读取令牌、`client::connect` 握手），平台相关部分在 `platform` 中
+//! 库部分同时供界面进程使用（管道名、读取令牌、`client::connect` 握手），平台相关部分在 `platform` 中。
+//! Android 上没有核心进程：界面进程用 `start` 做同样的初始化，再经 `client::connect_local` 不经管道连接
 pub mod client;
 pub mod models;
 pub mod pipeline;
@@ -13,7 +14,10 @@ pub mod proxy;
 mod resource;
 mod server;
 
-#[cfg(not(windows))]
+#[cfg(target_os = "android")]
+#[path = "android.rs"]
+mod platform;
+#[cfg(not(any(windows, target_os = "android")))]
 #[path = "other.rs"]
 mod platform;
 #[cfg(windows)]
@@ -23,10 +27,13 @@ mod platform;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use rummage_index::Db;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::pipeline::Config;
 
 pub use platform::{
     Listener, Stream, bind, lower_priority, on_power, on_session_end, process_memory,
@@ -68,6 +75,26 @@ pub enum BindError {
     Occupied,
     #[error("无法创建 IPC 管道：{0}")]
     Io(#[from] io::Error),
+}
+
+/// 打开索引数据库并载入参数，再启动索引流水线（先恢复上次中断的作业）、扫描线程（对全部根目录对账一次）与暂停检测；
+/// 核心进程与 Android 的进程内后台服务共用。数据库打开失败时照常返回，需要数据库的请求返回 `unavailable`。
+/// 会读写数据库、读系统状态，在阻塞线程中调用
+pub fn start(token: String, data_dir: &Path, cfg: Config) -> Arc<State> {
+    // 上次退出时没来得及删除的内嵌音视频临时文件
+    match std::fs::remove_dir_all(&cfg.embed_tmp) {
+        Err(err) if err.kind() != ErrorKind::NotFound => {
+            log::warn!("无法清空 {}：{err}", cfg.embed_tmp.display());
+        }
+        _ => {}
+    }
+    let state = State::new(token, Db::open(data_dir));
+    apply_log_setting(&state.params());
+    state.configure(cfg.clone());
+    state.start_pipeline(pipeline::Options::local(cfg));
+    state.start_scanner();
+    state.start_monitor();
+    state
 }
 
 pub fn pipe_name(data_dir: &Path) -> io::Result<String> {
@@ -146,6 +173,53 @@ pub async fn read_line<R: AsyncBufRead + Unpin>(
 pub async fn write_line<W: AsyncWrite + Unpin>(w: &mut W, line: &str) -> io::Result<()> {
     w.write_all(format!("{line}\n").as_bytes()).await?;
     w.flush().await
+}
+
+/// 测试用的临时目录。释放时删除失败（后台线程刚放开数据库、杀毒软件一时还占着新写的文件）就重试几秒，
+/// 不在 `%TEMP%` 留下目录；`tempfile::TempDir` 删除失败时不报错也不重试
+#[cfg(test)]
+pub(crate) struct TestDir(Option<tempfile::TempDir>);
+
+#[cfg(test)]
+impl TestDir {
+    pub(crate) fn path(&self) -> &Path {
+        self.0.as_ref().expect("释放之前一直有目录").path()
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let Some(dir) = self.0.take() else {
+            return;
+        };
+        let path = dir.keep();
+        for _ in 0..50 {
+            if std::fs::remove_dir_all(&path).is_ok() || !path.exists() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        eprintln!("无法删除测试临时目录 {}", path.display());
+    }
+}
+
+/// 测试用的扫描上限：参数表的默认上限，所有类型都开启
+#[cfg(test)]
+pub(crate) const TEST_LIMITS: rummage_index::ScanLimits = rummage_index::ScanLimits {
+    max_doc_mb: 200,
+    max_image_mb: 100,
+    max_audio_min: 240,
+    max_image_mp: 100,
+    documents: true,
+    images: true,
+    audio: true,
+    video: true,
+};
+
+#[cfg(test)]
+pub(crate) fn test_dir() -> TestDir {
+    TestDir(Some(tempfile::tempdir().unwrap()))
 }
 
 #[cfg(test)]
@@ -521,51 +595,4 @@ mod pipe_tests {
             .await
             .expect("应通知主循环退出");
     }
-}
-
-/// 测试用的临时目录。释放时删除失败（后台线程刚放开数据库、杀毒软件一时还占着新写的文件）就重试几秒，
-/// 不在 `%TEMP%` 留下目录；`tempfile::TempDir` 删除失败时不报错也不重试
-#[cfg(test)]
-pub(crate) struct TestDir(Option<tempfile::TempDir>);
-
-#[cfg(test)]
-impl TestDir {
-    pub(crate) fn path(&self) -> &Path {
-        self.0.as_ref().expect("释放之前一直有目录").path()
-    }
-}
-
-#[cfg(test)]
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let Some(dir) = self.0.take() else {
-            return;
-        };
-        let path = dir.keep();
-        for _ in 0..50 {
-            if std::fs::remove_dir_all(&path).is_ok() || !path.exists() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        eprintln!("无法删除测试临时目录 {}", path.display());
-    }
-}
-
-/// 测试用的扫描上限：参数表的默认上限，所有类型都开启
-#[cfg(test)]
-pub(crate) const TEST_LIMITS: rummage_index::ScanLimits = rummage_index::ScanLimits {
-    max_doc_mb: 200,
-    max_image_mb: 100,
-    max_audio_min: 240,
-    max_image_mp: 100,
-    documents: true,
-    images: true,
-    audio: true,
-    video: true,
-};
-
-#[cfg(test)]
-pub(crate) fn test_dir() -> TestDir {
-    TestDir(Some(tempfile::tempdir().unwrap()))
 }

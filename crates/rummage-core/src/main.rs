@@ -12,7 +12,7 @@
 //! 模型下载用的 rustls 在启动时安装进程默认的 ring 加密实现。
 //! `--shutdown`：作为客户端请同一数据目录的核心退出并等它结束（开发时重新构建前用），连不上也视为成功；
 //! 不带 `--data-dir` 时用 `rummage_datadir::current` 读出当前指向的数据目录（不检查待完成的更改，也不迁移）
-//! `worker …`：推理子进程（`rummage_embed::run_worker`），由核心进程的 `LocalBackend` 拉起；不写 core.log，也不碰管道
+//! `worker …`：推理子进程（`rummage_embed::run_worker_stdio`），由核心进程的 `LocalBackend` 拉起；不写 core.log，也不碰管道
 //! `selftest …`：开发用的推理后端自检（`dev` 模块）（`rummage_embed::selftest`），把报告打印到 stdout，有可用的后端时退出码为 0；
 //! 不写 core.log，也不碰管道。参数用参数表的默认值；带 `--skip-gpu` 时只测 CPU，不加载 Vulkan 运行库
 //! `search …`、`status`、`context …`、`folders …`、`settings …`、`pause`、`resume`、`failed …`：命令行（`cli` 模块），
@@ -42,11 +42,10 @@ use flexi_logger::{
     Naming,
 };
 use rummage_core::client::{self, ConnectError};
-use rummage_core::pipeline::{Config, Options};
-use rummage_core::{BindError, Power, State};
+use rummage_core::pipeline::Config;
+use rummage_core::{BindError, Power};
 use rummage_embed::WorkerArgs;
 use rummage_embed::space::{MMPROJ, MODEL, MODEL_DIR};
-use rummage_index::Db;
 
 /// 开发版或不在安装目录中运行（旁边没有 `llama\`），见模块说明
 fn in_repo(exe: &Path) -> bool {
@@ -111,54 +110,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         parsed.data_dir = Some(PathBuf::from(path));
     }
     Ok(parsed)
-}
-
-/// `worker` 子命令的参数，`worker` 本身已去掉
-fn parse_worker_args(args: impl IntoIterator<Item = OsString>) -> Result<WorkerArgs, String> {
-    let mut args = args.into_iter();
-    let mut runtime_dir = None;
-    let mut model = None;
-    let mut mmproj = None;
-    let mut threads = None;
-    let mut gpu = None;
-    let mut gpu_pci = None;
-    let mut list_devices = false;
-    while let Some(arg) = args.next() {
-        let flag = arg.to_string_lossy().into_owned();
-        if flag == "--list-devices" {
-            list_devices = true;
-            continue;
-        }
-        let mut value = || args.next().ok_or_else(|| format!("{flag} 后面缺少值。"));
-        match flag.as_str() {
-            "--runtime-dir" => runtime_dir = Some(PathBuf::from(value()?)),
-            "--model" => model = Some(PathBuf::from(value()?)),
-            "--mmproj" => mmproj = Some(PathBuf::from(value()?)),
-            "--threads" => {
-                let v = value()?;
-                let n = v
-                    .to_str()
-                    .and_then(|v| v.parse::<i32>().ok())
-                    .filter(|&n| n > 0);
-                threads = Some(n.ok_or("--threads 应为正整数。")?);
-            }
-            "--gpu" => gpu = Some(value()?.to_string_lossy().into_owned()),
-            "--gpu-pci" => gpu_pci = Some(value()?.to_string_lossy().into_owned()),
-            _ => return Err(format!("无法识别的参数：{flag}。")),
-        }
-    }
-    let runtime_dir = runtime_dir.ok_or("缺少 --runtime-dir。")?;
-    if list_devices {
-        return Ok(WorkerArgs::ListDevices { runtime_dir });
-    }
-    Ok(WorkerArgs::Embed {
-        runtime_dir,
-        model: model.ok_or("缺少 --model。")?,
-        mmproj,
-        threads: threads.ok_or("缺少 --threads。")?,
-        gpu,
-        gpu_pci,
-    })
 }
 
 /// core.log 的写入端：参数 `write_log_file` 关闭时丢弃，stderr 的副本照常输出
@@ -293,33 +244,16 @@ async fn run(data_dir: &Path) -> ExitCode {
         embed_tmp: Config::embed_tmp_dir(data_dir),
         gpus: rummage_embed::selftest::gpu_adapters,
     };
-    // 上次退出时没来得及删除的内嵌音视频临时文件
-    match std::fs::remove_dir_all(&cfg.embed_tmp) {
-        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
-            log::warn!("无法清空 {}：{err}", cfg.embed_tmp.display());
-        }
-        _ => {}
-    }
-    // 打开数据库在占住管道之后，第二个实例不会同时迁移同一个数据库；失败时核心照常运行，相关请求返回 unavailable
+    // 打开数据库在占住管道之后，第二个实例不会同时迁移同一个数据库
     let dir = data_dir.to_path_buf();
-    let state = match tokio::task::spawn_blocking(move || {
-        let state = State::new(token, Db::open(&dir));
-        rummage_core::apply_log_setting(&state.params());
-        state.configure(cfg.clone());
-        state.start_pipeline(Options::local(cfg));
-        // 启动扫描与暂停监测要取数据库锁、读系统状态，同样不放在异步执行器上
-        state.start_scanner();
-        state.start_monitor();
-        state
-    })
-    .await
-    {
-        Ok(state) => state,
-        Err(err) => {
-            log::error!("初始化核心状态时出错：{err}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let state =
+        match tokio::task::spawn_blocking(move || rummage_core::start(token, &dir, cfg)).await {
+            Ok(state) => state,
+            Err(err) => {
+                log::error!("初始化核心状态时出错：{err}");
+                return ExitCode::FAILURE;
+            }
+        };
     // 睡眠前不再领取作业，唤醒后验证推理引擎再继续；验证可能要几秒，不占用窗口线程
     let s = state.clone();
     let on_power: Box<dyn Fn(Power) + Send + Sync> = Box::new(move |event| match event {
@@ -397,8 +331,10 @@ fn main() -> ExitCode {
     let mut raw = std::env::args_os().skip(1).peekable();
     if raw.peek().is_some_and(|a| a == "worker") {
         raw.next();
-        return match parse_worker_args(raw) {
-            Ok(args) => ExitCode::from(u8::try_from(rummage_embed::run_worker(args)).unwrap_or(1)),
+        return match WorkerArgs::parse(raw) {
+            Ok(args) => {
+                ExitCode::from(u8::try_from(rummage_embed::run_worker_stdio(args)).unwrap_or(1))
+            }
             Err(msg) => {
                 eprintln!("{msg}");
                 ExitCode::FAILURE

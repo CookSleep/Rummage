@@ -1,4 +1,4 @@
-name: Build Desktop Client
+name: Build Release
 
 # 只由推送 v* tag 触发；不提供为已有 tag 手动重新构建的入口，已发布版本有问题时发布新版本修复
 on:
@@ -13,33 +13,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # job 级 if 不能引用 secrets，先由轻量 job 判断是否配置了签名私钥；未配置时跳过构建
+  # job 级 if 不能引用 secrets，先由轻量 job 判断是否配置了签名私钥（未配置时跳过构建），并校验版本、取出 Release 正文
   check:
     runs-on: ubuntu-latest
     outputs:
       enabled: ${{ steps.check.outputs.enabled }}
+      tag: ${{ steps.meta.outputs.tag }}
+      body: ${{ steps.meta.outputs.body }}
     steps:
       - id: check
         env:
           SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if [[ -z "$SIGNING_KEY" ]]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY is not set. Skipping desktop client build."
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set. Skipping release build."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-  windows:
-    needs: check
-    if: ${{ needs.check.outputs.enabled == 'true' }}
-    runs-on: windows-latest
-    steps:
       - uses: actions/checkout@v4
+        if: ${{ steps.check.outputs.enabled == 'true' }}
 
       - name: Check version and extract release notes
         id: meta
-        shell: bash
+        if: ${{ steps.check.outputs.enabled == 'true' }}
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -66,6 +64,13 @@ jobs:
             echo 'RELEASE_NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: check
+    if: ${{ needs.check.outputs.enabled == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
@@ -94,6 +99,7 @@ jobs:
       - run: npm ci
 
       # 构建 NSIS 安装包并用私钥（及其密码，均来自 GitHub Secrets）为更新包签名；安装包、.sig 和 latest.json 上传到 tag 对应的 Release。
+      # Release 先建成预发布：Android 也上传完、publish job 改为正式版之前，客户端的更新地址 releases/latest/download/… 不会指向它。
       # package.json 没有 tauri 脚本，需指定 tauriScript；--config 与 npm run tauri:build 相同，合并打包用的 externalBin 与 resources
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -101,21 +107,139 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ steps.meta.outputs.tag }}
-          releaseName: ${{ steps.meta.outputs.tag }}
-          releaseBody: ${{ steps.meta.outputs.body }}
+          tagName: ${{ needs.check.outputs.tag }}
+          releaseName: ${{ needs.check.outputs.tag }}
+          releaseBody: ${{ needs.check.outputs.body }}
           releaseDraft: false
-          prerelease: false
+          prerelease: true
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           tauriScript: npx tauri
           args: --config src-tauri/tauri.bundle.conf.json
 
-      # tauri-action 在 Release 已存在时只上传文件，不改标题、正文和草稿状态。
-      # 这里统一改为 RELEASE.md 的正文并设为正式版，客户端的更新地址 releases/latest/download/latest.json 才能指向它
-      - name: Sync release notes
-        shell: bash
+  # 构建 arm64 APK，用正式密钥签名，生成 android.json（客户端从 releases/latest/download/android.json 读取），
+  # 作为构建产物交给 publish job 上传；与 Windows 并行构建
+  android:
+    needs: check
+    if: ${{ needs.check.outputs.enabled == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 30.0.16248370
+      BUILD_TOOLS: 36.0.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check signing secrets
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo "::error::未配置 APK 签名用的 ANDROID_KEYSTORE_BASE64、ANDROID_KEYSTORE_PASSWORD、ANDROID_KEY_ALIAS、ANDROID_KEY_PASSWORD"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 镜像自带 Android SDK（ANDROID_HOME）；NDK 与 build-tools 钉定版本，已装时 sdkmanager 直接返回
+      - name: Install NDK and build-tools
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: swatinem/rust-cache@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: .cache/third-party/llama.cpp
+          key: third-party-android-${{ hashFiles('scripts/fetch-llama.ps1', 'scripts/common.ps1') }}
+
+      # llama.cpp 的 android-arm64 预编译包，校验 SHA-256 后去符号，Gradle 打进 APK
+      - name: Fetch llama.cpp
+        shell: pwsh
+        run: ./scripts/fetch-llama.ps1 -Variant android
+
+      - run: npm ci
+
+      # release 构建，versionCode 由 Tauri CLI 按版本号算出（主 × 1000000 + 次 × 1000 + 修订），写进 tauri.properties；
+      # 产物未签名
+      - name: Build APK
+        run: npx tauri android build --target aarch64 --apk
+
+      # 先 zipalign 再 apksigner 签名（签名后再改动 APK 会使签名失效）；密码经环境变量传给 apksigner，不出现在命令行中
+      - name: Sign APK
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
+          unsigned=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          mkdir -p dist-android
+          apk="dist-android/Rummage_${TAG#v}_android-arm64.apk"
+          keystore="$RUNNER_TEMP/release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          trap 'rm -f "$keystore"' EXIT
+          "$bt/zipalign" -P 16 -f 4 "$unsigned" "$RUNNER_TEMP/aligned.apk"
+          "$bt/apksigner" sign --ks "$keystore" --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD --v4-signing-enabled false \
+            --out "$apk" "$RUNNER_TEMP/aligned.apk"
+          "$bt/apksigner" verify --verbose "$apk"
+          echo "APK=$apk" >> "$GITHUB_ENV"
+
+      - name: Generate android.json
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          name=$(basename "$APK")
+          jq -n --arg version "${TAG#v}" \
+            --arg url "https://github.com/$REPO/releases/download/$TAG/$name" \
+            --arg sha256 "$(sha256sum "$APK" | cut -d' ' -f1)" \
+            --argjson size "$(stat -c %s "$APK")" \
+            '{version: $version, url: $url, sha256: $sha256, size: $size}' > dist-android/android.json
+          cat dist-android/android.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist-android/
+          if-no-files-found: error
+
+  # Windows 与 Android 都完成后才上传 APK、改为正式版：tauri-action 在 Release 已存在时只上传文件，
+  # 这里统一标题与正文（RELEASE.md）并设为正式版，客户端的更新地址 releases/latest/download/… 才指向它
+  publish:
+    needs: [check, windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android
+          path: dist-android
+
+      - name: Upload APK and publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.meta.outputs.tag }}
-        run: gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md --draft=false --prerelease=false
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.check.outputs.tag }}
+          BODY: ${{ needs.check.outputs.body }}
+        run: |
+          gh release upload "$TAG" dist-android/*.apk dist-android/android.json --clobber
+          printf '%s\n' "$BODY" > release-notes.md
+          gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md --draft=false --prerelease=false

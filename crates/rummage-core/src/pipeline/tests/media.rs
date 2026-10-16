@@ -2,7 +2,7 @@
 //! 改用纯画面、视频预设、音频切段与超长音频、超大图片只记元数据。
 use super::*;
 
-/// 长图切片：整图片段在前、不带区域；切片按切片档位的空间计算，参数版本带切分参数，locator 记原图中的区域。
+/// 长图切片：整图片段在前、不带区域，按图片档位；切片按切片档位的空间计算，参数版本带切分参数，locator 记原图中的区域。
 /// 内容相同的另一张长图只推理一次
 #[test]
 fn long_image_sliced() {
@@ -14,20 +14,24 @@ fn long_image_sliced() {
     assert_eq!((s.done, s.failed), (2, 0));
     assert_eq!(e.stub.embeds.load(Ordering::Relaxed), 6);
     let values = params::defaults();
-    let tier = int(&values, "image_tokens") as u32;
+    let (tier, slice_tier) = (
+        int(&values, "image_tokens") as u32,
+        int(&values, "long_image_tokens") as u32,
+    );
+    assert_ne!(tier, slice_tier);
     let cfg = SpaceConfig::current(Backend::Cpu);
-    let version = space::image_slice_preprocess(tier, 2.5, 12);
+    let version = space::image_slice_preprocess(slice_tier, 2.5, 12);
     for name in ["长图.bmp", "副本.bmp"] {
         let rows = e.strings(&format!(
             "SELECT s.locator_json || ' ' || v.space_id || ' ' || v.params_version
              FROM segments s JOIN files f ON f.id = s.file_id JOIN vectors v ON v.segment_id = s.id
              WHERE f.name = '{name}' ORDER BY s.id"
         ));
-        let mut want = vec![format!("{{}} {} image-v1-t140", cfg.image(140))];
+        let mut want = vec![format!("{{}} {} image-v1-t{tier}", cfg.image(tier))];
         for y in [0, 75, 150, 225, 300] {
             want.push(format!(
                 r#"{{"region":{{"x":0,"y":{y},"width":100,"height":100}}}} {} {version}"#,
-                cfg.image(tier)
+                cfg.image(slice_tier)
             ));
         }
         assert_eq!(rows, want, "{name}");
@@ -165,7 +169,7 @@ fn video_windows_stored() {
     assert_eq!(e.stub.embeds.load(Ordering::Relaxed), 4);
     assert_eq!(
         e.strings("SELECT DISTINCT v.params_version FROM vectors v"),
-        ["video-v2-w2-o0-f2-t70-v"]
+        ["video-v2-w2-o0-f2-t140-v"]
     );
     assert_eq!(
         e.strings("SELECT DISTINCT modality FROM segments"),
@@ -208,10 +212,10 @@ fn video_with_audio_falls_back_to_frames() {
     };
     assert_eq!(
         modality("讲话.mp4"),
-        ["video_av video-v2-w6-o0-f6-t70-av-m1024"]
+        ["video_av video-v2-w6-o0-f6-t140-av-m1152"]
     );
     // 没有音轨的只看画面
-    assert_eq!(modality("无声.mp4"), ["video_v video-v2-w6-o0-f6-t70-v"]);
+    assert_eq!(modality("无声.mp4"), ["video_v video-v2-w6-o0-f6-t140-v"]);
     // 建好的都符合当前设置，不重建
     assert!(
         e.pipeline
@@ -232,9 +236,9 @@ fn video_with_audio_falls_back_to_frames() {
     assert_eq!(
         *lock(&e.stub.videos),
         [
-            "video-v2-w6-o0-f6-t70-av-m1024",
-            "video-v2-w6-o0-f6-t70-v",
-            "video-v2-w6-o0-f6-t70-v"
+            "video-v2-w6-o0-f6-t140-av-m1152",
+            "video-v2-w6-o0-f6-t140-v",
+            "video-v2-w6-o0-f6-t140-v"
         ]
     );
     // 向量在纯画面空间，参数版本记带音频的版本，按当前设置不必重建
@@ -243,7 +247,7 @@ fn video_with_audio_falls_back_to_frames() {
             "SELECT DISTINCT s.modality || ' ' || sp.preprocess || ' ' || v.params_version FROM segments s
              JOIN vectors v ON v.segment_id = s.id JOIN spaces sp ON sp.id = v.space_id"
         ),
-        ["video_v video-v2-w6-o0-f6-t70-v video-v2-w6-o0-f6-t70-av-m1024"]
+        ["video_v video-v2-w6-o0-f6-t140-v video-v2-w6-o0-f6-t140-av-m1152"]
     );
     assert!(
         e.pipeline
@@ -273,10 +277,11 @@ fn video_opts_from_presets() {
         }
     );
     assert_eq!(opts.audio_tokens, None);
+    assert_eq!(opts.frame_tokens, 140);
     values.insert("video_preset".into(), ParamValue::Int(3));
     let opts = video_opts(&values);
     assert_eq!((opts.windows.window_s, opts.windows.frames), (6, 6));
-    assert_eq!(opts.audio_tokens, Some(1024));
+    assert_eq!(opts.audio_tokens, Some(1152));
     // 预设下高级项不生效
     values.insert("video_window_s".into(), ParamValue::Int(9));
     assert_eq!(video_opts(&values), opts);
@@ -294,7 +299,7 @@ fn video_opts_from_presets() {
     );
     assert_eq!(opts.audio_tokens, None);
     values.insert("video_audio".into(), ParamValue::Bool(true));
-    assert_eq!(video_opts(&values).audio_tokens, Some(1024));
+    assert_eq!(video_opts(&values).audio_tokens, Some(1152));
 }
 
 /// 16 kHz 单声道 16 位 PCM WAV：`tone` 秒正弦接 `silence` 秒静音

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "mobile"
+description = "允许主窗口在返回键没有可关闭的内容时把应用退到后台，以及读取全面屏的安全区（仅 Android）"
+commands.allow = ["move_task_to_back", "safe_area"]

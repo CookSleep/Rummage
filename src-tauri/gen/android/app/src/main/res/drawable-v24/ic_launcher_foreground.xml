@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标的前景：source.svg 中的白色图形，坐标沿用原图。图形宽高约 43dp，居中放在 108dp 的画布上，
+  在 66dp 的安全区内，大小约为可见区域（72dp）的 60%，与原图中图形占图标的比例相同。也用作主题图标（monochrome）
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="32.5"
+        android:translateY="16">
+        <path
+            android:pathData="M3.5,38a18,18 0,1 0,36 0a18,18 0,1 0,-36 0"
+            android:strokeWidth="7"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M39.5,20V56"
+            android:strokeWidth="7"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M12.1,34.6A10,10 0,0 1,18.1 28.6"
+            android:strokeWidth="4"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round" />
+    </group>
+</vector>

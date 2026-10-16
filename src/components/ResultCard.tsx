@@ -26,7 +26,7 @@ function Score({ hit }: { hit: SearchHit }) {
 }
 
 /**
- * 悬停时显示的“找相似的”按钮；卡片不在 Tab 顺序中，键盘用详情栏中的同名按钮。
+ * 悬停时显示的“找相似的”按钮（触摸屏上手指按在卡片上时显示）；卡片不在 Tab 顺序中，键盘用详情栏中的同名按钮。
  * 点击不选中卡片，双击不打开文件
  */
 function SimilarButton({ kind, onClick, className }: { kind: string; onClick: () => void; className: string }) {
@@ -131,7 +131,7 @@ export default memo(function ResultCard({ hit, box, index, selected, onSelect, o
         <div className="flex h-full flex-col gap-1 p-3">
           <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
             <KindIcon kind={hit.kind} className="h-4 w-4 flex-shrink-0" />
-            <span>{kindLabel(hit.kind)}</span>
+            <span className="flex-shrink-0 whitespace-nowrap">{kindLabel(hit.kind)}</span>
             {match && <span className="truncate">· {match}</span>}
             <span className="ml-auto flex flex-shrink-0 items-center gap-2"><Flags hit={hit} /><Score hit={hit} /></span>
           </div>

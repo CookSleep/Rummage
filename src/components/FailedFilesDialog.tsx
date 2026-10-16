@@ -128,13 +128,13 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[110] flex items-center justify-center modal-pad" onClick={onClose}>
       <div className="absolute inset-0 animate-overlay-in bg-black/20 backdrop-blur-md dark:bg-black/40" />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="失败的文件"
-        className="relative z-10 flex h-[85vh] max-h-[640px] w-full max-w-2xl animate-confirm-in flex-col rounded-3xl border border-white/50 bg-white/90 shadow-[0_8px_40px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/90 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] dark:ring-white/10"
+        className="relative z-10 flex h-[85vh] max-h-[min(640px,100%)] w-full max-w-2xl animate-confirm-in flex-col rounded-3xl border border-white/50 bg-white/90 shadow-[0_8px_40px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/90 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] dark:ring-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="shrink-0 px-6 pb-3 pt-6">

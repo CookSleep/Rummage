@@ -31,8 +31,17 @@ pub const GGML_BACKEND_DEVICE_TYPE_GPU: c_int = 1;
 pub const GGML_BACKEND_DEVICE_TYPE_IGPU: c_int = 2;
 pub const LLAMA_SPLIT_MODE_NONE: c_int = 0;
 pub const GGML_LOG_LEVEL_WARN: c_int = 3;
+#[cfg(target_os = "android")]
+pub const GGML_LOG_LEVEL_ERROR: c_int = 4;
 pub const GGML_LOG_LEVEL_CONT: c_int = 5;
 pub const MTMD_INPUT_CHUNK_TYPE_TEXT: c_int = 0;
+
+/// llama.h `llama_progress_callback`、mtmd.h `mtmd_progress_callback`：返回假时中止加载
+pub type ProgressCallback = extern "C" fn(f32, *mut c_void) -> bool;
+/// ggml.h `ggml_abort_callback`：返回真时中止计算
+pub type AbortCallback = extern "C" fn(*mut c_void) -> bool;
+/// ggml-backend.h `ggml_backend_sched_eval_callback`，第一个参数是 `struct ggml_tensor *`
+pub type EvalCallback = extern "C" fn(*mut c_void, bool, *mut c_void) -> bool;
 
 /// llama.h `struct llama_model_params`
 #[repr(C)]
@@ -46,7 +55,7 @@ pub struct LlamaModelParams {
     pub lazy_mode: c_int,
     pub main_gpu: i32,
     pub tensor_split: *const f32,
-    pub progress_callback: *mut c_void,
+    pub progress_callback: Option<ProgressCallback>,
     pub progress_callback_user_data: *mut c_void,
     pub kv_overrides: *const c_void,
     pub vocab_only: bool,
@@ -87,7 +96,7 @@ pub struct LlamaContextParams {
     pub cb_eval_user_data: *mut c_void,
     pub type_k: c_int,
     pub type_v: c_int,
-    pub abort_callback: *mut c_void,
+    pub abort_callback: Option<AbortCallback>,
     pub abort_callback_data: *mut c_void,
     pub embeddings: bool,
     pub offload_kqv: bool,
@@ -148,10 +157,10 @@ pub struct MtmdContextParams {
     pub warmup: bool,
     pub image_min_tokens: c_int,
     pub image_max_tokens: c_int,
-    pub cb_eval: *mut c_void,
+    pub cb_eval: Option<EvalCallback>,
     pub cb_eval_user_data: *mut c_void,
     pub batch_max_tokens: i32,
-    pub progress_callback: *mut c_void,
+    pub progress_callback: Option<ProgressCallback>,
     pub progress_callback_user_data: *mut c_void,
 }
 

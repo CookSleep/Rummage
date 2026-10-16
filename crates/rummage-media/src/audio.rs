@@ -1,6 +1,7 @@
 //! 音频：用 ffprobe 读元数据，用 ffmpeg 解码为 16 kHz 单声道 f32，按时间切段并跳过静音。
 //!
-//! - ffmpeg 的调用方式见 `ffmpeg`。
+//! - ffmpeg 的调用方式见 `ffmpeg`。Android 不用 ffmpeg，改用系统的 MediaExtractor + MediaCodec（`android.rs`），
+//!   下混与重采样按 ffmpeg 的做法自己实现（`resample`），结果与电脑接近而不逐位相同；`ffmpeg_dir` 在 Android 上不用。
 //! - 解码：只取第一条音轨（`-map 0:a:0`，带封面图的 mp3 也只解音频），`-ac 1 -ar 16000 -f f32le` 由 ffmpeg 混成单声道并重采样；
 //!   16 位 PCM 的输入转成 f32 时就是 `x / 32768`，与黄金样本的读法逐位相同。
 //!   采样数超过上限时立即结束 ffmpeg 并返回 `TooLong`，不会因为文件谎报时长而读入过多数据。视频的音轨同样用它解码。
@@ -15,13 +16,19 @@
 //!   - 否则 n 段等长、起点在 `[0, 总长 − 段长]` 上均匀分布：首段从 0 开始、末段与末端对齐，实际重叠可能略大于 `overlap_s`。
 //!   - 整段音量（RMS，dBFS）低于静音阈值的段跳过。修改这里的规则时提升 `rummage_embed::space::AUDIO_PREPROCESS`。
 
+#[cfg(any(target_os = "android", test))]
+pub(crate) mod resample;
+
+#[cfg(not(target_os = "android"))]
 use std::ffi::OsString;
 use std::path::Path;
 use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::ffmpeg::{self, MediaError, input, num, tag, text, tool};
+use crate::ffmpeg::{self, MediaError, num, tag, text};
+#[cfg(not(target_os = "android"))]
+use crate::ffmpeg::{input, tool};
 
 /// 送入模型的采样率
 pub const SAMPLE_RATE: u32 = 16_000;
@@ -60,6 +67,13 @@ impl AudioInfo {
 
 /// 用 `ffmpeg_dir` 中的 ffprobe 读取元数据，超过 `timeout` 就结束它
 pub fn probe(ffmpeg_dir: &Path, path: &Path, timeout: Duration) -> Result<AudioInfo, MediaError> {
+    // Android 上不设时限，读取卡住时无法中途结束
+    #[cfg(target_os = "android")]
+    {
+        let _ = (ffmpeg_dir, timeout);
+        crate::android::audio_probe(path)
+    }
+    #[cfg(not(target_os = "android"))]
     parse_probe(&ffmpeg::probe_json(ffmpeg_dir, path, timeout, "音频")?)
 }
 
@@ -87,8 +101,25 @@ pub fn parse_probe(v: &Value) -> Result<AudioInfo, MediaError> {
     })
 }
 
-/// 解码为 16 kHz 单声道 f32 采样。`expect` 为按时长估计的采样数（预先分配），超过 `max` 个采样时结束 ffmpeg 并返回 `TooLong`
+/// 解码为 16 kHz 单声道 f32 采样。`expect` 为按时长估计的采样数（预先分配），超过 `max` 个采样时停止解码并返回 `TooLong`
 pub fn decode(
+    ffmpeg_dir: &Path,
+    path: &Path,
+    expect: usize,
+    max: usize,
+    timeout: Duration,
+) -> Result<Vec<f32>, MediaError> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = ffmpeg_dir;
+        crate::android::audio_decode(path, expect, max, timeout)
+    }
+    #[cfg(not(target_os = "android"))]
+    ffmpeg_decode(ffmpeg_dir, path, expect, max, timeout)
+}
+
+#[cfg(not(target_os = "android"))]
+fn ffmpeg_decode(
     ffmpeg_dir: &Path,
     path: &Path,
     expect: usize,

@@ -2,20 +2,35 @@
 //! 以及由代码创建主窗口（WebView2 数据目录随数据目录走、按系统主题设背景色避免白闪、拒绝新窗口）、关闭兜底和核心进程的连接与守护。
 //! 关闭主窗口只销毁窗口，界面进程留在托盘（`tray`），从托盘再打开时重新创建；只有托盘的“退出”等入口会退出进程。
 //! 用户在设置中选了关闭窗口时退出的，由前端在关闭时调用 `exit_app`（同托盘的“退出”），设置存在前端的本地存储
+#[cfg(target_os = "android")]
+mod android;
+// 前台服务的启停判定，其他平台上只为测试编译
+#[cfg(all(test, not(target_os = "android")))]
+#[path = "android/background.rs"]
+mod background;
+// Android 更新包的校验与保存，其他平台上只为测试编译
+#[cfg(all(test, not(target_os = "android")))]
+#[path = "android/update.rs"]
+mod android_update;
 mod close_watch;
 mod core;
 mod data;
+#[cfg(not(target_os = "android"))]
 mod data_dir;
 mod diagnostics;
 mod failures;
 mod image_query;
 mod open_at;
 mod pause;
+mod releases;
 mod search;
 mod settings;
 mod setup;
+#[cfg(desktop)]
 mod tray;
+#[cfg(desktop)]
 mod update;
+mod update_store;
 mod zip;
 
 #[cfg(not(windows))]
@@ -27,33 +42,46 @@ mod platform;
 
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
+#[cfg(desktop)]
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 检查更新（update）用的 rustls 需要进程默认的 ring 加密实现
+    // 检查更新（releases、update）用的 rustls 需要进程默认的 ring 加密实现
     rummage_core::models::install_crypto();
     // 日志和 WebView2 都使用数据目录，需最先确定；有待迁移的更改时在此完成迁移，
-    // 指向的目录无法使用时在创建窗口前询问用户
+    // 指向的目录无法使用时在创建窗口前询问用户。Android 上为应用私有目录，同时初始化 TLS
+    #[cfg(not(target_os = "android"))]
     let startup = data_dir::prepare();
+    #[cfg(target_os = "android")]
+    let startup = android::prepare();
     // 同时启动的另一个实例正在迁移并显示进度，本实例直接退出
     if matches!(startup.dir, Err(rummage_datadir::Error::Busy)) {
         std::process::exit(0);
     }
     let data_dir = startup.dir.as_ref().ok().cloned();
     let data = data::DataDir::new(data_dir.clone(), startup.notices.clone());
-    tauri::Builder::default()
-        // single-instance 需最先注册，第二个实例启动时把已有主窗口带到前台后退出
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main(app)
-        }))
-        // 紧随 single-instance 注册：第二个实例在此之前已退出，不会与已有实例同时写日志文件
-        .plugin(diagnostics::plugin(data_dir.as_deref()))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+    let builder = tauri::Builder::default();
+    // single-instance 需最先注册，第二个实例启动时把已有主窗口带到前台后退出
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        tray::show_main(app)
+    }));
+    // 紧随 single-instance 注册：第二个实例在此之前已退出，不会与已有实例同时写日志文件
+    let builder = builder.plugin(diagnostics::plugin(data_dir.as_deref()));
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    let builder = builder
         .plugin(tauri_plugin_opener::init())
         // 只供 Rust 侧选择以图搜图的图片、引导中的文件夹与模型文件，不向前端开放插件命令
-        .plugin(tauri_plugin_dialog::init())
-        // 只供 Rust 侧的更新命令使用，不向前端开放插件命令
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init());
+    // 只供 Rust 侧的更新命令使用，不向前端开放插件命令；Android 的应用内更新见 android::update
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    // 存储权限与选择文件夹、文件（android::storage），同样只供 Rust 侧使用
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_rummage_android::init());
+    builder
         .manage(core::Core::default())
         .manage(image_query::ImageTokens::default())
         .manage(data)
@@ -85,24 +113,50 @@ pub fn run() {
             failures::ignore_all_failed,
             search::segment_text,
             search::file_details,
+            #[cfg(not(target_os = "android"))]
             search::open_file,
+            #[cfg(target_os = "android")]
+            android::ui::open_file,
+            #[cfg(target_os = "android")]
+            android::ui::move_task_to_back,
+            #[cfg(target_os = "android")]
+            android::ui::safe_area,
             search::can_open_at,
             search::reveal_file,
             search::get_history,
             search::add_history,
             search::remove_history,
             search::clear_history,
+            #[cfg(not(target_os = "android"))]
             image_query::pick_image,
+            #[cfg(target_os = "android")]
+            android::storage::pick_image,
             setup::setup_status,
             setup::finish_setup,
             setup::set_onboarding_step,
             setup::list_roots,
+            #[cfg(desktop)]
             setup::add_root,
+            #[cfg(target_os = "android")]
+            android::storage::add_root,
+            #[cfg(target_os = "android")]
+            android::storage::add_common_root,
+            #[cfg(target_os = "android")]
+            android::storage::storage_access,
+            #[cfg(target_os = "android")]
+            android::storage::request_storage_access,
+            #[cfg(target_os = "android")]
+            android::background::battery_unrestricted,
+            #[cfg(target_os = "android")]
+            android::background::request_battery_unrestricted,
             setup::remove_root,
             setup::get_params,
             setup::set_param,
             setup::download_models,
+            #[cfg(not(target_os = "android"))]
             setup::import_models,
+            #[cfg(target_os = "android")]
+            android::storage::import_models,
             setup::cancel_model_task,
             setup::verify_model,
             setup::verify_models,
@@ -120,6 +174,7 @@ pub fn run() {
             settings::dismiss_notice,
             data::storage_info,
             data::open_data_dir,
+            #[cfg(desktop)]
             data::data_dir_pick,
             data::data_dir_change,
             data::data_dir_notices,
@@ -129,14 +184,24 @@ pub fn run() {
             data::exit_app,
             diagnostics::open_log_dir,
             diagnostics::export_diagnostics,
-            update::fetch_releases,
+            releases::fetch_releases,
+            #[cfg(desktop)]
             update::update_ready,
+            #[cfg(desktop)]
             update::update_download,
-            update::update_install
+            #[cfg(desktop)]
+            update::update_install,
+            #[cfg(target_os = "android")]
+            android::update::update_ready,
+            #[cfg(target_os = "android")]
+            android::update::update_download,
+            #[cfg(target_os = "android")]
+            android::update::update_install
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { .. } => close_watch::on_close_requested(window),
             // 窗口状态平时只在退出时写盘；界面进程可能在托盘中一直留到关机，关窗时就写下来
+            #[cfg(desktop)]
             tauri::WindowEvent::Destroyed => {
                 if let Err(err) = window.app_handle().save_window_state(StateFlags::all()) {
                     log::warn!("无法保存窗口状态：{err}");
@@ -168,19 +233,33 @@ pub fn run() {
                     notice.details.join(" ")
                 );
             }
-            let updates = app
-                .state::<data::DataDir>()
-                .dir()
-                .ok()
-                .map(|dir| dir.join("updates"));
-            let info = app.package_info().clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                update::cleanup(updates.as_deref(), &info.name, &info.version)
-            });
+            #[cfg(desktop)]
+            {
+                let updates = app
+                    .state::<data::DataDir>()
+                    .dir()
+                    .ok()
+                    .map(|dir| dir.join("updates"));
+                let info = app.package_info().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    update::cleanup(updates.as_deref(), &info.name, &info.version)
+                });
+            }
+            #[cfg(target_os = "android")]
+            if let Ok(dir) = app.state::<data::DataDir>().dir() {
+                let updates = dir.join("updates");
+                let version = app.package_info().version.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    android::update::cleanup(&updates, &version)
+                });
+            }
             // 托盘先于守护创建，连上核心后的第一次状态更新不会落空
+            #[cfg(desktop)]
             tray::create(app.handle())?;
             // 在后台连接或拉起核心进程，不阻塞窗口创建
             core::supervise(app.handle());
+            #[cfg(target_os = "android")]
+            android::background::start(app.handle());
             create_main_window(app.handle())?;
             Ok(())
         })
@@ -200,10 +279,11 @@ pub fn run() {
 /// 设好标题的文件对话框，主窗口在时挂到主窗口上
 pub(crate) fn file_dialog<R: Runtime>(app: &AppHandle<R>, title: &str) -> FileDialogBuilder<R> {
     let dialog = app.dialog().file().set_title(title);
-    match app.get_webview_window("main") {
-        Some(win) => dialog.set_parent(&win),
-        None => dialog,
+    #[cfg(desktop)]
+    if let Some(win) = app.get_webview_window("main") {
+        return dialog.set_parent(&win);
     }
+    dialog
 }
 
 /// 创建主窗口：启动时和从托盘重新打开时

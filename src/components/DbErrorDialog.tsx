@@ -55,7 +55,7 @@ export default function DbErrorDialog({ connected }: { connected: boolean }) {
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-[110] flex items-center justify-center modal-pad">
         <div className="absolute inset-0 animate-overlay-in bg-black/20 backdrop-blur-md dark:bg-black/40" />
         <div
           role="alertdialog"

@@ -1,10 +1,14 @@
-//! 资源占用控制中与平台无关的部分：由检测到的系统状态、手动暂停和参数判定建索引是否暂停。
-//! - 自动暂停：任一显示器上有全屏程序（`pause_on_fullscreen`）、使用电池（`pause_on_battery`）、数据目录所在卷的剩余空间低于
-//!   `min_free_disk_gb`。检测由平台模块的 `sense` 完成，查询失败的项按“不暂停”处理。
+//! 资源占用控制中与平台无关的部分：由检测到的系统状态、手动暂停和参数判定建索引是否暂停、是否降温。
+//! - 自动暂停：数据目录所在卷的剩余空间低于 `min_free_disk_gb`；Android 前台服务今日的后台额度已用完（`Quota`，由界面经
+//!   `BackgroundQuota` 告知，不持久化）；手机过热（热状态达到 `SEVERE` 或温度余量达到 1.0，始终生效）；未充电
+//!   （`pause_on_battery`）；Android 亮屏（`pause_when_screen_on`）；任一显示器上有全屏程序（`pause_on_fullscreen`）。
+//!   检测由平台模块的 `sense` 完成，查询失败的项按“不暂停”处理；Windows 上热状态、亮屏两项始终为默认值。
+//! - 降温（`slow`）：温度余量达到 `thermal_slow_headroom` 或热状态为 `MODERATE` 及以上时，流水线按 50% 占空比领取作业
+//!   （`pipeline::schedule`）。降温不是暂停，不报暂停原因。
 //! - 手动暂停：存在索引数据库 `meta` 表的 `manual_pause` 中（`{"until": Unix 毫秒或 null}`），核心重启后仍然有效；
 //!   到期由调用方清除。
-//! - 多个原因同时成立时只报一个，优先级：手动 > 磁盘 > 电池 > 全屏。睡眠（`sleeping`）由流水线在报告时插在手动之后
-//!   （`pipeline::wake`）。
+//! - 多个原因同时成立时只报一个，优先级：手动 > 磁盘 > 额度 > 过热 > 电池 > 亮屏 > 全屏。睡眠（`sleeping`）由流水线在报告时
+//!   插在手动之后（`pipeline::wake`）。
 //! - 检测与时钟可注入（`System`），测试不依赖真实的电源、全屏状态与系统时间。
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -15,11 +19,23 @@ use rummage_proto::{ParamValue, PauseReason, params};
 /// `meta` 表中手动暂停的键
 pub(crate) const MANUAL_KEY: &str = "manual_pause";
 
+/// `PowerManager.THERMAL_STATUS_MODERATE`
+pub(crate) const THERMAL_MODERATE: i32 = 2;
+/// `PowerManager.THERMAL_STATUS_SEVERE`
+pub(crate) const THERMAL_SEVERE: i32 = 3;
+
 /// 一次检测到的系统状态
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct Sensed {
     pub fullscreen: bool,
+    /// 使用电池供电（未充电）
     pub battery: bool,
+    /// 屏幕亮着（Android `PowerManager.isInteractive`）
+    pub screen_on: bool,
+    /// Android 的热状态（`PowerManager.getCurrentThermalStatus`，0 为 `NONE`）
+    pub thermal: i32,
+    /// Android 预测的温度余量（`PowerManager.getThermalHeadroom`），1.0 对应 `SEVERE`；不支持或调用过于频繁时为空
+    pub headroom: Option<f64>,
     /// 数据目录所在卷对当前用户可用的空间（GB）；查询失败时为空
     pub free_gb: Option<f64>,
 }
@@ -59,9 +75,10 @@ pub(crate) fn decode_manual(raw: &str) -> Option<Option<i64>> {
     }
 }
 
-/// 判定暂停原因。`manual` 为未到期的手动暂停：外层为空表示没有手动暂停，内层为到期时间
+/// 判定暂停原因。`manual` 为未到期的手动暂停：外层为空表示没有手动暂停，内层为到期时间；`quota` 为今日后台额度已用完
 pub(crate) fn reason(
     manual: Option<Option<i64>>,
+    quota: bool,
     s: &Sensed,
     values: &BTreeMap<String, ParamValue>,
 ) -> Option<PauseReason> {
@@ -77,13 +94,29 @@ pub(crate) fn reason(
             free_gb: (gb * 10.0).floor() / 10.0,
         });
     }
+    if quota {
+        return Some(PauseReason::Quota);
+    }
+    if s.thermal >= THERMAL_SEVERE || s.headroom.is_some_and(|h| h >= 1.0) {
+        return Some(PauseReason::Hot);
+    }
     if s.battery && params::flag(values, "pause_on_battery") {
         return Some(PauseReason::Battery);
+    }
+    if s.screen_on && params::flag(values, "pause_when_screen_on") {
+        return Some(PauseReason::ScreenOn);
     }
     if s.fullscreen && params::flag(values, "pause_on_fullscreen") {
         return Some(PauseReason::Fullscreen);
     }
     None
+}
+
+/// 是否降温（见模块说明）
+pub(crate) fn slow(s: &Sensed, values: &BTreeMap<String, ParamValue>) -> bool {
+    s.thermal >= THERMAL_MODERATE
+        || s.headroom
+            .is_some_and(|h| h >= params::float(values, "thermal_slow_headroom"))
 }
 
 #[cfg(test)]
@@ -93,40 +126,69 @@ mod tests {
 
     #[test]
     fn priority_and_merge() {
-        let values = params::defaults();
+        let mut values = params::defaults();
+        values.insert("pause_on_battery".into(), ParamValue::Bool(true));
+        values.insert("pause_when_screen_on".into(), ParamValue::Bool(true));
         let all = Sensed {
             fullscreen: true,
             battery: true,
+            screen_on: true,
+            thermal: THERMAL_SEVERE,
+            headroom: Some(1.2),
             free_gb: Some(1.25),
         };
-        let r = |manual, s: Sensed| reason(manual, &s, &values);
-        assert_eq!(r(None, Sensed::default()), None);
-        // 全部成立时手动优先，其后依次是磁盘、电池、全屏
+        let r = |manual, quota, s: Sensed| reason(manual, quota, &s, &values);
+        assert_eq!(r(None, false, Sensed::default()), None);
+        // 全部成立时手动优先，其后依次是磁盘、额度、过热、电池、亮屏、全屏
         assert_eq!(
-            r(Some(Some(5)), all),
+            r(Some(Some(5)), true, all),
             Some(PauseReason::Manual { until: Some(5) })
         );
         assert_eq!(
-            r(Some(None), Sensed::default()),
+            r(Some(None), false, Sensed::default()),
             Some(PauseReason::Manual { until: None })
         );
-        assert_eq!(r(None, all), Some(PauseReason::DiskLow { free_gb: 1.2 }));
+        assert_eq!(
+            r(None, true, all),
+            Some(PauseReason::DiskLow { free_gb: 1.2 })
+        );
         let s = Sensed {
             free_gb: Some(500.0),
             ..all
         };
-        assert_eq!(r(None, s), Some(PauseReason::Battery));
+        assert_eq!(r(None, true, s), Some(PauseReason::Quota));
+        assert_eq!(r(None, false, s), Some(PauseReason::Hot));
+        // 热状态与温度余量任一达到即为过热
+        let s = Sensed { thermal: 0, ..s };
+        assert_eq!(r(None, false, s), Some(PauseReason::Hot));
+        let s = Sensed {
+            thermal: THERMAL_SEVERE,
+            headroom: None,
+            ..s
+        };
+        assert_eq!(r(None, false, s), Some(PauseReason::Hot));
+        let s = Sensed {
+            thermal: THERMAL_MODERATE,
+            headroom: Some(0.99),
+            ..s
+        };
+        assert_eq!(r(None, false, s), Some(PauseReason::Battery));
         let s = Sensed {
             battery: false,
             ..s
         };
-        assert_eq!(r(None, s), Some(PauseReason::Fullscreen));
+        assert_eq!(r(None, false, s), Some(PauseReason::ScreenOn));
+        let s = Sensed {
+            screen_on: false,
+            ..s
+        };
+        assert_eq!(r(None, false, s), Some(PauseReason::Fullscreen));
         // 剩余空间查询失败时不按磁盘不足处理
         let s = Sensed {
             free_gb: None,
             ..Sensed::default()
         };
-        assert_eq!(r(None, s), None);
+        assert_eq!(r(None, false, s), None);
     }
 
     #[test]
@@ -134,21 +196,48 @@ mod tests {
         let mut values = params::defaults();
         values.insert("pause_on_battery".into(), ParamValue::Bool(false));
         values.insert("pause_on_fullscreen".into(), ParamValue::Bool(false));
+        values.insert("pause_when_screen_on".into(), ParamValue::Bool(false));
         values.insert("min_free_disk_gb".into(), ParamValue::Int(10));
         let s = Sensed {
             fullscreen: true,
             battery: true,
+            screen_on: true,
             free_gb: Some(20.0),
+            ..Sensed::default()
         };
-        assert_eq!(reason(None, &s, &values), None);
+        assert_eq!(reason(None, false, &s, &values), None);
         let s = Sensed {
             free_gb: Some(9.99),
             ..s
         };
         assert_eq!(
-            reason(None, &s, &values),
+            reason(None, false, &s, &values),
             Some(PauseReason::DiskLow { free_gb: 9.9 })
         );
+    }
+
+    #[test]
+    fn slow_by_headroom_or_status() {
+        let mut values = params::defaults();
+        assert!(!slow(&Sensed::default(), &values));
+        let s = Sensed {
+            headroom: Some(0.8),
+            ..Sensed::default()
+        };
+        assert!(slow(&s, &values));
+        values.insert("thermal_slow_headroom".into(), ParamValue::Float(0.9));
+        assert!(!slow(&s, &values));
+        let s = Sensed {
+            thermal: THERMAL_MODERATE,
+            ..Sensed::default()
+        };
+        assert!(slow(&s, &values));
+        // 热状态 LIGHT 不降温
+        let s = Sensed {
+            thermal: 1,
+            ..Sensed::default()
+        };
+        assert!(!slow(&s, &values));
     }
 
     #[test]

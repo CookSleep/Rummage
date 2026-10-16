@@ -45,7 +45,7 @@ describe('indexHint', () => {
     const paused = { ...base, paused: { type: 'battery' as const } }
     // 原本要用的设备出了问题而改用另一个设备
     expect(indexHint(base, new Date(), 0, { name: 'RTX 3070', why: '「RTX 4080 SUPER」出现问题' })).toBe('正在用「RTX 3070」建立索引（「RTX 4080 SUPER」出现问题）：已处理 66 / 70，完成前，尚未处理的文件只能按文件名搜索')
-    expect(indexHint(paused, new Date(), 0, { name: 'CPU', why: '显卡检测未通过' })).toBe('正在建立索引：已处理 66 / 70（正在使用电池，已暂停），完成前，尚未处理的文件只能按文件名搜索')
+    expect(indexHint(paused, new Date(), 0, { name: 'CPU', why: '显卡检测未通过' })).toBe('正在建立索引：已处理 66 / 70（未接电源，已暂停），完成前，尚未处理的文件只能按文件名搜索')
   })
 })
 

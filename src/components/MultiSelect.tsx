@@ -25,6 +25,8 @@ interface Props<T> {
   unit: string
   /** 触发器的说明气泡，悬停或触屏长按时显示 */
   tip?: string
+  /** 不可展开；说明放在 `tip` 中，悬停或触屏点按时显示 */
+  disabled?: boolean
 }
 
 /**
@@ -42,7 +44,7 @@ export function summary(labels: string[], checked: string[], allText: string, un
  * 可多选的下拉菜单，外观同 `Select`：点选一项时切换勾选、菜单不收起，最后一个勾选的不能取消。
  * 键盘：Tab 聚焦，Enter 或空格展开；展开后上下键移动、Enter 或空格切换勾选，Esc 或 Tab 收起
  */
-export default function MultiSelect<T extends string | number>({ values, onChange, options, label, allText, unit, tip }: Props<T>) {
+export default function MultiSelect<T extends string | number>({ values, onChange, options, label, allText, unit, tip, disabled }: Props<T>) {
   const [open, setOpen] = useState(false)
   // 键盘移动到的选项
   const [active, setActive] = useState(-1)
@@ -66,13 +68,15 @@ export default function MultiSelect<T extends string | number>({ values, onChang
       <div
         ref={triggerRef}
         role="button"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-disabled={disabled || undefined}
         onClick={(e) => {
           e.preventDefault()
           e.stopPropagation()
+          if (disabled) return
           if (!open) setActive(-1)
           setOpen(!open)
         }}
@@ -104,7 +108,7 @@ export default function MultiSelect<T extends string | number>({ values, onChang
             setOpen(false)
           }
         }}
-        className={`flex w-full cursor-pointer select-none items-center justify-between gap-1 ${SELECT_CLASS}`}
+        className={`flex w-full select-none items-center justify-between gap-1 ${SELECT_CLASS} ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
       >
         <span className="truncate">{text}</span>
         <ChevronDownIcon className={`h-3.5 w-3.5 flex-shrink-0 text-gray-400 transition-transform duration-200 dark:text-gray-500 ${open ? 'rotate-180' : ''}`} />

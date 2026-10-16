@@ -60,6 +60,7 @@ fn validate_rejects_bad_values() {
         ("video_preset", ParamValue::Int(4)),
         ("video_preset", ParamValue::Float(1.0)),
         ("video_decoder", ParamValue::Int(2)),
+        ("video_frame_tokens", ParamValue::Int(280)),
         ("no_such_key", ParamValue::Int(1)),
     ];
     for (key, value) in cases {
@@ -93,7 +94,7 @@ fn def_serializes_for_frontend() {
     let json = serde_json::to_string(def("image_tokens").unwrap()).unwrap();
     assert!(
         json.contains(
-            r#""kind":{"Named":{"options":[[70,"低"],[140,"标准"],[280,"较高"],[560,"高"],[1120,"最高"]],"unit":"Token"}}"#
+            r#""kind":{"Named":{"options":[[70,"最低"],[140,"较低"],[280,"标准"],[560,"较高"],[1120,"最高"]],"unit":"Token"}}"#
         ),
         "{json}"
     );
@@ -101,8 +102,18 @@ fn def_serializes_for_frontend() {
         json.contains(r#""affectsIndex":true,"indexKinds":["image"]"#),
         "{json}"
     );
-    assert!(json.contains(r#""default":140"#), "{json}");
+    assert!(json.contains(r#""default":280"#), "{json}");
     assert!(json.contains(r#""section":"图片""#), "{json}");
+    let json = serde_json::to_string(def("long_image_tokens").unwrap()).unwrap();
+    assert!(json.contains(r#""default":140"#), "{json}");
+    assert!(json.contains(r#""indexKinds":["image"]"#), "{json}");
+    let json = serde_json::to_string(def("video_frame_tokens").unwrap()).unwrap();
+    assert!(
+        json.contains(r#""kind":{"Named":{"options":[[70,"低"],[140,"标准"]],"unit":"Token"}}"#),
+        "{json}"
+    );
+    assert!(json.contains(r#""default":140"#), "{json}");
+    assert!(json.contains(r#""indexKinds":["video"]"#), "{json}");
     let json = serde_json::to_string(def("result_limit").unwrap()).unwrap();
     assert!(json.contains(r#""indexKinds":[]"#), "{json}");
     let json = serde_json::to_string(def("video_preset").unwrap()).unwrap();
@@ -120,5 +131,30 @@ fn error_message_is_sentence() {
     assert_eq!(
         err.to_string(),
         "“文本分段长度（Token）”应在 128 到 512 之间。"
+    );
+}
+
+#[test]
+fn platform_only_params() {
+    for key in ["pause_when_screen_on", "thermal_slow_headroom"] {
+        let d = def(key).unwrap();
+        assert_eq!(d.platform, "android");
+        assert_eq!(d.shown(), cfg!(target_os = "android"), "{key}");
+    }
+    // Android 上不起作用：视频一律用 MediaCodec 解码，没有全屏检测与显卡，识别在应用进程内的线程中运行、没有作业对象限制内存
+    for key in [
+        "video_decoder",
+        "pause_on_fullscreen",
+        "gpu_selftest_timeout_s",
+        "worker_mem_gb",
+    ] {
+        let d = def(key).unwrap();
+        assert_eq!(d.platform, "windows");
+        assert_eq!(d.shown(), cfg!(windows), "{key}");
+    }
+    assert!(def("pause_on_battery").unwrap().shown());
+    assert_eq!(
+        flag(&defaults(), "pause_on_battery"),
+        !cfg!(target_os = "android")
     );
 }

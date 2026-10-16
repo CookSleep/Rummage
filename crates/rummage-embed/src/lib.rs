@@ -4,13 +4,14 @@
 //! - 输出：`Embedding` 带向量空间 ID（`space`）；向量都经过数值检查和 L2 归一化（`vector`）。
 //! - 后端：`EmbeddingBackend` 为远程推理（PC 代算）预留的抽象，当前唯一的实现是 `LocalBackend`（`local`）：
 //!   一个调度线程按优先级（查询先于索引，同级先来先到）把请求逐个交给推理子进程 `rummage-core worker`。
-//! - 推理子进程（`worker`）：只在其中加载 llama.cpp；Windows 上放进 Job Object 并设内存上限，
+//! - 推理子进程（`worker`）：只在其中加载 llama.cpp；Windows 上放进 Job Object 并设内存上限；
+//!   Android 上没有子进程，是应用进程内的线程（`android.rs`），帧协议相同。
 //!   初始化与单次推理都有时限。默认只加载主模型，遇到图像或音频时才带上 mmproj 重启；空闲超时后结束。
 //!   CPU 模式超时、崩溃后下次请求重新拉起，连续失败 3 次后不再重试；
 //!   GPU 模式出错不再拉起（显存或内存分配失败只让这一项失败，下次请求重新拉起）；出现设备丢失时返回 `Error::DeviceLost`，由上层屏蔽该设备。
 //!   GPU 由推理进程按描述与 PCI 号在它自己枚举出的设备中选定，原始序号也在推理进程中现算（`worker`）。
 //! - 自检（`selftest`）：用黄金样本检查每个候选后端并选出最快的，结果按设备与版本缓存，未通过的 GPU 屏蔽。
-//! - 协议见 `frame`；Windows 专有代码只在平台模块中（`windows.rs` / `other.rs`）。
+//! - 协议见 `frame`；平台专有代码只在平台模块中（`windows.rs` / `android.rs` / `other.rs`）。
 
 mod frame;
 mod local;
@@ -20,7 +21,10 @@ pub mod space;
 pub mod vector;
 mod worker;
 
-#[cfg(not(windows))]
+#[cfg(target_os = "android")]
+#[path = "android.rs"]
+mod platform;
+#[cfg(not(any(windows, target_os = "android")))]
 #[path = "other.rs"]
 mod platform;
 #[cfg(windows)]
@@ -28,13 +32,14 @@ mod platform;
 mod platform;
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub use frame::{DeviceInfo, GpuInfo};
 pub use local::{Gpu, Limits, LocalBackend, WorkerSpec, list_devices};
 pub use platform::adapters;
 pub use space::{Backend, SpaceConfig, SpaceId};
-pub use worker::{WorkerArgs, run_worker};
+pub use worker::{WorkerArgs, run_worker, run_worker_stdio};
 
 /// 一块显卡适配器的属性（`adapters`），供诊断包使用；只查询属性，不加载推理运行库。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -50,10 +55,20 @@ pub struct Adapter {
     pub driver: Option<String>,
 }
 
+/// CPU 设备显示的名称：处理器型号，读不到时为“CPU”。只用于显示，设备 ID 与自检缓存的键都不含它
+pub fn cpu_name() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| platform::cpu_name().unwrap_or_else(|| "CPU".to_string()))
+}
+
 /// 推理进程连续失败多少次后不再重新拉起（由上层回退到下一个后端）。
 pub const MAX_FAILURES: u32 = 3;
 /// 结束推理进程后最多等它退出多久；驱动挂起时进程可能结束不了，到期就不再等它，按设备失效处理
+#[cfg(not(target_os = "android"))]
 pub(crate) const KILL_GRACE: Duration = Duration::from_secs(10);
+/// Android 上推理是进程内的线程，中止只在计算节点之间生效：1120 档图像在 i7-12700H 上最慢的单个节点约 2.4 秒，手机更慢
+#[cfg(target_os = "android")]
+pub(crate) const KILL_GRACE: Duration = Duration::from_secs(60);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
