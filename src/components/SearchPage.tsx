@@ -259,12 +259,12 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
   }
 
   // 打开时带上命中位置（音视频的起点、PDF 的页码），默认程序支持时打开到那里
-  const run = useCallback((cmd: 'open_file' | 'reveal_file', hit: SearchHit) => {
+  const run = useCallback((cmd: 'open_file' | 'reveal_file' | 'share_file', hit: SearchHit) => {
     remember()
     const args = cmd === 'open_file' ? { fileId: hit.fileId, at: hitPosition(hit) } : { fileId: hit.fileId }
     invoke(cmd, args).catch((err) => {
-      console.warn('打开文件失败：', err)
-      showToast(errorMessage(err, '无法打开这个文件'), 'error')
+      console.warn(cmd === 'share_file' ? '分享文件失败：' : '打开文件失败：', err)
+      showToast(errorMessage(err, cmd === 'share_file' ? '无法分享这个文件' : '无法打开这个文件'), 'error')
     })
   }, [remember])
 
@@ -544,6 +544,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
           onOpen={() => selectedHit && run('open_file', selectedHit)}
           onReveal={isAndroid ? undefined : () => selectedHit && run('reveal_file', selectedHit)}
           onSimilar={() => selected !== null && findSimilar(selected)}
+          onShare={isAndroid ? () => selectedHit && run('share_file', selectedHit) : undefined}
         />
       )}
 

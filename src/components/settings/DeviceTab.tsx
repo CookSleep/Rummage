@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import type { BlockedGpu, SelftestStatus, SetupStatus } from '../../types'
+import type { BlockedGpu, ParamValues, SelftestStatus, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { isAndroid } from '../../lib/platform'
 import { blockedName, CPU_FALLBACK_TEXT, cpuFallbackReason, cpuFaster, cpuName, deviceName, SELFTEST_TEXT, switchedDevice, switchedText } from '../../lib/device'
@@ -46,7 +46,7 @@ function effective(st: SelftestStatus): { gpu: boolean; name: string; reason: st
  * 被屏蔽的显卡单独列出（本次测过未通过的同时留在检测结果中），可以解除屏蔽（确认后删除它的全部屏蔽记录，后台服务随即只重测它）；重新检测不清除屏蔽与未通过记录。
  * Android 上只用 CPU，只显示检测结果与“重新检测”
  */
-export default function DeviceTab({ setup }: { setup: SetupStatus }) {
+export default function DeviceTab({ setup, values }: { setup: SetupStatus; values: ParamValues | null }) {
   const [error, setError] = useState('')
   // 等待确认解除屏蔽的显卡，以及是否正在解除
   const [unblocking, setUnblocking] = useState<BlockedGpu | null>(null)
@@ -137,7 +137,7 @@ export default function DeviceTab({ setup }: { setup: SetupStatus }) {
           </button>
         </div>
         <p className={ROW_DESC}>{SELFTEST_TEXT}期间暂停建立索引。{isAndroid ? '' : '未通过或已屏蔽的显卡在更新显卡驱动或 Rummage 后，再次重新检测才会参与测试。'}</p>
-        {st.devices.length ? <DeviceList devices={st.devices} /> : <p className="text-sm text-gray-500 dark:text-gray-400">还没有检测过</p>}
+        {st.devices.length ? <DeviceList devices={st.devices} values={values} /> : <p className="text-sm text-gray-500 dark:text-gray-400">还没有检测过</p>}
         {st.error && <p data-selectable-text className={ERROR_TEXT}>{renderMessage(st.error, 'font-semibold')}</p>}
         {unblockNote && !st.running && <p data-selectable-text className={ROW_DESC}>{unblockNote}</p>}
         {!setup.model.ready && <p className={ROW_DESC}>请先下载或导入模型，再检测设备</p>}

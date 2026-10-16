@@ -1,6 +1,8 @@
 //! 自检中单个候选的测试：按顺序测试并在驱动错误后跳过其余 GPU（`test_in_order`），
-//! 在单独的线程中启动推理进程、算两遍黄金样本（`measure`：第一遍比较余弦，第二遍计时），限时等结果（`wait_limited`），
+//! 在单独的线程中启动推理进程、算黄金样本（`measure`）再测速（`speed`），限时等结果（`wait_limited`），
 //! 测完查系统日志中的显卡驱动事件（`check_driver_events`）。判定规则见上级模块说明。
+//! 黄金样本在 GPU 上算两遍：第一遍比较余弦兼作预热（首次遇到的输入形状要编译着色器），第二遍计时；
+//! CPU 没有这类预热成本，只算一遍，比较余弦的同时计时。
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -8,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::golden::Golden;
+use super::speed;
 use super::{
     CANCEL_POLL, CandidateReport, Events, Modality, SKIPPED_REASON, SampleResult, Status,
     TDR_LOG_WAIT, TDR_WINDOW_MARGIN, WAIT_GRACE,
@@ -188,15 +191,19 @@ fn measure(
         r.description = d.description;
     }
 
+    let gpu = r.backend == Backend::Vulkan;
     let mut low = Vec::new();
+    let mut times = Vec::new();
     for s in &golden.samples {
         if stop.load(Ordering::Relaxed) {
             return;
         }
+        let t = Instant::now();
         let v = match backend.embed(s.input.clone(), Priority::Index) {
             Ok(e) => e.vector,
             Err(err) => return r.backend_error(format!("样本 {}：", s.id), &err),
         };
+        times.push((s.id.clone(), ms(t.elapsed())));
         if v.len() != s.want.len() {
             log::warn!(
                 "{} 样本 {} 的向量为 {} 维，参考向量为 {} 维。",
@@ -227,30 +234,41 @@ fn measure(
         return r.fail("这个设备的计算结果与标准结果相差过大，不能使用。".to_string());
     }
 
-    // 第二遍计时，第一遍兼作预热。
-    let mut text = Vec::new();
-    let mut image = Vec::new();
-    let mut audio = Vec::new();
-    let mut video = Vec::new();
-    for s in &golden.samples {
-        if stop.load(Ordering::Relaxed) {
-            return;
-        }
-        let t = Instant::now();
-        if let Err(err) = backend.embed(s.input.clone(), Priority::Index) {
-            return r.backend_error(format!("样本 {}：", s.id), &err);
-        }
-        match s.modality {
-            Modality::Text => text.push(ms(t.elapsed())),
-            Modality::Image => image.push(ms(t.elapsed())),
-            Modality::Audio => audio.push(ms(t.elapsed())),
-            Modality::Video => video.push(ms(t.elapsed())),
+    // GPU 第二遍计时，第一遍兼作预热；CPU 用第一遍的耗时
+    if gpu {
+        times.clear();
+        for s in &golden.samples {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            let t = Instant::now();
+            if let Err(err) = backend.embed(s.input.clone(), Priority::Index) {
+                return r.backend_error(format!("样本 {}：", s.id), &err);
+            }
+            times.push((s.id.clone(), ms(t.elapsed())));
         }
     }
-    r.text_ms = median(text);
-    r.image_ms = median(image);
-    r.audio_ms = median(audio);
-    r.video_ms = median(video);
+    let by = |m: Modality| {
+        let v = golden
+            .samples
+            .iter()
+            .zip(&times)
+            .filter(|(s, _)| s.modality == m)
+            .map(|(_, t)| t.1)
+            .collect();
+        median(v)
+    };
+    r.text_ms = by(Modality::Text);
+    r.image_ms = by(Modality::Image);
+    r.audio_ms = by(Modality::Audio);
+    r.video_ms = by(Modality::Video);
+    if let Some(plan) = &golden.speed {
+        match speed::measure(backend, plan, &times, gpu, stop) {
+            Ok(Some(s)) => r.speed = Some(s),
+            Ok(None) => return,
+            Err((context, err)) => return r.backend_error(context, &err),
+        }
+    }
     r.status = Status::Passed;
 }
 

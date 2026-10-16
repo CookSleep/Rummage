@@ -3,9 +3,12 @@
 //! - 候选：CPU，加上 `list_devices` 列出的每块 GPU（由调用方给出）。
 //! - 样本：黄金样本中的文本、纯图像、音频与视频窗口项（`Options::images` 为否时只测文本、不加载 mmproj：用户只选了文档时
 //!   不下载 mmproj）；文本按清单的 kind 拼前缀（并与清单中的 `input` 核对），
-//!   图像用 `rummage_media::prepare` 按参考向量的档位缩放，音频读成 16 kHz 采样，视频窗口按清单组装（`golden`）。
+//!   图像用 `rummage_media::prepare` 按当前的 `image_tokens` 档位缩放，音频读成 16 kHz 采样，视频窗口取与当前视频设置
+//!   对应的变体、按当前的 `video_frame_tokens` 档位组装（`golden`）。参考向量覆盖全部档位组合，自检只取当前参数对应的那些。
 //! - 每个候选：启动 `LocalBackend` 并计初始化耗时 → 全部样本算一遍，向量经数值检查（`vector::normalize`），
-//!   逐条与参考向量比较，余弦须 ≥ `selftest_min_cosine` → 再算一遍计时（第一遍兼作预热），按模态取中位数。
+//!   逐条与参考向量比较，余弦须 ≥ `selftest_min_cosine`，同时计时；GPU 再算一遍计时（第一遍兼作预热），
+//!   CPU 没有预热成本、只算一遍。各模态耗时取中位数。通过后测速：按当前参数处理一个文件（一段）的耗时（`speed`），
+//!   参数与黄金样本一致的类型直接用计时那一遍的耗时。
 //! - GPU 候选：整个过程限时 `gpu_selftest_timeout_s`，超时就结束推理进程并判失败；
 //!   出错（含设备丢失、后端失效、崩溃）立即判失败，`LocalBackend` 的 GPU 模式本身不重试。
 //!   测完等几秒再查这段时间内系统日志中的显卡驱动事件，有就判失败（`driver_events`）。
@@ -36,7 +39,8 @@
 //! - `Options::only`（解除屏蔽后的重测）只测这一个设备，其余设备照缓存原样显示，保存时只替换缓存中这一项。
 //! - `selftest.json` 的读改写（自检保存结果、建索引时屏蔽、清除记录）都在 `CACHE_LOCK` 内进行；自检保存前重新读取
 //!   文件再合并本次的记录，不会覆盖期间写入的屏蔽记录。
-//! - 选择：通过的候选按图像耗时中位数排序（只测文本时按文本耗时，`by_speed`），选最快的一个，文本、图像与音频使用同一个后端。
+//! - 选择：通过的候选按图像耗时排序（只测文本时按文本耗时，`by_speed`），选最快的一个，文本、图像与音频使用同一个后端。
+//!   都有测速结果且测速参数相同时按测速结果，否则（旧的缓存、沿用的上次结果参数不同）按黄金样本的耗时。
 //!   只测了文本的结果不能用来处理图片、音频或视频：`cached_gpu` 要求 mmproj 时不选它，需要重新检测。
 //! - 建索引（核心进程）只用 `preferred_gpu` 读记录：用户在设置中指定、检测通过的显卡（`CandidateReport::device_id`）能用时用它，
 //!   否则按性能顺序取第一个能用的设备（显卡要未被屏蔽、键中各项不变、仍在系统中、不在本次运行停用的集合中），是 CPU 时用 CPU；
@@ -51,6 +55,7 @@
 mod cache;
 mod candidate;
 mod golden;
+mod speed;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -58,6 +63,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use rummage_proto::DeviceSpeed;
 use rummage_proto::params::{self, ParamValue};
 use serde::{Deserialize, Serialize};
 
@@ -178,7 +184,7 @@ pub enum Modality {
     Text,
     Image,
     Audio,
-    /// 视频窗口，带音频与纯画面两条
+    /// 视频窗口：与当前视频设置对应的一条
     Video,
 }
 
@@ -218,15 +224,18 @@ pub struct CandidateReport {
     pub status: Status,
     /// 未通过或被跳过的原因，中文整句，多条用换行分隔。
     pub reason: Option<String>,
-    /// 第一遍的逐条余弦。
+    /// 逐条余弦（GPU 为第一遍）。
     pub samples: Vec<SampleResult>,
     pub init_ms: Option<f64>,
-    /// 第二遍各模态单条耗时的中位数。
+    /// 计时那一遍（GPU 为第二遍，CPU 只算一遍）各模态单条耗时的中位数。
     pub text_ms: Option<f64>,
     pub image_ms: Option<f64>,
     pub audio_ms: Option<f64>,
-    /// 视频窗口（带音频与纯画面两条的中位数）
+    /// 视频窗口
     pub video_ms: Option<f64>,
+    /// 测速结果（见 `speed`）；旧的缓存中没有
+    #[serde(default)]
+    pub speed: Option<DeviceSpeed>,
     /// 出现了驱动错误（见模块说明）；之后的 GPU 都不再测试。
     pub driver_error: bool,
     /// 出现了设备丢失：持久屏蔽的依据之一。只在本次自检中使用，不写入记录
@@ -259,6 +268,7 @@ impl CandidateReport {
             image_ms: None,
             audio_ms: None,
             video_ms: None,
+            speed: None,
             driver_error: false,
             device_lost: false,
             transient: false,
@@ -376,6 +386,15 @@ pub fn wake_sample(golden_dir: &Path) -> Result<Sample, Error> {
     golden::first_text(golden_dir)
 }
 
+/// 当前的视频设置（参数 `video_preset`，“自定义”时为高级项），由调用方解析（rummage-core 的 `pipeline::video_opts`）；
+/// 测速按它组装一个视频片段
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoSpeed {
+    pub window_s: u32,
+    pub frames: u32,
+    pub audio: bool,
+}
+
 /// 自检的文件位置。
 pub struct Options {
     /// rummage-core 可执行文件，推理进程以它的 `worker` 子命令启动。
@@ -405,6 +424,7 @@ pub struct Options {
     /// 不检查也不测试；保存时只替换缓存中这一项，其余照旧（缓存为空时整份写入，其余为未检测、下次检测时再测）。
     /// 系统中没有这个设备时返回 `Error::GpuNotFound`。不保存时（`save` 为否，列显卡的进程卡住）与手动检测一样整份缓存丢弃
     pub only: Option<String>,
+    pub video: VideoSpeed,
 }
 
 impl Options {
@@ -444,10 +464,25 @@ pub fn run(
     }
 
     let max_pixels = params::max_image_pixels(values);
-    let mut golden = golden::load(&opts.golden_dir, max_pixels)?;
+    let mut golden = golden::load(&opts.golden_dir, values, opts.video, max_pixels)?;
     if !opts.images {
         golden.samples.retain(|s| s.modality == Modality::Text);
     }
+    // 测速只是附加的耗时信息，安排不了时照常做正确性检查
+    golden.speed = match speed::plan(
+        &opts.golden_dir,
+        &golden,
+        values,
+        opts.video,
+        opts.images,
+        max_pixels,
+    ) {
+        Ok(plan) => Some(plan),
+        Err(err) => {
+            log::warn!("无法安排测速，本次只检查结果是否正确：{err}");
+            None
+        }
+    };
     let golden = Arc::new(golden);
     let min_cos = params::float(values, "selftest_min_cosine");
     let total = Duration::from_secs(params::int(values, "gpu_selftest_timeout_s") as u64);
@@ -668,12 +703,28 @@ fn select(reports: &[CandidateReport], images: bool) -> Option<usize> {
     by_speed(reports, images).first().copied()
 }
 
-/// 通过的候选按性能排序（与 `select` 的指标相同），最快的在前；没有这项耗时的排在最后
+/// 通过的候选按性能排序（与 `select` 的指标相同），最快的在前；没有这项耗时的排在最后。
+/// 通过的候选都有测速结果、且测速参数相同时比较测速结果，否则比较黄金样本的耗时（见模块说明）
 fn by_speed(reports: &[CandidateReport], images: bool) -> Vec<usize> {
-    let ms = |r: &CandidateReport| if images { r.image_ms } else { r.text_ms };
     let mut v: Vec<usize> = (0..reports.len())
         .filter(|&i| reports[i].status == Status::Passed)
         .collect();
+    fn real(r: &CandidateReport, images: bool) -> Option<(f64, &BTreeMap<String, ParamValue>)> {
+        let s = r.speed.as_ref()?;
+        Some((if images { s.image_ms } else { s.text_ms }?, &s.params))
+    }
+    let first = v
+        .first()
+        .and_then(|&i| real(&reports[i], images))
+        .map(|x| x.1);
+    let use_speed = v
+        .iter()
+        .all(|&i| real(&reports[i], images).is_some_and(|x| Some(x.1) == first));
+    let ms = |r: &CandidateReport| match (use_speed, images) {
+        (true, _) => real(r, images).map(|x| x.0),
+        (false, true) => r.image_ms,
+        (false, false) => r.text_ms,
+    };
     v.sort_by(|&a, &b| {
         let (x, y) = (ms(&reports[a]), ms(&reports[b]));
         x.is_none()

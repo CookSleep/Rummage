@@ -167,6 +167,7 @@ pub fn prepare_device(env: &Env, device: &Device, record: &Path) -> Result<Optio
         cancel: Default::default(),
         images: true,
         only: None,
+        video: rummage_core::pipeline::speed_video(&values),
     };
     let report = selftest::run(
         &opts,

@@ -1,14 +1,16 @@
 import { useState, type ReactNode } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import type { DeviceResult, DeviceStatus, SelftestStatus } from '../../types'
+import type { DeviceResult, DeviceStatus, ParamValues, SelftestStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { isAndroid } from '../../lib/platform'
-import { deviceName, SELFTEST_TEXT, switchedDevice, switchedText } from '../../lib/device'
+import { deviceName, SELFTEST_TEXT, SPEED_STALE_TEXT, speedStale, switchedDevice, switchedText } from '../../lib/device'
+import { useParamValues } from '../../hooks/useParamValues'
 import { AudioIcon, BanIcon, CheckCircleIcon, ClockIcon, CpuIcon, DocumentIcon, GpuIcon, ImageIcon, MinusCircleIcon, SpinnerIcon, VideoIcon, XCircleIcon } from '../icons'
 import { renderMessage } from '../ConfirmDialog'
 import Select from '../Select'
 import Tip, { HoverTip } from '../Tip'
 import { ROW_DESC, ROW_LABEL } from '../settings/styles'
+import SpeedParamsDialog from './SpeedParamsDialog'
 import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
 
 function ms(v: number) {
@@ -24,9 +26,14 @@ const STATUS: Record<DeviceStatus, { label: string; icon: ReactNode }> = {
   skipped: { label: '未检测', icon: <MinusCircleIcon className="h-4 w-4 text-gray-400 dark:text-gray-500" /> },
 }
 
-/** 一种输入的单条耗时；没有结果时留空，仍占住这一列 */
-function Timing({ label, icon, value }: { label: string; icon: ReactNode; value: number | null }) {
+/**
+ * 一种输入的单个文件（单段）耗时：有测速结果时用它（`speed`，`what` 如“每张图片”），否则用黄金样本的耗时（`sample`）；
+ * 没有结果时留空，仍占住这一列。`stale` 时测速用的参数已改过
+ */
+function Timing({ what, icon, speed, sample, stale }: { what: string; icon: ReactNode; speed: number | null | undefined; sample: number | null; stale: boolean }) {
+  const value = speed ?? sample
   if (value === null) return <span />
+  const label = speed == null ? `检测样本中${what}的用时` : `按${stale ? '修改前的' : '当前'}设置，${what}约 ${ms(speed)}`
   return (
     <Tip label={label} className="gap-1 whitespace-nowrap text-xs text-gray-500 tabular-nums dark:text-gray-400">
       {icon}
@@ -37,29 +44,34 @@ function Timing({ label, icon, value }: { label: string; icon: ReactNode; value:
 
 /**
  * 每个设备的检测结果；引导与设置页共用。各行是卡片网格的子网格（subgrid），耗时列按所有行中最宽的内容取宽度，
- * 列间靠得近，上下行仍对齐。首尾两列用 auto：子网格的左右内边距会加在边上的列里，固定列宽装不下，图标会压到相邻的列上
+ * 列间靠得近，上下行仍对齐。首尾两列用 auto：子网格的左右内边距会加在边上的列里，固定列宽装不下，图标会压到相邻的列上。
+ * 耗时为按测速时的参数处理单个文件（单段）的用时，`values`（当前参数）与测速时不同时在上方提示
  */
-export function DeviceList({ devices }: { devices: DeviceResult[] }) {
+export function DeviceList({ devices, values }: { devices: DeviceResult[]; values: ParamValues | null }) {
+  const stale = (d: DeviceResult) => speedStale(d, values)
   return (
-    <div className={`${CARD} grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] gap-x-3 max-sm:grid-cols-[auto_minmax(0,1fr)_auto]`}>
-      {devices.map((d, i) => (
-        <div key={i} className="col-span-full grid grid-cols-subgrid items-center px-4 py-2.5">
-          <span className={ICON_TILE}>{d.gpu ? <GpuIcon className="h-4 w-4" /> : <CpuIcon className="h-4 w-4" />}</span>
-          <span className="truncate text-sm text-gray-800 dark:text-gray-100 max-sm:whitespace-normal">
-            {deviceName(d, devices)}
-            <HoverTip label={deviceName(d, devices)} wrap />
-          </span>
-          {/* 手机宽度下耗时放到名称下面一行 */}
-          <span className="contents max-sm:col-[2/-1] max-sm:row-start-2 max-sm:mt-1 max-sm:flex max-sm:flex-wrap max-sm:gap-x-3">
-            <Timing label="处理一段文本的用时" icon={<DocumentIcon className="h-3.5 w-3.5" />} value={d.textMs} />
-            <Timing label="处理一张图片的用时" icon={<ImageIcon className="h-3.5 w-3.5" />} value={d.imageMs} />
-            <Timing label="处理一段音频的用时" icon={<AudioIcon className="h-3.5 w-3.5" />} value={d.audioMs} />
-            <Timing label="处理一个视频片段的用时" icon={<VideoIcon className="h-3.5 w-3.5" />} value={d.videoMs} />
-          </span>
-          <Tip label={STATUS[d.status].label} className="w-full justify-end max-sm:col-start-3 max-sm:row-start-1">{STATUS[d.status].icon}</Tip>
-          {d.reason && <p data-selectable-text className="col-[2/-1] mt-1 whitespace-pre-line text-xs text-gray-500 dark:text-gray-400">{d.reason}</p>}
-        </div>
-      ))}
+    <div>
+      {devices.some(stale) && <p className="mb-2 text-xs text-amber-600 dark:text-amber-400">{SPEED_STALE_TEXT}</p>}
+      <div className={`${CARD} grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto] gap-x-3 max-sm:grid-cols-[auto_minmax(0,1fr)_auto]`}>
+        {devices.map((d, i) => (
+          <div key={i} className="col-span-full grid grid-cols-subgrid items-center px-4 py-2.5">
+            <span className={ICON_TILE}>{d.gpu ? <GpuIcon className="h-4 w-4" /> : <CpuIcon className="h-4 w-4" />}</span>
+            <span className="truncate text-sm text-gray-800 dark:text-gray-100 max-sm:whitespace-normal">
+              {deviceName(d, devices)}
+              <HoverTip label={deviceName(d, devices)} wrap />
+            </span>
+            {/* 手机宽度下耗时放到名称下面一行 */}
+            <span className="contents max-sm:col-[2/-1] max-sm:row-start-2 max-sm:mt-1 max-sm:flex max-sm:flex-wrap max-sm:gap-x-3">
+              <Timing what="每段文本" icon={<DocumentIcon className="h-3.5 w-3.5" />} speed={d.speed?.textMs} sample={d.textMs} stale={stale(d)} />
+              <Timing what="每张图片" icon={<ImageIcon className="h-3.5 w-3.5" />} speed={d.speed?.imageMs} sample={d.imageMs} stale={stale(d)} />
+              <Timing what="每段音频" icon={<AudioIcon className="h-3.5 w-3.5" />} speed={d.speed?.audioMs} sample={d.audioMs} stale={stale(d)} />
+              <Timing what="每个视频片段" icon={<VideoIcon className="h-3.5 w-3.5" />} speed={d.speed?.videoMs} sample={d.videoMs} stale={stale(d)} />
+            </span>
+            <Tip label={STATUS[d.status].label} className="w-full justify-end max-sm:col-start-3 max-sm:row-start-1">{STATUS[d.status].icon}</Tip>
+            {d.reason && <p data-selectable-text className="col-[2/-1] mt-1 whitespace-pre-line text-xs text-gray-500 dark:text-gray-400">{d.reason}</p>}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -110,10 +122,13 @@ export function DevicePicker({ st }: { st: SelftestStatus }) {
  * 第 4 步：设备自检。允许跳过、只用 CPU；
  * 检测在核心进程的推理子进程中进行，进度与每个设备的结果经事件推来，完成后索引立即改用选出的设备。
  * 检测结果列表下方是一行卡片：将使用的设备与说明，右侧是“开始检测 / 重新检测”小按钮；还没检测时再给“只用 CPU”。
- * 检测完成后卡片下方是与设置页相同的设备下拉菜单，可选自动、CPU 或检测通过的显卡，卡片随后台返回的状态更新。结果过期时不拦截，有待建立索引的文件且未暂停时后台服务自动重新检测（期间用 CPU）。页面上的主按钮只有引导底部的“下一步”
+ * 检测完成后卡片下方是与设置页相同的设备下拉菜单，可选自动、CPU 或检测通过的显卡，卡片随后台返回的状态更新。结果过期时不拦截，有待建立索引的文件且未暂停时后台服务自动重新检测（期间用 CPU）。页面上的主按钮只有引导底部的“下一步”。
+ * 卡片上的“高级”打开只列出影响速度的参数的弹窗（`SpeedParamsDialog`）；改了测速用到的参数时检测结果上方提示耗时是修改前的，不自动重新检测
  */
 export default function SelftestStep({ selftest, model }: { selftest: SelftestStatus; model: boolean }) {
   const [error, setError] = useState('')
+  const [advanced, setAdvanced] = useState(false)
+  const values = useParamValues(true)
   const st = selftest
   const selected = st.selected !== null ? st.devices[st.selected] : undefined
   const cpuOnly = st.preferred === 'cpu'
@@ -138,7 +153,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
 
       {tested && (
         <div className="mt-4">
-          <DeviceList devices={st.devices} />
+          <DeviceList devices={st.devices} values={values} />
         </div>
       )}
 
@@ -190,6 +205,9 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
                   只用 CPU
                 </button>
               )}
+              <button type="button" className={SMALL_BUTTON} disabled={!values} onClick={() => setAdvanced(true)}>
+                高级
+              </button>
               <button type="button" className={SMALL_BUTTON} disabled={!model} onClick={() => call('run_selftest')}>
                 {tested ? '重新检测' : '开始检测'}
               </button>
@@ -198,6 +216,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
         </div>
       </div>
       {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
+      {advanced && values && <SpeedParamsDialog values={values} onClose={() => setAdvanced(false)} />}
       {/* Android 上只用 CPU，没有可选的设备 */}
       {!st.running && tested && !isAndroid && (
         <div className="mt-4">

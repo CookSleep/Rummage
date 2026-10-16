@@ -3,7 +3,8 @@
 读取 assets/golden/manifest.json，先核对样本文件哈希，再用 llama_embed.LlamaEmbedder 逐条计算 768 维向量并做数值检查
 （无 NaN / Inf、范数与 1 相差不超过 1e-6），写入 assets/golden/vectors-gguf-q8-<主模型 SHA-256 前 16 位>.json。
 - 文本已在清单中加好任务前缀；图像、音频、视频窗口不加前缀。
-- 图像 140 档视觉 token；视频帧按清单中的 vision_tokens_per_image。
+- 图像按 IMAGE_TIERS 各档、视频窗口的每个变体按 VIDEO_FRAME_TIERS 各档各算一条，覆盖参数 image_tokens 与
+  video_frame_tokens 的全部取值，自检按当前参数取对应的一条；这两类向量项带 tokens 字段，编号与档位一起确定一条向量。
 - 只加载纯 CPU 预编译包，出现非 CPU 设备即中止。
 
 用法（在仓库根目录）：
@@ -28,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import llama_embed as le  # noqa: E402
 
 QUANT = "Q8_0"
-IMAGE_TOKENS = 140
+IMAGE_TIERS = [70, 140, 280, 560, 1120]
+VIDEO_FRAME_TIERS = [70, 140]
 GGUF_SOURCE = "ggml-org/embeddinggemma-2-GGUF@bfcd298762cc34d0357ece5ebdd31791a3a374d8"
 # 同一运行库、同一后端重算时应几乎逐位相同，门槛比跨后端比较严得多。
 CHECK_MIN_COS = 0.9999
@@ -58,17 +60,19 @@ def main() -> None:
   init_s = time.perf_counter() - t0
   vectors, bad = [], []
   try:
-    for s in le.golden_parts(manifest, IMAGE_TOKENS):
+    for s in le.golden_parts(manifest, IMAGE_TIERS, VIDEO_FRAME_TIERS):
       t1 = time.perf_counter()
       vec, st = emb.embed(s["parts"])
       nan_inf = int((~np.isfinite(vec)).sum())
       norm = float(np.linalg.norm(vec.astype(np.float64)))
-      print(f"{s['id']:22s} {s['modality']:8s} 范数 {norm:.7f}  序列 {st['seq_len']:4d}  {time.perf_counter() - t1:6.2f} 秒",
+      print(f"{s['id']:22s} {s['modality']:8s} {s.get('tokens', ''):>4}  范数 {norm:.7f}  序列 {st['seq_len']:4d}  {time.perf_counter() - t1:6.2f} 秒",
             flush=True)
       if vec.shape != (768,) or nan_inf or not np.isfinite(st["raw_norm"]) or abs(norm - 1) > 1e-6:
-        bad.append(s["id"])
-      vectors.append({"id": s["id"], "modality": s["modality"], "norm": round(norm, 7), "seq_len": st["seq_len"],
-                      "vector": [float(f"{v:.9g}") for v in vec]})
+        bad.append(f"{s['id']}@{s.get('tokens')}")
+      item = {"id": s["id"], "modality": s["modality"]}
+      if "tokens" in s:
+        item["tokens"] = s["tokens"]
+      vectors.append({**item, "norm": round(norm, 7), "seq_len": st["seq_len"], "vector": [float(f"{v:.9g}") for v in vec]})
   finally:
     emb.close()
   if bad:
@@ -78,17 +82,18 @@ def main() -> None:
     old = json.loads(path.read_text(encoding="utf-8"))
     if old["manifest_sha256"] != sha256(manifest_path):
       raise SystemExit("manifest.json 与生成黄金向量时的版本不同，需要重新计算黄金向量。")
-    ref = {v["id"]: v for v in old["vectors"]}
+    key = lambda v: (v["id"], v.get("tokens"))  # noqa: E731
+    ref = {key(v): v for v in old["vectors"]}
     # 每个模态记录 [最小余弦, 对应编号, 逐元素最大绝对差]。
     worst: dict[str, list] = {}
     for v in vectors:
-      r = ref[v["id"]]["vector"]
+      r = ref[key(v)]["vector"]
       a, b = np.asarray(v["vector"], np.float64), np.asarray(r, np.float64)
       cos = float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
       diff = float(np.abs(a - b).max())
       w = worst.setdefault(v["modality"], [2.0, "", 0.0])
       if cos < w[0]:
-        w[0], w[1] = cos, v["id"]
+        w[0], w[1] = cos, f"{v['id']}@{v['tokens']}" if "tokens" in v else v["id"]
       w[2] = max(w[2], diff)
     for m, (cos, sid, diff) in worst.items():
       print(f"{m:8s} 最小余弦 {cos:.9f}（{sid}）  逐元素最大绝对差 {diff:.3g}")
@@ -115,8 +120,8 @@ def main() -> None:
       "pooling": "mean，非因果注意力，整段输入一次编码",
       "threads": le.DEFAULT_THREADS,
       "max_tokens": le.MAX_TOKENS,
-      "vision_tokens_per_image": IMAGE_TOKENS,
-      "video_vision_tokens_per_image": manifest["videos"][0]["vision_tokens_per_image"],
+      "image_tiers": IMAGE_TIERS,
+      "video_frame_tiers": VIDEO_FRAME_TIERS,
       "prefix_scheme": manifest["prefix_scheme"],
       "manifest_sha256": sha256(manifest_path),
       "engine_init_seconds": round(init_s, 2),

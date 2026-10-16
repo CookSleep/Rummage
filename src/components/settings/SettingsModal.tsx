@@ -184,7 +184,7 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
     }
     if (offline) return <CoreStatusNotice status={coreStatus} className="h-full" />
     if ((tab === 'device' || tab === 'models') && !setup) return setupError ? <LoadError message={setupError} onRetry={onSetupRetry} /> : null
-    if (tab === 'device' && setup) return <DeviceTab setup={setup} />
+    if (tab === 'device' && setup) return <DeviceTab setup={setup} values={values} />
     if (tab === 'models' && setup) return <ModelsTab setup={setup} acted={modelsActed} onAct={onModelsAct} />
     if (loadError) return <LoadError message={loadError} onRetry={load} />
     if (!values) return null

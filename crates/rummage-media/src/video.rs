@@ -19,7 +19,7 @@
 //!   实测（i7-12700H，1080p H.264）硬件解码比多线程软件解码慢约一倍，但 CPU 占用只有约九分之一，后台建索引时更不打扰前台。
 //! - 组装（`assemble`）：带音频时依次为 `时间戳, 音频段, 时间戳, 画面帧`，时间戳为窗口起点加帧时刻取整秒的 `mm:ss`，
 //!   音频段为窗口音频按帧数等分（`window_s × 16000 / 帧数` 个采样）；不带音频时只放画面帧。与黄金样本的
-//!   `inputs_av` / `inputs_v` 相同，媒体之间不加空格，占位与分词由推理引擎做。
+//!   各变体的 `inputs` 相同，媒体之间不加空格，占位与分词由推理引擎做。
 //! - Android 不用 ffmpeg：元数据与抽帧用系统的 MediaExtractor + MediaCodec（`android/video.rs`），取帧规则、YUV 转 RGB 与转正
 //!   按 ffmpeg 的做法自己实现（`raw`），缩放用 `resize_bicubic`，结果与电脑接近而不逐位相同；`ffmpeg_dir`、`hwaccel` 在 Android 上不用。
 //! - 修改窗口、抽帧或组装的规则时提升 `rummage_embed::space::VIDEO_PREPROCESS`。
@@ -437,8 +437,8 @@ mod tests {
     use super::*;
     use crate::ffmpeg::tests::ffmpeg_dir;
 
-    /// 黄金样本的每帧档位
-    const GOLDEN_TOKENS: u32 = 70;
+    /// 与黄金样本的帧比较时用的每帧档位（`video_frame_tokens` 的默认值）
+    const GOLDEN_TOKENS: u32 = 140;
 
     const OBJECTS: WindowOpts = WindowOpts {
         window_s: 2,
@@ -691,7 +691,7 @@ mod tests {
             .collect()
     }
 
-    /// 一次解码抽出的帧与黄金样本的帧（PIL 缩成 640×360、JPEG 质量 80，再缩放到 70 档）比较并报告差异。
+    /// 一次解码抽出的帧与黄金样本的帧（PIL 缩成 640×360、JPEG 质量 80，再缩放到 `GOLDEN_TOKENS` 档）比较并报告差异。
     /// 两者的缩放算法、JPEG 有损压缩不同，像素不可能相同；第 0 帧正好落在原视频的一帧上（1.000 秒），取帧规则相同，
     /// 只差缩放与压缩，要求平均差很小。其余帧黄金样本取 T 之后的第一帧，这里取 T 及之前的最后一帧（见模块说明），
     /// 画面在动时差异较大，只报告

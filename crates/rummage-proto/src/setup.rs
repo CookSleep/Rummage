@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ParamValue;
+
 /// 模型下载源
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -125,13 +127,28 @@ pub struct DeviceResult {
     pub status: DeviceStatus,
     /// 未通过或被跳过的原因，中文整句
     pub reason: Option<String>,
-    /// 单条耗时的中位数（毫秒）
+    /// 黄金样本单条耗时的中位数（毫秒）
     pub text_ms: Option<f64>,
     pub image_ms: Option<f64>,
     pub audio_ms: Option<f64>,
     pub video_ms: Option<f64>,
+    /// 按测速时的参数处理单个文件（单段）的耗时；没有测速结果（旧的检测结果）时为空
+    pub speed: Option<DeviceSpeed>,
     /// 显卡现在的情况；CPU 与检测中为空
     pub state: Option<GpuState>,
+}
+
+/// 按当时的参数测得的耗时（毫秒），对应 `rummage_embed::selftest::CandidateReport::speed`：
+/// 一段 `chunk_tokens` 长的文本、一张图片、一段音频、一个视频片段；没测的为空
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSpeed {
+    pub text_ms: Option<f64>,
+    pub image_ms: Option<f64>,
+    pub audio_ms: Option<f64>,
+    pub video_ms: Option<f64>,
+    /// 测速时影响耗时的参数值；之后改了其中任何一项，界面提示这些耗时是修改前的
+    pub params: BTreeMap<String, ParamValue>,
 }
 
 /// 显卡现在的情况。已屏蔽的显卡一般只在 `SelftestStatus::blocked` 中列出；本次测过且未通过时例外，标为 `Blocked`
@@ -309,6 +326,16 @@ mod tests {
                     image_ms: None,
                     audio_ms: Some(48.0),
                     video_ms: None,
+                    speed: Some(DeviceSpeed {
+                        text_ms: Some(30.0),
+                        image_ms: Some(1500.5),
+                        audio_ms: None,
+                        video_ms: None,
+                        params: BTreeMap::from([
+                            ("chunk_tokens".to_string(), ParamValue::Int(384)),
+                            ("selftest_min_cosine".to_string(), ParamValue::Float(0.99)),
+                        ]),
+                    }),
                     state: Some(GpuState::Absent),
                 }],
                 selected: None,

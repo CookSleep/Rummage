@@ -92,6 +92,11 @@ fn options(cache_file: PathBuf, auto: bool, only: Option<String>) -> Options {
         auto,
         cancel: Arc::default(),
         only,
+        video: VideoSpeed {
+            window_s: 2,
+            frames: 2,
+            audio: false,
+        },
     }
 }
 

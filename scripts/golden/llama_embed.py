@@ -18,7 +18,7 @@ tools/mtmd/mtmd.h 为准。模型：ggml-org/embeddinggemma-2-GGUF 的主模型�
   按 `target_size`（transformers Gemma 4 `get_aspect_ratio_preserving_size`）以 PIL 双三次缩放后，把 RGB 字节交给
   `mtmd_bitmap_init`。尺寸已是 48 的倍数，mtmd 不会再缩放；软 token 数与推算不符时报错。
 - 音频用 `read_wav` 读成 [-1, 1] 的 float32，交给 `mtmd_bitmap_init_from_audio`，梅尔谱由 mtmd 计算。
-- 视频窗口按清单中 `inputs_av` / `inputs_v` 的交错顺序，段与段之间不加空格。
+- 视频窗口按清单中各变体 `inputs` 的交错顺序，段与段之间不加空格。
 
 精度：llama.cpp 与 mtmd 的 Flash Attention 默认是 AUTO，CPU 上会启用并把 K、V 与掩码转成 F16，
 所以两边都显式关闭。CPU 上矩阵乘的激活按权重的 vec_dot 类型量化（Q8_0 权重 → 激活 Q8_0），这是 ggml CPU 后端的固有行为。
@@ -429,25 +429,29 @@ class LlamaEmbedder:
     return vec, {"seq_len": pos, "raw_norm": norm}
 
 
-def golden_parts(manifest: dict, image_tokens: int) -> list[dict]:
-  """把黄金样本展开为 embed 的输入。单张图片按 image_tokens 档，视频帧按清单中的 vision_tokens_per_image。"""
+def golden_parts(manifest: dict, image_tiers: list[int], video_frame_tiers: list[int]) -> list[dict]:
+  """把黄金样本展开为 embed 的输入。单张图片按 image_tiers 各档、视频窗口的每个变体按 video_frame_tiers 各档各算一条。"""
   read = lambda rel: (GOLDEN_DIR / rel).read_bytes()  # noqa: E731
   out = []
   for t in manifest["texts"]:
     out.append({"id": t["id"], "modality": "text", "parts": [("text", t["input"])]})
-  for im in manifest["images"]:
-    out.append({"id": im["id"], "modality": "image", "parts": [("image", read(im["file"]), image_tokens)]})
+  for tier in image_tiers:
+    for im in manifest["images"]:
+      out.append({"id": im["id"], "modality": "image", "tokens": tier,
+                  "parts": [("image", read(im["file"]), tier)]})
   for a in manifest["audios"]:
     out.append({"id": a["id"], "modality": "audio", "parts": [("audio", read_wav(read(a["file"])))]})
   for v in manifest["videos"]:
-    for variant in ("av", "v"):
-      parts = []
-      for p in v[f"inputs_{variant}"]:
-        if p["type"] == "text":
-          parts.append(("text", p["text"]))
-        elif p["type"] == "image":
-          parts.append(("image", read(p["file"]), v["vision_tokens_per_image"]))
-        else:
-          parts.append(("audio", read_wav(read(p["file"]))))
-      out.append({"id": f"{v['id']}_{variant}", "modality": f"video_{variant}", "parts": parts})
+    for tier in video_frame_tiers:
+      for var in v["variants"]:
+        parts = []
+        for p in var["inputs"]:
+          if p["type"] == "text":
+            parts.append(("text", p["text"]))
+          elif p["type"] == "image":
+            parts.append(("image", read(p["file"]), tier))
+          else:
+            parts.append(("audio", read_wav(read(p["file"]))))
+        out.append({"id": f"{v['id']}_{var['id']}", "modality": "video_av" if var["audio"] else "video_v", "tokens": tier,
+                    "parts": parts})
   return out

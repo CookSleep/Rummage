@@ -32,3 +32,12 @@ export function rebuildLabel(changes: [ParamDef, ParamValue][]) {
   const labels = changes.flatMap(([d]) => d.indexKinds.map((k) => KIND_LABELS[k] ?? k))
   return [...new Set(labels)].join('、')
 }
+
+/** 修改影响索引的参数前的确认文字 */
+export function rebuildConfirmText(changes: [ParamDef, ParamValue][]) {
+  const affected = changes.filter(([d]) => d.affectsIndex)
+  const text = `修改后需要重建受影响的索引（${rebuildLabel(affected)}）。\n\n重建期间旧索引仍可搜索。`
+  // 以图搜图只比较同一视觉 token 档位的向量，文字查询不受档位影响
+  if (!affected.some(([d]) => d.indexKinds.includes('image'))) return text
+  return `${text}\n\n重建完成前，以图搜图可能找不到尚未重建的图片（文字搜图片不受影响）。`
+}

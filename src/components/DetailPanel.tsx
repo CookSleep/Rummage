@@ -1,22 +1,39 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { FileInfo, SearchHit } from '../types'
+import { copyText } from '../lib/clipboard'
 import { errorMessage } from '../lib/errors'
 import { canFindSimilar, formatSize, formatTime, indexStateText, kindLabel, matchPercent, matchText, openAtText } from '../lib/format'
 import { hitPosition } from '../lib/media'
 import { isTauri } from '../lib/platform'
 import { useCoreEvent } from '../hooks/useCoreEvent'
 import { renderMessage } from './ConfirmDialog'
-import { CloseIcon, FolderIcon, KindIcon, OpenIcon, PanelCollapseIcon, SimilarIcon } from './icons'
+import { CloseIcon, FolderIcon, KindIcon, OpenIcon, PanelCollapseIcon, ShareIcon, SimilarIcon } from './icons'
 import Preview from './Preview'
 import { HoverTip } from './Tip'
 import PathText from './PathText'
+import { showToast } from './Toast'
 
 /** 详情栏宽度（px）；窗口不窄于 `PANEL_OVERLAY_BELOW` 时详情栏常驻右侧、网格让出这么宽，否则选中结果后覆盖整个窗口 */
 export const PANEL_WIDTH = 400
 export const PANEL_OVERLAY_BELOW = 900
 /** 建索引期间刷新详情的最短间隔（ms） */
 const REFRESH_MS = 2000
+
+/** 点击文件名或路径时复制；在其中拖选了文字时不复制，留给用户复制选中的部分 */
+async function copyField(el: HTMLElement, text: string, what: string) {
+  const sel = window.getSelection()
+  if (sel && !sel.isCollapsed && sel.containsNode(el, true)) return
+  try {
+    await copyText(text)
+    showToast(`${what}已复制`, 'success')
+  } catch (err) {
+    console.warn(err)
+    showToast(`复制${what}失败`, 'error')
+  }
+}
+
+const COPY_TEXT = 'cursor-pointer text-left transition duration-200 hover:text-blue-500 dark:hover:text-blue-400'
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -43,10 +60,12 @@ interface DetailsProps {
   /** 为空时不显示“在资源管理器中显示”（Android） */
   onReveal?: () => void
   onSimilar: () => void
+  /** 为空时不显示“分享”（Windows） */
+  onShare?: () => void
 }
 
 /** 选中结果的预览、文件信息与索引情况 */
-function Details({ hit, query, onOpen, onReveal, onSimilar }: DetailsProps) {
+function Details({ hit, query, onOpen, onReveal, onSimilar, onShare }: DetailsProps) {
   const [info, setInfo] = useState<FileInfo | null>(null)
   // 默认程序能跳到命中位置时按钮写“打开到 03:12”，打开时由 SearchPage 带上同一个位置
   const at = hitPosition(hit)
@@ -114,7 +133,12 @@ function Details({ hit, query, onOpen, onReveal, onSimilar }: DetailsProps) {
         <Preview hit={hit} query={query} />
 
         <Section title="文件">
-          <Row label="路径"><span data-selectable-text><PathText path={hit.path} /></span></Row>
+          <Row label="路径">
+            <button type="button" data-selectable-text onClick={(e) => void copyField(e.currentTarget, hit.path, '路径')} className={COPY_TEXT}>
+              <PathText path={hit.path} />
+              <HoverTip label="复制路径" />
+            </button>
+          </Row>
           <Row label="类型">{kindLabel(hit.kind)}{info?.ext ? `（.${info.ext}）` : ''}</Row>
           <Row label="大小">{formatSize(info?.size ?? hit.size)}</Row>
           <Row label="修改时间">{formatTime(info?.mtime ?? hit.mtime)}</Row>
@@ -145,6 +169,12 @@ function Details({ hit, query, onOpen, onReveal, onSimilar }: DetailsProps) {
           <button type="button" onClick={onSimilar} aria-label="找相似" className={ICON_BUTTON}>
             <SimilarIcon kind={hit.kind} className="h-4 w-4" />
             <HoverTip label="找相似" />
+          </button>
+        )}
+        {onShare && (
+          <button type="button" onClick={onShare} aria-label="分享" className={ICON_BUTTON}>
+            <ShareIcon className="h-4 w-4" />
+            <HoverTip label="分享" />
           </button>
         )}
         {onReveal && (
@@ -181,13 +211,15 @@ interface Props {
   /** 为空时不显示“在资源管理器中显示”（Android） */
   onReveal?: () => void
   onSimilar: () => void
+  /** 为空时不显示“分享”（Windows） */
+  onShare?: () => void
 }
 
 /**
  * 右侧详情栏：不是弹窗，不抢焦点。宽窗口时有结果就常驻（可收起），单击只更新内容、不改变布局，
  * 双击就是指针下那张卡片的原生双击；窄窗口时选中结果后覆盖整个窗口，内部滚动
  */
-export default function DetailPanel({ hit, query, overlay, viewportHeight, connected, onHide, onOpen, onReveal, onSimilar }: Props) {
+export default function DetailPanel({ hit, query, overlay, viewportHeight, connected, onHide, onOpen, onReveal, onSimilar, onShare }: Props) {
   // 长图预览的高度（px，Preview 的 `--long-image-max`）：除去详情栏的标题行与底部按钮（约 140），再留出下面“文件”一节的标题和第一行，
   // 不把文件信息完全挤出可见范围。详情栏可以滚动，窗口很矮时仍保留 320
   const longImageMax = Math.max(320, viewportHeight - 220)
@@ -204,7 +236,10 @@ export default function DetailPanel({ hit, query, overlay, viewportHeight, conne
         {hit && (
           <>
             <KindIcon kind={hit.kind} className="mt-2 h-5 w-5 flex-shrink-0 text-gray-400" />
-            <p className="mt-2 min-w-0 flex-1 break-all text-sm font-semibold text-gray-800 dark:text-gray-100">{hit.name}</p>
+            <button type="button" onClick={(e) => void copyField(e.currentTarget, hit.name, '文件名')} className={`mt-2 min-w-0 flex-1 break-all text-sm font-semibold text-gray-800 dark:text-gray-100 ${COPY_TEXT}`}>
+              {hit.name}
+              <HoverTip label="复制文件名" />
+            </button>
           </>
         )}
         <button
@@ -218,7 +253,7 @@ export default function DetailPanel({ hit, query, overlay, viewportHeight, conne
         </button>
       </div>
       {hit ? (
-        <Details key={`${hit.fileId}-${connected}`} hit={hit} query={query} onOpen={onOpen} onReveal={onReveal} onSimilar={onSimilar} />
+        <Details key={`${hit.fileId}-${connected}`} hit={hit} query={query} onOpen={onOpen} onReveal={onReveal} onSimilar={onSimilar} onShare={onShare} />
       ) : (
         <p className="flex flex-1 items-center justify-center px-5 pb-16 text-sm text-gray-400 dark:text-gray-500">选择一个结果查看详情</p>
       )}

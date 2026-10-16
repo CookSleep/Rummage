@@ -209,6 +209,13 @@ impl<R: Runtime> Android<R> {
         Ok(res.opened)
     }
 
+    /// 用系统分享面板分享文件
+    pub async fn share_file(&self, path: &Path) -> Result<(), Error> {
+        self.0
+            .run_mobile_plugin_async("shareFile", PathArgs { path })
+            .await
+    }
+
     /// 是否已在“安装未知应用”中允许本应用
     pub async fn can_install_packages(&self) -> Result<bool, Error> {
         let res: Granted = self

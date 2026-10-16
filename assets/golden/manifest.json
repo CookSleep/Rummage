@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "prefix_scheme": "A",
   "license": "全部素材由 AI 生成（图片 gpt-image-2.5-sunburst，音频与视频 doubao-seedance-2.5，2026-10），不含第三方版权素材；与仓库同为 MIT，见 README.md",
   "texts": [
@@ -309,130 +309,169 @@
         4.8,
         6.0
       ],
-      "vision_tokens_per_image": 70,
       "audio_segment_seconds": 1.0,
-      "inputs_av": [
+      "variants": [
         {
-          "type": "text",
-          "text": "00:01"
+          "id": "f2_v",
+          "frames": 2,
+          "window_seconds": 2,
+          "audio": false,
+          "frame_times": [
+            0.0,
+            1.2
+          ],
+          "inputs": [
+            {
+              "type": "image",
+              "file": "video/vid01/frame0.jpg"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame1.jpg"
+            }
+          ]
         },
         {
-          "type": "audio",
-          "file": "video/vid01/audio0.wav"
+          "id": "f4_v",
+          "frames": 4,
+          "window_seconds": 4,
+          "audio": false,
+          "frame_times": [
+            0.0,
+            1.2,
+            2.4,
+            3.6
+          ],
+          "inputs": [
+            {
+              "type": "image",
+              "file": "video/vid01/frame0.jpg"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame1.jpg"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame2.jpg"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame3.jpg"
+            }
+          ]
         },
         {
-          "type": "text",
-          "text": "00:01"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame0.jpg"
-        },
-        {
-          "type": "text",
-          "text": "00:02"
-        },
-        {
-          "type": "audio",
-          "file": "video/vid01/audio1.wav"
-        },
-        {
-          "type": "text",
-          "text": "00:02"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame1.jpg"
-        },
-        {
-          "type": "text",
-          "text": "00:03"
-        },
-        {
-          "type": "audio",
-          "file": "video/vid01/audio2.wav"
-        },
-        {
-          "type": "text",
-          "text": "00:03"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame2.jpg"
-        },
-        {
-          "type": "text",
-          "text": "00:04"
-        },
-        {
-          "type": "audio",
-          "file": "video/vid01/audio3.wav"
-        },
-        {
-          "type": "text",
-          "text": "00:04"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame3.jpg"
-        },
-        {
-          "type": "text",
-          "text": "00:05"
-        },
-        {
-          "type": "audio",
-          "file": "video/vid01/audio4.wav"
-        },
-        {
-          "type": "text",
-          "text": "00:05"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame4.jpg"
-        },
-        {
-          "type": "text",
-          "text": "00:07"
-        },
-        {
-          "type": "audio",
-          "file": "video/vid01/audio5.wav"
-        },
-        {
-          "type": "text",
-          "text": "00:07"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame5.jpg"
-        }
-      ],
-      "inputs_v": [
-        {
-          "type": "image",
-          "file": "video/vid01/frame0.jpg"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame1.jpg"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame2.jpg"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame3.jpg"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame4.jpg"
-        },
-        {
-          "type": "image",
-          "file": "video/vid01/frame5.jpg"
+          "id": "f6_av",
+          "frames": 6,
+          "window_seconds": 6,
+          "audio": true,
+          "frame_times": [
+            0.0,
+            1.2,
+            2.4,
+            3.6,
+            4.8,
+            6.0
+          ],
+          "inputs": [
+            {
+              "type": "text",
+              "text": "00:01"
+            },
+            {
+              "type": "audio",
+              "file": "video/vid01/audio0.wav"
+            },
+            {
+              "type": "text",
+              "text": "00:01"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame0.jpg"
+            },
+            {
+              "type": "text",
+              "text": "00:02"
+            },
+            {
+              "type": "audio",
+              "file": "video/vid01/audio1.wav"
+            },
+            {
+              "type": "text",
+              "text": "00:02"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame1.jpg"
+            },
+            {
+              "type": "text",
+              "text": "00:03"
+            },
+            {
+              "type": "audio",
+              "file": "video/vid01/audio2.wav"
+            },
+            {
+              "type": "text",
+              "text": "00:03"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame2.jpg"
+            },
+            {
+              "type": "text",
+              "text": "00:04"
+            },
+            {
+              "type": "audio",
+              "file": "video/vid01/audio3.wav"
+            },
+            {
+              "type": "text",
+              "text": "00:04"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame3.jpg"
+            },
+            {
+              "type": "text",
+              "text": "00:05"
+            },
+            {
+              "type": "audio",
+              "file": "video/vid01/audio4.wav"
+            },
+            {
+              "type": "text",
+              "text": "00:05"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame4.jpg"
+            },
+            {
+              "type": "text",
+              "text": "00:07"
+            },
+            {
+              "type": "audio",
+              "file": "video/vid01/audio5.wav"
+            },
+            {
+              "type": "text",
+              "text": "00:07"
+            },
+            {
+              "type": "image",
+              "file": "video/vid01/frame5.jpg"
+            }
+          ]
         }
       ],
       "files": [

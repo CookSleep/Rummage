@@ -16,8 +16,8 @@ use rummage_embed::{
 /// 同一后端的一致门槛。
 const MIN_COSINE: f64 = 0.9999;
 const THREADS: u32 = 6;
-/// 黄金样本的图像档位。
-const IMAGE_TOKENS: u32 = 140;
+/// 取这一档的图像黄金向量
+const IMAGE_TOKENS: u32 = 280;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -71,12 +71,13 @@ fn golden_texts_and_images() {
         "vectors-gguf-q8-{}.json",
         &space::MODEL.sha256[..16]
     )));
-    let want = |id: &str| -> Vec<f32> {
+    // 图像按 `IMAGE_TOKENS` 档取，文本没有档位
+    let want = |id: &str, tokens: Option<u32>| -> Vec<f32> {
         golden["vectors"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|v| v["id"] == id)
+            .find(|v| v["id"] == id && v["tokens"].as_u64() == tokens.map(u64::from))
             .unwrap_or_else(|| panic!("黄金向量中没有 {id}"))["vector"]
             .as_array()
             .unwrap()
@@ -101,7 +102,7 @@ fn golden_texts_and_images() {
         };
         let got = backend.embed(input, Priority::Query).unwrap();
         assert_eq!(got.space, cfg.text());
-        let cos = vector::cosine(&got.vector, &want(id));
+        let cos = vector::cosine(&got.vector, &want(id, None));
         println!("{id:20} 余弦 {cos:.9}");
         assert!(cos >= MIN_COSINE, "{id} 余弦 {cos} 低于 {MIN_COSINE}");
         min_text = min_text.min(cos);
@@ -124,7 +125,7 @@ fn golden_texts_and_images() {
         };
         let got = backend.embed(input, Priority::Index).unwrap();
         assert_eq!(got.space, cfg.image(IMAGE_TOKENS));
-        let cos = vector::cosine(&got.vector, &want(id));
+        let cos = vector::cosine(&got.vector, &want(id, Some(IMAGE_TOKENS)));
         println!("{id:20} 余弦 {cos:.9}");
         assert!(cos >= MIN_COSINE, "{id} 余弦 {cos} 低于 {MIN_COSINE}");
         min_image = min_image.min(cos);

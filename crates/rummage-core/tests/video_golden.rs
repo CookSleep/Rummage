@@ -1,5 +1,6 @@
 //! 黄金视频窗口的两层核对，在指定显卡上计算，推理在可强行结束的推理子进程中进行（`LocalBackend`）：
-//! 1. 黄金样本的输入是预先抽好的 JPEG 帧与 WAV：按 `rummage_media::video::assemble` 组装（帧按 70 档缩放），
+//! 1. 黄金样本的输入是预先抽好的 JPEG 帧与 WAV：按 `rummage_media::video::assemble` 组装（帧按 70 档缩放，
+//!    取“找说话内容”变体 `vid01_f6_av` 的 70 档黄金向量），
 //!    向量与黄金向量的余弦须 ≥ 0.999，核对组装顺序、时间戳与音频段；
 //! 2. 改用建索引的做法，从原视频（在仓库外）一次解码抽帧、解码音轨，按同一窗口（1–7 秒）
 //!    组装，只报告余弦：取帧时刻与缩放、JPEG 压缩都与黄金样本不同（见 `rummage_media::video`）。
@@ -63,7 +64,7 @@ fn ffmpeg_frames_near_golden_vectors() {
     .unwrap();
 
     // 黄金样本：窗口从 1 秒起 6 秒、6 帧，时间戳为 00:01 … 00:07（assets/golden/video/vid01/window.json）
-    // 黄金样本的每帧档位
+    // 取这一档的黄金向量
     const TOKENS: u32 = 70;
     let opts = WindowOpts {
         window_s: 6,
@@ -134,44 +135,39 @@ fn ffmpeg_frames_near_golden_vectors() {
         start_ms: 0,
         ..win.clone()
     };
-    for (id, with_audio) in [("vid01_av", true), ("vid01_v", false)] {
-        let want: Vec<f32> = golden["vectors"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|v| v["id"] == id)
-            .unwrap()["vector"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|x| x.as_f64().unwrap() as f32)
-            .collect();
-        let embed = |parts| {
-            let input = Input::Video {
-                parts,
-                preprocess: rummage_embed::space::video_preprocess(6, 0, 6, TOKENS, with_audio),
-                max_tokens: 1024,
-            };
-            let t = Instant::now();
-            let got = backend.embed(input, Priority::Index).unwrap().vector;
-            (
-                vector::cosine(&got, &want),
-                t.elapsed().as_secs_f64() * 1000.0,
-            )
+    let id = "vid01_f6_av";
+    let want: Vec<f32> = golden["vectors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["id"] == id && v["tokens"] == TOKENS)
+        .unwrap()["vector"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_f64().unwrap() as f32)
+        .collect();
+    let embed = |parts| {
+        let input = Input::Video {
+            parts,
+            preprocess: rummage_embed::space::video_preprocess(6, 0, 6, TOKENS, true),
+            max_tokens: 1024,
         };
-        let (cos, ms) = embed(video::assemble(
-            &golden_win,
-            &golden_frames,
-            with_audio.then_some(&golden_audio[..]),
-        ));
-        println!("{id}：黄金帧组装，与黄金向量的余弦 {cos:.6}，推理 {ms:.0} 毫秒");
-        assert!(cos >= 0.999, "{id} 黄金帧组装的余弦 {cos}");
-        let (cos, ms) = embed(video::assemble(
-            &win,
-            &frames,
-            with_audio.then_some(&samples[..]),
-        ));
-        println!("{id}：一次解码抽帧，与黄金向量的余弦 {cos:.6}，推理 {ms:.0} 毫秒");
-        assert!(cos > 0.95, "{id} 余弦 {cos}");
-    }
+        let t = Instant::now();
+        let got = backend.embed(input, Priority::Index).unwrap().vector;
+        (
+            vector::cosine(&got, &want),
+            t.elapsed().as_secs_f64() * 1000.0,
+        )
+    };
+    let (cos, ms) = embed(video::assemble(
+        &golden_win,
+        &golden_frames,
+        Some(&golden_audio[..]),
+    ));
+    println!("{id}：黄金帧组装，与黄金向量的余弦 {cos:.6}，推理 {ms:.0} 毫秒");
+    assert!(cos >= 0.999, "{id} 黄金帧组装的余弦 {cos}");
+    let (cos, ms) = embed(video::assemble(&win, &frames, Some(&samples[..])));
+    println!("{id}：一次解码抽帧，与黄金向量的余弦 {cos:.6}，推理 {ms:.0} 毫秒");
+    assert!(cos > 0.95, "{id} 余弦 {cos}");
 }

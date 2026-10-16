@@ -601,6 +601,7 @@ fn fake_gpu() -> selftest::CandidateReport {
         image_ms: None,
         audio_ms: None,
         video_ms: None,
+        speed: None,
         driver_error: false,
         device_lost: false,
         transient: false,

@@ -5,7 +5,7 @@
 - parts.json：有序片段列表，{"text": ...}、{"image": "0.rgb", "w": 宽, "h": 高}、{"audio": "1.f32"}；
 - 二进制文件：图像是 llama_embed.LlamaEmbedder.bitmap() 交给 mtmd_bitmap_init 的 RGB 字节（按行，每像素 3 字节），
   音频是交给 mtmd_bitmap_init_from_audio 的小端 float32 采样。文件名前缀是片段序号。
-图像档位与黄金向量一致：图像 140，视频帧按清单中的 vision_tokens_per_image。
+只导出参数默认值对应的组合：图像 280 档，视频窗口只导出 f2_v 变体（“找物体”预设）、每帧 140 档。
 输出到 .cache/golden/pil-inputs/，即上述测试读取的位置。
 
 用法（在仓库根目录）：
@@ -33,7 +33,8 @@ OUT_DIR = le.REPO_ROOT / ".cache" / "golden" / "pil-inputs"
 def main() -> None:
   sys.stdout.reconfigure(encoding="utf-8", errors="replace")
   manifest = json.loads((le.GOLDEN_DIR / "manifest.json").read_text(encoding="utf-8"))
-  samples = le.golden_parts(manifest, 140)
+  samples = [s for s in le.golden_parts(manifest, [280], [140]) if not s["modality"].startswith("video")
+             or s["id"].endswith("_f2_v")]
   if OUT_DIR.exists():
     shutil.rmtree(OUT_DIR)
   for s in samples:

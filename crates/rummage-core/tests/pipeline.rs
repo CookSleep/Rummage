@@ -129,14 +129,16 @@ fn finished(s: &IndexStatus, total: u64) -> bool {
     s.state == IndexState::Idle && s.total == total && s.done + s.failed == total
 }
 
+/// 图片在默认档位（`image_tokens`）的黄金向量
 fn golden(id: &str) -> Vec<f32> {
     let path = repo().join("assets/golden/vectors-gguf-q8-2188ac1deca4b77d.json");
     let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    let tier = rummage_proto::params::int(&rummage_proto::params::defaults(), "image_tokens");
     let item = v["vectors"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|x| x["id"] == id)
+        .find(|x| x["id"] == id && x["tokens"] == tier)
         .unwrap();
     item["vector"]
         .as_array()

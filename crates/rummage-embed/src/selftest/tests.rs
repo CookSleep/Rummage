@@ -6,6 +6,7 @@ mod candidate;
 mod records;
 mod run;
 mod select;
+mod speed;
 
 fn gpu(desc: &str) -> GpuInfo {
     GpuInfo {

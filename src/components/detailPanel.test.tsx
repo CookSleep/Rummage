@@ -84,4 +84,33 @@ describe('DetailPanel', () => {
     expect(state()).toBe('已索引')
     expect(calls.filter((c) => c.cmd === 'file_details').map((c) => c.args)).toEqual([{ fileId: 7 }, { fileId: 7 }])
   })
+
+  it('点击文件名与路径时复制', async () => {
+    mockCore({ file_details: () => INFO })
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    render(panel(true))
+    await flush()
+    const button = (label: string) => [...document.querySelectorAll('button')].find((el) => el.textContent === label)!
+    button(HIT.name).click()
+    button(HIT.path).click()
+    await flush()
+    expect(writeText.mock.calls).toEqual([[HIT.name], [HIT.path]])
+  })
+
+  it('有 onShare 时显示“分享”，点击调用它；没有时不显示', async () => {
+    mockCore({ file_details: () => INFO })
+    const onShare = vi.fn()
+    const share = () => document.querySelector<HTMLButtonElement>('button[aria-label="分享"]')
+    const { rerender } = render(panel(true))
+    await flush()
+    expect(share()).toBeNull()
+
+    rerender(
+      <DetailPanel hit={HIT} query="" overlay={false} viewportHeight={800} connected onHide={vi.fn()} onOpen={vi.fn()} onSimilar={vi.fn()} onShare={onShare} />,
+    )
+    await flush()
+    share()!.click()
+    expect(onShare).toHaveBeenCalledTimes(1)
+  })
 })

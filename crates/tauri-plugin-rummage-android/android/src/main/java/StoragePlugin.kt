@@ -3,6 +3,7 @@ package com.cooksleep.rummage.storage
 import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ContentUris
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -135,6 +136,26 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
       invoke.reject(e.message ?: e.toString())
     }
   }
+
+  /** 用系统分享面板分享文件：同 openFile 经 FileProvider 换成 content URI，并放进 ClipData，接收方才能取得读取权限 */
+  @Command
+  fun shareFile(invoke: Invoke) {
+    try {
+      val file = File(invoke.parseArgs(OpenFileArgs::class.java).path)
+      val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
+      val intent = Intent(Intent.ACTION_SEND)
+        .setType(MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*")
+        .putExtra(Intent.EXTRA_STREAM, uri)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      intent.clipData = ClipData.newRawUri(null, uri)
+      activity.startActivity(Intent.createChooser(intent, null))
+      invoke.resolve()
+    } catch (e: Exception) {
+      Logger.error(Logger.tags("StoragePlugin"), "无法分享文件", e)
+      invoke.reject(e.message ?: e.toString())
+    }
+  }
+
   private fun resolveGranted(invoke: Invoke) {
     val ret = JSObject()
     ret.put("granted", Environment.isExternalStorageManager())

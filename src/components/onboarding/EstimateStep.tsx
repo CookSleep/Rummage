@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { Estimate, SelftestStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
-import { cpuName, deviceName, switchedDevice, switchedText } from '../../lib/device'
+import { cpuName, deviceName, speedStale, switchedDevice, switchedText } from '../../lib/device'
 import type { Kinds } from '../../lib/kinds'
-import { diskShort, estimateIndex, formatSizeRange, formatTimeRange, pickSpeeds } from '../../lib/estimate'
+import { diskShort, estimateDevice, estimateIndex, formatSizeRange, formatTimeRange, pickSpeeds } from '../../lib/estimate'
 import { formatSize } from '../../lib/format'
 import { isAndroid } from '../../lib/platform'
 import { useCoreEvent } from '../../hooks/useCoreEvent'
+import { useParamValues } from '../../hooks/useParamValues'
 import ChangeDataDirButton from '../ChangeDataDirButton'
 import { WarningIcon } from '../icons'
 import LoadError from '../LoadError'
@@ -27,12 +28,14 @@ interface Props {
 /**
  * 第 5 步：按各文件夹中各类文件的数量与大小，结合设备检测测得的速度预估索引时间与占用空间。
  * 文件夹还在扫描时数量会继续增加，扫描结束后自动刷新。
- * 预估占用的上限可能用尽数据目录所在磁盘的剩余空间时提示，并可更改数据目录；不阻止继续，空间不足时由自动暂停处理
+ * 预估占用的上限可能用尽数据目录所在磁盘的剩余空间时提示，并可更改数据目录；不阻止继续，空间不足时由自动暂停处理。
+ * 测速之后改过用到的参数时提示预估用的是修改前的速度
  */
 export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Props) {
   const [est, setEst] = useState<Estimate | null>(null)
   const [error, setError] = useState('')
   const [dirError, setDirError] = useState('')
+  const values = useParamValues(true)
 
   const load = useCallback(() => {
     invoke<Estimate>('index_estimate')
@@ -60,6 +63,8 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
   const device = sel ? deviceName(sel, st.devices) : cpuName(st)
   const switched = switchedDevice(st)
   const r = est && estimateIndex(est, kinds, pickSpeeds(st), preset)
+  const measured = estimateDevice(st)
+  const stale = measured !== undefined && speedStale(measured, values)
 
   return (
     <div>
@@ -99,6 +104,7 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
         </dl>
       )}
       {r && switched && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{switchedText(switched)}</p>}
+      {r && stale && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">参数已修改，预估按修改前测得的速度，重新检测后更新</p>}
       {r && est.freeGb != null && diskShort(r.disk.high, est.freeGb, minFreeGb) && (
         <div className={`mt-3 ${NOTICE_BOX}`}>
           <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />

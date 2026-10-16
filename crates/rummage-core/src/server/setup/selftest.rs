@@ -224,6 +224,7 @@ fn device(r: &CandidateReport) -> DeviceResult {
         image_ms: r.image_ms,
         audio_ms: r.audio_ms,
         video_ms: r.video_ms,
+        speed: r.speed.clone(),
         state: None,
     }
 }
@@ -325,6 +326,7 @@ pub(super) fn unblock_gpu(state: &Arc<State>, device: String) -> Result<Reply, A
             d.status = DeviceStatus::Skipped;
             d.reason = Some(selftest::UNBLOCKED_REASON.to_string());
             (d.text_ms, d.image_ms, d.audio_ms, d.video_ms) = (None, None, None, None);
+            d.speed = None;
         }
         // 用户主动解除：清掉这块显卡本次运行的停用，当场重测（所有显卡都停用时，重测通过后只恢复它，见 `run_selftest`）
         lock(&state.disabled)
@@ -501,9 +503,13 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
             } else {
                 p.hold(Hold::Selftest, false);
             }
-            // 自动检测出错只写日志，界面照旧显示上次的结果
+            // 没有开始检测：界面照旧显示上次的结果与选中的设备；自动检测出错只写日志
+            let (shown, selected) = selftest::last_report(&cfg.selftest_cache)
+                .map(|r| devices(&r))
+                .unwrap_or_default();
             *lock(&state.setup.selftest) = SelftestStatus {
-                devices: cached(),
+                devices: shown,
+                selected,
                 error: (!auto)
                     .then(|| "正在处理的文件长时间没有结束，暂时无法检测设备，请稍后再试。".into()),
                 ..SelftestStatus::default()
@@ -573,6 +579,7 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
                 image_ms: None,
                 audio_ms: None,
                 video_ms: None,
+                speed: None,
                 state: None,
             })
         })
@@ -595,6 +602,7 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
             Mode::Retest(d) => Some(d.clone()),
             _ => None,
         },
+        video: crate::pipeline::speed_video(&values),
         // 手动检测不会被中止
         cancel: if auto {
             state.setup.auto_cancel.clone()

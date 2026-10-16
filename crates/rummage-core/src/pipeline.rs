@@ -103,6 +103,16 @@ const RECENT_IMAGES: usize = 1024;
 const VIDEO_PRESETS: [(i64, u32, u32, bool); 3] =
     [(1, 2, 2, false), (2, 4, 4, false), (3, 6, 6, true)];
 
+/// 设备检测测速用的视频设置（`selftest::VideoSpeed`），与建索引相同
+pub fn speed_video(values: &BTreeMap<String, ParamValue>) -> selftest::VideoSpeed {
+    let v = video_opts(values);
+    selftest::VideoSpeed {
+        window_s: v.windows.window_s,
+        frames: v.windows.frames,
+        audio: v.audio_tokens.is_some(),
+    }
+}
+
 /// 实际使用的视频设置：预设，或“自定义”时的高级项
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VideoOpts {

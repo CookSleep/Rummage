@@ -2,10 +2,36 @@
 
 use super::{Group, ParamDef, ParamKind, ParamValue};
 
-/// 留出至少 2 个核心给系统和前台程序
+/// 留出至少 2 个核心给系统和前台程序。Android 上按大核数（`big_cores`），并至少留出 1 个核心给界面：
+/// 推理把每步计算平分给各线程，落在小核上的那份拖慢整体（SM8550 上 5 线程图片每张 5.2 s，6 线程 6.5 s，8 线程 17 s）。
+/// 不把线程绑定到大核：线程数等于大核数时，任何一个大核被其他线程占用都会让整步计算停下等它（绑定后 5 线程图片 15 s）
 fn index_threads_default() -> ParamValue {
     let n = std::thread::available_parallelism().map_or(1, |n| n.get()) as i64;
+    #[cfg(target_os = "android")]
+    if let Some(big) = big_cores() {
+        return ParamValue::Int((big.len() as i64).min(n - 1).clamp(1, 64));
+    }
     ParamValue::Int((n - 2).clamp(1, 64))
+}
+
+/// Android 上的大核编号：最高频率不低于最快核心 75% 的核心（读 `/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq`），
+/// 读不到时为 None
+#[cfg(target_os = "android")]
+fn big_cores() -> Option<Vec<usize>> {
+    let n = std::thread::available_parallelism().ok()?.get();
+    let freqs: Vec<u64> = (0..n)
+        .map(|i| {
+            std::fs::read_to_string(format!(
+                "/sys/devices/system/cpu/cpu{i}/cpufreq/cpuinfo_max_freq"
+            ))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+        })
+        .collect::<Option<_>>()?;
+    let max = *freqs.iter().max()?;
+    Some((0..n).filter(|&i| freqs[i] * 4 >= max * 3).collect())
 }
 
 pub static PARAMS: &[ParamDef] = &[
@@ -558,7 +584,7 @@ pub static PARAMS: &[ParamDef] = &[
         index_kinds: &[],
         label: "建立索引线程数",
         help: "越多建立索引越快，CPU 占用也越高。修改后需重新启动 Rummage 才能完全生效。",
-        basis: "留出至少 2 个核心给系统和前台程序，按 CPU 核数减 2",
+        basis: "留出至少 2 个核心给系统和前台程序，按 CPU 核数减 2；Android 上按大核数，至少留 1 个核心（SM8550 实测 5 线程最快）",
         platform: "",
     },
     // 只影响抽帧的速度与 CPU 占用，两种解码得到的画面只有细微差别（rummage-media 的 video 模块测试），改了不需要重建；对之后开始处理的视频生效

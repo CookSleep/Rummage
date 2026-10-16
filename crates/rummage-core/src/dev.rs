@@ -340,6 +340,7 @@ fn run_selftest(args: SelftestArgs) -> ExitCode {
         cancel: Default::default(),
         images: true,
         only: None,
+        video: rummage_core::pipeline::speed_video(&values),
     };
     match selftest::run(&opts, &candidates, &values, &[], &mut |_, _| {}) {
         Ok(report) => {

@@ -227,6 +227,11 @@ fn manual_pass_unblocks() {
         auto,
         cancel: Arc::default(),
         only: only.map(str::to_string),
+        video: VideoSpeed {
+            window_s: 2,
+            frames: 2,
+            audio: false,
+        },
     };
     assert!(opts(false, None).manual());
     assert!(!opts(true, None).manual() && !opts(false, Some("gpu:X|")).manual());

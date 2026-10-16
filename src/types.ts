@@ -329,14 +329,26 @@ export interface DeviceResult {
   name: string
   status: DeviceStatus
   reason: string | null
-  /** 单条耗时的中位数（毫秒） */
+  /** 黄金样本单条耗时的中位数（毫秒） */
   textMs: number | null
   imageMs: number | null
   audioMs: number | null
-  /** 一个视频片段（黄金样本的 6 帧窗口，带声音与只看画面两种的中位数） */
+  /** 一个视频片段（黄金样本的视频窗口，带声音与只看画面两种的中位数） */
   videoMs: number | null
+  /** 按测速时的参数处理单个文件（单段）的耗时；没有测速结果（旧的检测结果）时为空 */
+  speed: DeviceSpeed | null
   /** 显卡现在的情况；CPU 与检测中为空 */
   state: GpuState | null
+}
+
+/** 按当时的参数测得的耗时（毫秒）：一段文本、一张图片、一段音频、一个视频片段，没测的为空；对应 Rust `rummage_proto::DeviceSpeed` */
+export interface DeviceSpeed {
+  textMs: number | null
+  imageMs: number | null
+  audioMs: number | null
+  videoMs: number | null
+  /** 测速时影响耗时的参数值；之后改了其中任何一项，耗时就是修改前的 */
+  params: ParamValues
 }
 
 /** 显卡现在的情况（可用、本次运行停用、不在系统中、已屏蔽），对应 Rust `rummage_proto::GpuState`；已屏蔽的显卡一般不在检测结果中（见 `SelftestStatus.blocked`），本次测过且未通过时例外 */

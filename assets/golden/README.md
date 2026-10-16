@@ -15,14 +15,14 @@
 
 | 路径 | 内容 |
 |---|---|
-| `manifest.json` | 样本清单：每条文本的原文与加前缀后的输入、每张图片 / 每段音频的说明与生成来源、视频窗口的输入序列，以及所有素材文件的 SHA-256 |
+| `manifest.json` | 样本清单：每条文本的原文与加前缀后的输入、每张图片 / 每段音频的说明与生成来源、视频窗口三种输入的序列，以及所有素材文件的 SHA-256 |
 | `images/` | 5 张图片：照片 2 张（JPEG），界面截图、图表、长截图各 1 张（PNG） |
 | `audio/` | 3 段音频，16 kHz 单声道 16 位 PCM WAV，5–10 秒：中文朗读、英文朗读、环境声各 1 段 |
 | `video/vid01/` | 1 个短视频窗口的素材：画面帧（640×360 JPEG）、逐帧对应的音频段（WAV）、`window.json`（窗口参数）、`transcript.txt`（有解说时的逐字稿） |
 | `vectors-gguf-q8-<主模型 SHA-256 前 16 位>.json` | 黄金向量，见下文 |
 | `THIRD_PARTY.md` | 第三方素材声明（本目录没有第三方素材） |
 
-样本（全部素材文件加 `manifest.json`）合计 5,906,247 字节（5.63 MiB）：图片 4.7 MB、音频 0.8 MB、视频窗口 0.4 MB、清单 0.02 MB。导入时照片转为 JPEG 质量 90，截图、图表与长截图保留 PNG 只做无损重压缩，音频与视频窗口原样复制。黄金向量按模型文件另行打包，不计入样本体积。
+样本（全部素材文件加 `manifest.json`）合计 5,907,460 字节（5.63 MiB）：图片 4.7 MB、音频 0.8 MB、视频窗口 0.4 MB、清单 0.02 MB。导入时照片转为 JPEG 质量 90，截图、图表与长截图保留 PNG 只做无损重压缩，音频与视频窗口原样复制。黄金向量按模型文件另行打包，不计入样本体积。
 
 ### 文本（15 条）
 
@@ -61,12 +61,18 @@
 |---|---|---|---|---|
 | `vid01` | 00:01 起 6 秒 | 6 | 揉面、切剂子、擀饺子皮（只拍到手） | 中文女声解说 |
 
-- 抽帧：窗口内均匀分布、首尾各一帧，640×360 JPEG；每帧 70 个视觉 token。帧时刻见 `window.json` 与清单的 `frame_times`。
+- 抽帧：窗口内均匀分布、首尾各一帧，640×360 JPEG。帧时刻见 `window.json` 与清单的 `frame_times`。
 - 音频：窗口音频按帧数等分，每帧配一段（每段 1 秒）。
-- `manifest.json` 中每个窗口有两种输入序列：
-  - `inputs_av`（带音频）：`时间戳文字, 音频段, 时间戳文字, 画面帧` 依次重复，时间戳为窗口起点加帧时刻取整秒的 `mm:ss`，不加任务前缀；
-  - `inputs_v`（不带音频）：只放画面帧，不加时间戳。
-- 两种序列分别对应子空间 `video_av` / `video_v`，黄金向量中记为 `vid01_av`、`vid01_v`。
+- `manifest.json` 中每个窗口有三种输入（`variants`），与三个视频预设对应，取窗口的前若干帧：
+
+  | 编号 | 预设 | 帧数 | `window_seconds` | 音频 |
+  |---|---|---|---|---|
+  | `f2_v` | 找物体 | 前 2 帧 | 2 | 不带 |
+  | `f4_v` | 找动作 | 前 4 帧 | 4 | 不带 |
+  | `f6_av` | 找说话内容 | 6 帧 | 6 | 带 |
+
+  每项写明 `frames`、`window_seconds`、`audio`、`frame_times`（窗口帧时刻的前缀）与 `inputs`。带音频时 `inputs` 为 `时间戳文字, 音频段, 时间戳文字, 画面帧` 依次重复，时间戳为窗口起点加帧时刻取整秒的 `mm:ss`，不加任务前缀；不带音频时只放画面帧，不加时间戳。
+- 带音频与不带音频分别对应子空间 `video_av` / `video_v`，黄金向量中记为 `vid01_f2_v`、`vid01_f4_v`、`vid01_f6_av`。每帧的视觉 token 档位不在清单中，见下文。
 
 ## 黄金向量
 
@@ -74,10 +80,10 @@
 
 - 运行库：llama.cpp **b11461** 官方纯 CPU 预编译包 `llama-b11461-bin-win-cpu-x64.zip`（Python ctypes 调 `llama.dll` + `mtmd.dll`），设备列表只有 `CPU`。
 - 模型：`ggml-org/embeddinggemma-2-GGUF` 提交 `bfcd298762cc34d0357ece5ebdd31791a3a374d8` 的 Q8_0 主模型 `embeddinggemma-2-Q8_0.gguf`（SHA-256 `2188ac1deca4b77d…`，文件名中的 16 位即其前缀）与 Q8_0 mmproj `mmproj-embeddinggemma-2-Q8_0.gguf`（SHA-256 `c4a8a52691ecef40…`）。
-- 推理：文本、视觉、音频都在 CPU 上；**Flash Attention 显式关闭**（llama 上下文与 mtmd 均设为 DISABLED，默认的 AUTO 会把注意力的 K、V 转成 F16）；非因果注意力，平均池化后 L2 归一化；6 线程；单个输入最多 2048 token；图像 140 档视觉 token（视频帧 70）；文本前缀方案 A（见上文“文本”）。
-- 共 25 条：文本 15、图像 5、音频 3、视频窗口 2（1 个窗口 × 带 / 不带音频）。
+- 推理：文本、视觉、音频都在 CPU 上；**Flash Attention 显式关闭**（llama 上下文与 mtmd 均设为 DISABLED，默认的 AUTO 会把注意力的 K、V 转成 F16）；非因果注意力，平均池化后 L2 归一化；6 线程；单个输入最多 2048 token；文本前缀方案 A（见上文“文本”）。
+- 覆盖全部档位组合，共 49 条：文本 15；图像 25（5 张 × 70、140、280、560、1120 五档）；音频 3；视频窗口 6（3 种输入 × 每帧 70、140 两档）。设备自检只取与当前参数（`image_tokens`、`video_frame_tokens` 与视频识别方式）对应的那些。
 
-格式为单行 UTF-8 JSON（约 0.27 MB）：
+格式为单行 UTF-8 JSON（约 0.52 MB）：
 
 | 字段 | 含义 |
 |---|---|
@@ -89,13 +95,13 @@
 | `precision` | 权重 Q8_0；CPU 后端把矩阵乘的激活按权重类型量化为 Q8_0，其余运算 F32，不使用 F16 |
 | `flash_attn` | `off`（显式关闭） |
 | `pooling`、`threads`、`max_tokens` | 平均池化、线程数 6、单个输入上限 2048 token |
-| `vision_tokens_per_image`、`video_vision_tokens_per_image` | 每图 140 视觉 token、视频帧 70 |
+| `image_tiers`、`video_frame_tiers` | 图像的视觉 token 档位 `[70, 140, 280, 560, 1120]`、视频每帧的档位 `[70, 140]` |
 | `prefix_scheme` | 文本前缀方案 `A` |
 | `manifest_sha256` | 计算时 `manifest.json` 的 SHA-256，用来发现样本已改而向量未重算 |
 | `engine_init_seconds` | 引擎初始化耗时（仅供参考） |
-| `vectors` | 25 项，每项 `{id, modality, norm, seq_len, vector}`；`modality` 为 `text`、`image`、`audio`、`video_av`、`video_v`；`vector` 是 768 个 float32，以 9 位有效数字的十进制写出（可无损还原为 float32），已 L2 归一化；`norm` 是写出前的范数；`seq_len` 是送入编码器的 token 数（含软 token） |
+| `vectors` | 49 项，每项 `{id, modality, tokens, norm, seq_len, vector}`；`tokens` 是视觉 token 档位，只有图像与视频窗口有，编号加档位确定一条向量；`modality` 为 `text`、`image`、`audio`、`video_av`、`video_v`；`vector` 是 768 个 float32，以 9 位有效数字的十进制写出（可无损还原为 float32），已 L2 归一化；`norm` 是写出前的范数；`seq_len` 是送入编码器的 token 数（含软 token） |
 
-全部向量已检查无 NaN / Inf、范数与 1 相差不超过 10⁻⁶；用同一运行库在 CPU 上重算复核（`golden_vectors.py --check`），25 条与文件中的值逐位相同。
+全部向量已检查无 NaN / Inf、范数与 1 相差不超过 10⁻⁶；用同一运行库在 CPU 上重算复核（`golden_vectors.py --check`），49 条与文件中的值逐位相同（各模态最小余弦 1.000000000，逐元素最大绝对差 0）。
 
 ## 重算黄金向量
 

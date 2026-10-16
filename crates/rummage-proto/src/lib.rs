@@ -16,9 +16,9 @@ pub use params::{Group, ParamDef, ParamKind, ParamValue};
 pub use settings::{Appearance, FontMode, Notice};
 pub use setup::{AUTO_DEVICE, CPU_DEVICE};
 pub use setup::{
-    BlockedGpu, DeviceResult, DeviceStatus, Estimate, GpuState, KindTotal, ModelFileStatus,
-    ModelSource, ModelTask, ModelTaskKind, ModelTaskPhase, ModelTaskState, ProxyMode, ProxySetting,
-    RootEstimate, SelftestStatus, SetupStatus,
+    BlockedGpu, DeviceResult, DeviceSpeed, DeviceStatus, Estimate, GpuState, KindTotal,
+    ModelFileStatus, ModelSource, ModelTask, ModelTaskKind, ModelTaskPhase, ModelTaskState,
+    ProxyMode, ProxySetting, RootEstimate, SelftestStatus, SetupStatus,
 };
 
 /// 每次修改消息类型都要加 1。

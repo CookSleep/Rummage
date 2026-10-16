@@ -111,7 +111,7 @@ export function dialog() {
 }
 
 export function device(over: Partial<DeviceResult> = {}): DeviceResult {
-  return { id: 'cpu', gpu: false, pciId: null, name: 'CPU', status: 'passed', reason: null, textMs: 80, imageMs: 900, audioMs: null, videoMs: null, state: null, ...over }
+  return { id: 'cpu', gpu: false, pciId: null, name: 'CPU', status: 'passed', reason: null, textMs: 80, imageMs: 900, audioMs: null, videoMs: null, speed: null, state: null, ...over }
 }
 
 export function selftest(over: Partial<SelftestStatus> = {}): SelftestStatus {

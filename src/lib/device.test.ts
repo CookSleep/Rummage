@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DeviceResult, SelftestStatus } from '../types'
-import { cpuFallbackReason, cpuFaster, deviceName, indexDevice, switchedDevice, switchedText } from './device'
+import { cpuFallbackReason, cpuFaster, deviceName, indexDevice, speedStale, switchedDevice, switchedText } from './device'
 
 const dev = (name: string, pciId: string | null, gpu = true): DeviceResult => ({
   id: `gpu:${name}|${pciId ?? ''}`,
@@ -13,6 +13,7 @@ const dev = (name: string, pciId: string | null, gpu = true): DeviceResult => ({
   imageMs: null,
   audioMs: null,
   videoMs: null,
+  speed: null,
   state: null,
 })
 
@@ -78,6 +79,28 @@ describe('cpuFaster', () => {
     expect(cpuFaster(st([textOnly, { ...dev('A', null), textMs: 20 }]))).toBe(true)
     expect(cpuFaster(st([cpu, { ...dev('A', null), status: 'failed', imageMs: 10 }]))).toBe(false)
     expect(cpuFaster(st([cpu]))).toBe(false)
+  })
+
+  it('都有测速结果且参数相同时按测速结果比较，否则按样本耗时', () => {
+    const speed = (imageMs: number, tier = 280) => ({ textMs: 1, imageMs, audioMs: null, videoMs: null, params: { image_tokens: tier } })
+    // 样本耗时显卡更快，按当前参数测速 CPU 更快
+    const gpu = { ...dev('A', null), textMs: 5, imageMs: 50, speed: speed(900) }
+    expect(cpuFaster(st([{ ...cpu, speed: speed(800) }, gpu]))).toBe(true)
+    // CPU 没有测速结果（旧的检测结果）、或测速参数不同时按样本耗时
+    expect(cpuFaster(st([cpu, gpu]))).toBe(false)
+    expect(cpuFaster(st([{ ...cpu, speed: speed(800, 560) }, gpu]))).toBe(false)
+  })
+})
+
+describe('speedStale', () => {
+  const d = { ...dev('A', null), speed: { textMs: 1, imageMs: 2, audioMs: null, videoMs: null, params: { image_tokens: 280, chunk_tokens: 384 } } }
+
+  it('测速用到的参数改过时为真；其他参数、没有测速结果或读不到参数时为假', () => {
+    expect(speedStale(d, { image_tokens: 280, chunk_tokens: 384, video_preset: 2 })).toBe(false)
+    expect(speedStale(d, { image_tokens: 560, chunk_tokens: 384 })).toBe(true)
+    expect(speedStale(d, { chunk_tokens: 384 })).toBe(false)
+    expect(speedStale(dev('A', null), { image_tokens: 560 })).toBe(false)
+    expect(speedStale(d, null)).toBe(false)
   })
 })
 

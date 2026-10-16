@@ -575,7 +575,8 @@ mod tests {
                 continue;
             }
             let want = std::fs::read(&want_path).unwrap();
-            let got = prepare(&file, 140, MAX_PIXELS).unwrap();
+            // 与导出的档位相同
+            let got = prepare(&file, 280, MAX_PIXELS).unwrap();
             assert_eq!(got.data.len(), want.len(), "{id} 尺寸不同");
             let diff: Vec<u8> = got
                 .data

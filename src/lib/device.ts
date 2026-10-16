@@ -1,4 +1,4 @@
-import type { BlockedGpu, DeviceResult, SelftestStatus } from '../types'
+import type { BlockedGpu, DeviceResult, ParamValues, SelftestStatus } from '../types'
 import { isAndroid } from './platform'
 
 /** 显示名称用到的字段，检测结果与被屏蔽的显卡都有 */
@@ -9,14 +9,33 @@ export function cpuName(st: SelftestStatus) {
   return st.devices.find((d) => !d.gpu)?.name ?? 'CPU'
 }
 
-/** 检测通过的显卡都比 CPU 慢（与核心的选择规则相同：有图片耗时按图片，否则按文字），所以选用了 CPU */
+/**
+ * 比较设备速度用的耗时，与核心的选择规则相同：通过的设备都有测速结果、且测速时的参数相同时按测速结果，
+ * 否则按黄金样本的耗时；有图片耗时按图片，否则按文字
+ */
+export function speedMs(passed: DeviceResult[]) {
+  const params = (d: DeviceResult) => JSON.stringify(d.speed?.params ?? null)
+  const real = passed.every((d) => (d.speed?.imageMs ?? d.speed?.textMs) != null && params(d) === params(passed[0]))
+  return (d: DeviceResult) => (real && d.speed ? d.speed.imageMs ?? d.speed.textMs : d.imageMs ?? d.textMs)
+}
+
+/** 检测通过的显卡都比 CPU 慢（见 `speedMs`），所以选用了 CPU */
 export function cpuFaster(st: SelftestStatus) {
-  const ms = (d: DeviceResult) => d.imageMs ?? d.textMs
+  const ms = speedMs(st.devices.filter((d) => d.status === 'passed'))
   const cpu = st.devices.find((d) => !d.gpu && d.status === 'passed')
   const gpus = st.devices.filter((d) => d.gpu && d.status === 'passed')
   const t = cpu && ms(cpu)
   return t != null && gpus.length > 0 && gpus.every((g) => (ms(g) ?? Infinity) >= t)
 }
+
+/** 测速之后改过其中用到的参数：显示的耗时与预估用的速度都是修改前的。`values` 中没有的参数不算；显卡的耗时与线程数无关 */
+export function speedStale(d: DeviceResult, values: ParamValues | null) {
+  if (!d.speed || !values) return false
+  return Object.entries(d.speed.params).some(([k, v]) => !(d.gpu && k === 'index_threads') && values[k] !== undefined && values[k] !== v)
+}
+
+/** 检测结果中的耗时是修改参数前测得的 */
+export const SPEED_STALE_TEXT = '参数已修改，以下耗时为修改前的结果，重新检测后更新'
 
 /** 引导与设备页共用的检测设备说明 */
 export const SELFTEST_TEXT = isAndroid

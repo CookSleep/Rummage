@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { ParamDef, ParamGroup, ParamValue, ParamValues } from '../../types'
 import { useIndexStatus } from '../../hooks/useIndexStatus'
-import { useSaveParam } from '../../hooks/useSaveParam'
-import { rebuildLabel } from '../../lib/params'
+import { useParamChanges } from '../../hooks/useParamChanges'
+import { rebuildConfirmText } from '../../lib/params'
 import { isAndroid } from '../../lib/platform'
 import { rebuildNotice } from '../../lib/rebuild'
 import ConfirmDialog from '../ConfirmDialog'
@@ -25,14 +25,6 @@ const GROUP_DESC: Record<ParamGroup, string> = {
   Advanced: '一般不需要修改。',
 }
 
-function confirmText(changes: [ParamDef, ParamValue][]) {
-  const affected = changes.filter(([d]) => d.affectsIndex)
-  const text = `修改后需要重建受影响的索引（${rebuildLabel(affected)}）。\n\n重建期间旧索引仍可搜索。`
-  // 以图搜图只比较同一视觉 token 档位的向量，文字查询不受档位影响
-  if (!affected.some(([d]) => d.indexKinds.includes('image'))) return text
-  return `${text}\n\n重建完成前，以图搜图可能找不到尚未重建的图片（文字搜图片不受影响）。`
-}
-
 interface Props {
   group: ParamGroup
   defs: ParamDef[]
@@ -50,12 +42,8 @@ interface Props {
  * Android 的“资源”页顶部是“后台运行”（电池优化白名单）
  */
 export default function ParamsTab({ group, defs, values, setParam, onDevice }: Props) {
-  const { errors, save } = useSaveParam(setParam)
-  // 等待确认的修改
-  const [pending, setPending] = useState<[ParamDef, ParamValue][] | null>(null)
-  // 取消确认后递增，让输入框回到当前值
-  const [epoch, setEpoch] = useState(0)
   const [recheck, setRecheck] = useState(false)
+  const { errors, epoch, pending, request, confirm, cancel } = useParamChanges(values, setParam, (key) => key === SELFTEST_KEY && setRecheck(true))
   // 本页有影响索引的参数时，在顶部说明按新设置重建的情况
   const indexStatus = useIndexStatus(true)
   const rebuild = defs.some((d) => d.group === group && d.affectsIndex) ? indexStatus?.rebuild : null
@@ -70,22 +58,6 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice }: P
     else sections.push({ title: d.section, defs: [d] })
   }
   const desc = GROUP_DESC[group]
-
-  const apply = async (changes: [ParamDef, ParamValue][]) => {
-    for (const [d, v] of changes) {
-      if ((await save(d.key, v)) && d.key === SELFTEST_KEY) setRecheck(true)
-    }
-  }
-
-  const request = (changes: [ParamDef, ParamValue][]) => {
-    const real = changes.filter(([d, v]) => values[d.key] !== v)
-    if (!real.length) return
-    if (real.some(([d]) => d.affectsIndex)) {
-      setPending(real)
-      return
-    }
-    void apply(real)
-  }
 
   const changed = list.filter((d) => values[d.key] !== d.default)
 
@@ -134,16 +106,10 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice }: P
       {pending && (
         <ConfirmDialog
           title="重建索引"
-          message={confirmText(pending)}
+          message={rebuildConfirmText(pending)}
           confirmText="修改并重建"
-          onConfirm={() => {
-            void apply(pending)
-            setPending(null)
-          }}
-          onCancel={() => {
-            setPending(null)
-            setEpoch((n) => n + 1)
-          }}
+          onConfirm={confirm}
+          onCancel={cancel}
         />
       )}
     </div>

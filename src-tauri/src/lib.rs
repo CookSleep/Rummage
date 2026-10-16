@@ -118,6 +118,8 @@ pub fn run() {
             #[cfg(target_os = "android")]
             android::ui::open_file,
             #[cfg(target_os = "android")]
+            android::ui::share_file,
+            #[cfg(target_os = "android")]
             android::ui::move_task_to_back,
             #[cfg(target_os = "android")]
             android::ui::safe_area,

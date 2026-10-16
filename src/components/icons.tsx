@@ -42,6 +42,10 @@ export function OpenIcon(props: SVGProps<SVGSVGElement>) {
   return <Icon {...props} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
 }
 
+export function ShareIcon(props: SVGProps<SVGSVGElement>) {
+  return <Icon {...props} d="M8.59 13.51l6.83 3.98m-.01-10.98l-6.82 3.98M21 5a3 3 0 11-6 0 3 3 0 016 0zM9 12a3 3 0 11-6 0 3 3 0 016 0zm12 7a3 3 0 11-6 0 3 3 0 016 0z" />
+}
+
 export function FolderIcon(props: SVGProps<SVGSVGElement>) {
   return <Icon {...props} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
 }

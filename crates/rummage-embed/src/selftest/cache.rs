@@ -518,6 +518,7 @@ pub(super) fn unblocked(r: &mut CandidateReport) {
     r.reason = Some(UNBLOCKED_REASON.to_string());
     r.samples.clear();
     (r.init_ms, r.text_ms, r.image_ms, r.audio_ms, r.video_ms) = (None, None, None, None, None);
+    r.speed = None;
 }
 
 /// 解除屏蔽后、重新检测前的原因
