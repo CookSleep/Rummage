@@ -1,8 +1,11 @@
-﻿# 下载 EmbeddingGemma 2 模型到开发版数据目录 src-tauri/dev-data/models/：
+﻿# 下载 EmbeddingGemma 2 模型到开发版数据目录 src-tauri/dev-data/models/，两种格式：
 # 1. GGUF Q8_0（ggml-org/embeddinggemma-2-GGUF，正式使用的模型，默认下载）：
 #    主模型 embeddinggemma-2-Q8_0.gguf（分词器 + 文本骨干）与 mmproj-embeddinggemma-2-Q8_0.gguf（视觉 + 音频编码器），
 #    存到 models/embeddinggemma-2-gguf/。-Gguf text 只取主模型（只处理文本时不需要 mmproj），-Gguf none 不取。
-# 仓库钉定提交（resolve/<提交>/<路径>）：先调用 /api/models/<仓库>/tree/<提交>
+# 2. LiteRT-LM 通用版（-LiteRt，手机端的推理后端，在电脑上只用于评测）：litert-community/embeddinggemma-2-740m-litert-lm
+#    的 embeddinggemma-2-740m.litertlm（不取芯片专用版）与 google/embeddinggemma-2 的 tokenizer.json（数切片长度用），
+#    存到 models/embeddinggemma-2-litert/。
+# 各仓库都钉定提交（resolve/<提交>/<路径>）：先调用 /api/models/<仓库>/tree/<提交>
 # 核对文件大小和 lfs.oid（即 SHA-256）与内置已知表一致，接口不可用时直接按已知表。
 # main 分支有新提交时只提示、不停止。-AllowUpdate 时该仓库的所有文件整体改用 main 当前指向的同一个提交
 # （不混用两个提交），核实后需把该提交与新哈希写回脚本。
@@ -13,10 +16,13 @@
 #   powershell -ExecutionPolicy Bypass -File scripts/fetch-models.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts/fetch-models.ps1 -Gguf text
 #   powershell -ExecutionPolicy Bypass -File scripts/fetch-models.ps1 -Endpoint https://hf-mirror.com
+#   powershell -ExecutionPolicy Bypass -File scripts/fetch-models.ps1 -Gguf none -LiteRt
 
 param(
   # GGUF：all 为主模型 + mmproj（默认），text 只取主模型，none 不取。
   [ValidateSet('all', 'text', 'none')][string]$Gguf = 'all',
+  # 另取 LiteRT-LM 模型与分词器。
+  [switch]$LiteRt,
   # Hugging Face 或接口兼容的镜像地址，例如 https://hf-mirror.com。
   [string]$Endpoint = 'https://huggingface.co',
   # 改用 main 分支当前指向的提交下载（默认按钉定的提交）。
@@ -33,6 +39,19 @@ $GgufDir = 'embeddinggemma-2-gguf'
 $GgufFiles = @(
   @{ Path = 'embeddinggemma-2-Q8_0.gguf'; Modal = 'text'; Size = 309855456; Sha256 = '2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135' }
   @{ Path = 'mmproj-embeddinggemma-2-Q8_0.gguf'; Modal = 'media'; Size = 554821024; Sha256 = 'c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f' }
+)
+
+# LiteRT-LM 已知表：从两个提交的文件列表读取（与 rummage_embed::space 的 LITERT_MODEL、TOKENIZER 相同）。
+$LiteRtDir = 'embeddinggemma-2-litert'
+$LiteRtModelRepo = 'litert-community/embeddinggemma-2-740m-litert-lm'
+$LiteRtModelCommit = '24d962e906c7d332c6428e71c9676855024569e2'
+$LiteRtModelFiles = @(
+  @{ Path = 'embeddinggemma-2-740m.litertlm'; Size = 484622336; Sha256 = 'e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c' }
+)
+$TokenizerRepo = 'google/embeddinggemma-2'
+$TokenizerCommit = '914f7f89142e33e77833254d9c9b90c3cef7303b'
+$TokenizerFiles = @(
+  @{ Path = 'tokenizer.json'; Size = 32170510; Sha256 = '4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4' }
 )
 
 # git blob SHA-1："blob <长度>\0" + 内容。用于核对不走 LFS 的小配置文件。
@@ -137,7 +156,7 @@ function Sync-PinnedFiles([string]$Label, [string]$Repo, [string]$Commit, [strin
   }
 }
 
-if ($Gguf -eq 'none') { throw '没有要下载的模型：-Gguf none 时不取任何文件。' }
+if ($Gguf -eq 'none' -and -not $LiteRt) { throw '没有要下载的模型：-Gguf none 时请用 -LiteRt。' }
 
 $base = $Endpoint.TrimEnd('/')
 $modelsDir = Join-Path $RepoRoot 'src-tauri\dev-data\models'
@@ -147,6 +166,11 @@ $script:ready = @()
 if ($Gguf -ne 'none') {
   $want = @($GgufFiles | Where-Object { $Gguf -eq 'all' -or $_.Modal -eq 'text' })
   Sync-PinnedFiles "GGUF Q8_0（$(if ($Gguf -eq 'all') { '主模型 + mmproj' } else { '只取主模型' })）" $GgufRepo $GgufCommit $GgufDir $want
+}
+
+if ($LiteRt) {
+  Sync-PinnedFiles 'LiteRT-LM 通用版' $LiteRtModelRepo $LiteRtModelCommit $LiteRtDir $LiteRtModelFiles
+  Sync-PinnedFiles 'LiteRT-LM 分词器' $TokenizerRepo $TokenizerCommit $LiteRtDir $TokenizerFiles
 }
 
 Write-Host "模型就绪（$modelsDir）："

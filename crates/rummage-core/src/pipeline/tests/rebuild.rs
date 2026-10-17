@@ -1,6 +1,10 @@
 //! 设置与索引绑定：符合当前设置时不重建，改参数后只把不符的文件放回重建。
 use super::*;
 
+fn gguf() -> rummage_embed::SpaceConfig {
+    rummage_embed::SpaceConfig::current(rummage_embed::Backend::Cpu)
+}
+
 /// 建好的索引都符合当前设置：启动或再检查时不重建
 #[test]
 fn fresh_index_needs_no_rebuild() {
@@ -67,7 +71,7 @@ fn ratio_change_rebuilds_only_long_images() {
 /// 默认的各项版本：整图 280 档，长图切片 140 档，视频帧 140 档
 #[test]
 fn default_versions() {
-    let w = crate::pipeline::rebuild::wanted(&params::defaults());
+    let w = crate::pipeline::rebuild::wanted(&params::defaults(), &gguf());
     assert_eq!(w.image, "image-v1-t280");
     assert_eq!(w.slice, "image-v1-t140-slice-v1-r2.5-n12");
     assert_eq!(w.video, "video-v2-w2-o0-f2-t140-v");
@@ -82,9 +86,13 @@ fn each_tier_changes_only_its_versions() {
     let wanted = |key: &str, v: i64| {
         let mut values = base.clone();
         values.insert(key.to_string(), ParamValue::Int(v));
-        let mut w = crate::pipeline::rebuild::wanted(&values);
+        let mut w = crate::pipeline::rebuild::wanted(&values, &gguf());
         w.doc_media = serde_json::to_string(&crate::pipeline::docmedia::tokens(
-            &values, true, true, true,
+            &values,
+            &gguf(),
+            true,
+            true,
+            true,
         ))
         .unwrap();
         w

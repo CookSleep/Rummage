@@ -244,7 +244,7 @@ pub struct Sample {
     pub want: Vec<f32>,
 }
 
-pub(super) struct Golden {
+pub(crate) struct Golden {
     pub samples: Vec<Sample>,
     /// 所选的视频帧档位（即当前参数）与视频变体的窗口、帧数与音频（没有视频样本时为空），测速据此判断能否复用
     /// 样本耗时；图像样本总是按当前的 `image_tokens` 档位（见各样本的 `Input::Image`）
@@ -343,7 +343,7 @@ pub(super) fn wav(dir: &Path, file: &str) -> Result<Vec<f32>, Error> {
 
 /// 读取清单与当前模型的参考向量中与当前参数对应的组合（见模块说明），并预先缩放全部图像、读出全部音频（不计入耗时）。
 /// `video` 为当前的视频设置
-pub(super) fn load(
+pub(crate) fn load(
     dir: &Path,
     values: &BTreeMap<String, ParamValue>,
     video: VideoSpeed,

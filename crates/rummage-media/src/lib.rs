@@ -319,6 +319,33 @@ pub fn fit(img: Rgb, max_soft_tokens: u32) -> Result<Rgb, Error> {
     resize_bicubic(&img, w, h)
 }
 
+/// 缩放到给定尺寸（与 `fit` 相同的双三次缩放），尺寸相同时原样返回
+pub fn resize(img: Rgb, width: u32, height: u32) -> Result<Rgb, Error> {
+    if (width, height) == (img.width, img.height) {
+        return Ok(img);
+    }
+    resize_bicubic(&img, width, height)
+}
+
+/// 无损编码为 PNG（交给自带解码器的推理引擎）
+pub fn png(img: &Rgb) -> Vec<u8> {
+    use image::ImageEncoder;
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new_with_quality(
+        &mut out,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::Sub,
+    )
+    .write_image(
+        &img.data,
+        img.width,
+        img.height,
+        image::ExtendedColorType::Rgb8,
+    )
+    .expect("像素数据的长度与宽高一致，写入内存不会失败");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

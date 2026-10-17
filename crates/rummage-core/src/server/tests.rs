@@ -315,6 +315,7 @@ fn start_busy(dir: &std::path::Path) -> Arc<State> {
         driver_events: Box::new(|_| unreachable!("没有推理后端，不会失效")),
         file_timeout: None,
         gpus: Vec::new,
+        litert: false,
     });
     state
 }
@@ -358,6 +359,7 @@ fn query_too_long_reported() {
         driver_events: Box::new(|_| unreachable!("没有显卡引擎")),
         file_timeout: None,
         gpus: Vec::new,
+        litert: false,
     });
     let body = Request::Search {
         text: Some("很长的搜索内容".into()),
@@ -415,6 +417,7 @@ fn search_without_inference_skips_engine() {
         driver_events: Box::new(|_| unreachable!("没有显卡引擎")),
         file_timeout: None,
         gpus: Vec::new,
+        litert: false,
     });
     let search = |text: &str, similar| Request::Search {
         text: Some(text.into()),

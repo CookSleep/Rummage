@@ -410,7 +410,7 @@ fn image(shared: &Shared, task: Task, qh: Vec<u8>) -> Prep {
     let max_slices = int(&task.params, "long_image_max_slices").max(0) as u32;
     let tier = int(&task.params, "image_tokens") as u32;
     let slice_tier = int(&task.params, "long_image_tokens") as u32;
-    let slice_version = space::image_slice_preprocess(slice_tier, max_ratio, max_slices);
+    let slice_version = engine.cfg.slice_version(slice_tier, max_ratio, max_slices);
     let image_space = space_row(&engine.cfg, Some(tier));
     let copy =
         lock(&shared.db).copy_source(&ch, &image_space.id, &slice_version, max_ratio, job.file_id);

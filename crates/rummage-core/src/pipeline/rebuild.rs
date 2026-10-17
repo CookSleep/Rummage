@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 use rummage_embed::space;
+use rummage_embed::{Backend, SpaceConfig};
 use rummage_extract::ChunkOpts;
 use rummage_index::{Db, DbError, Wanted};
 use rummage_media::audio;
@@ -27,7 +28,8 @@ pub(crate) fn void_kinds(key: &str) -> Vec<&'static str> {
 }
 
 /// 按参数表各种类的向量应有的参数版本；`kinds` 为空，由调用方按开启的种类填写
-pub(super) fn wanted(values: &BTreeMap<String, ParamValue>) -> Wanted {
+/// `cfg` 为当前运行库的空间配置，决定图像预处理版本
+pub(super) fn wanted(values: &BTreeMap<String, ParamValue>, cfg: &SpaceConfig) -> Wanted {
     let long_ratio = float(values, "long_image_ratio");
     let chunk = ChunkOpts::from_params(values);
     let seg_s = int(values, "audio_segment_s").max(1) as u32;
@@ -37,8 +39,8 @@ pub(super) fn wanted(values: &BTreeMap<String, ParamValue>) -> Wanted {
     Wanted {
         kinds: Vec::new(),
         text: space::text_version(chunk.target, chunk.overlap_pct, chunk.min),
-        image: space::image_preprocess(int(values, "image_tokens") as u32),
-        slice: space::image_slice_preprocess(
+        image: cfg.image_version(int(values, "image_tokens") as u32),
+        slice: cfg.slice_version(
             int(values, "long_image_tokens") as u32,
             long_ratio,
             int(values, "long_image_max_slices").max(0) as u32,
@@ -63,7 +65,7 @@ pub(super) fn wanted(values: &BTreeMap<String, ParamValue>) -> Wanted {
 impl Shared {
     /// 处理哪些媒体种类（图片、音频、视频）：mmproj 可用且对应的参数开启，与 `engine` 的判定相同
     fn media_on(&self, values: &BTreeMap<String, ParamValue>) -> (bool, bool, bool) {
-        let mmproj = (self.opts.available)(&self.opts.mmproj, &space::MMPROJ);
+        let mmproj = (self.opts.available)(&self.opts.mmproj, self.opts.model_files().1);
         let on = |k: &str| mmproj && params::flag(values, k);
         (on("index_images"), on("index_audio"), on("index_video"))
     }
@@ -73,11 +75,12 @@ impl Shared {
     pub(super) fn requeue_stale(&self, db: &Db) -> Result<BTreeMap<String, usize>, DbError> {
         let values = lock(&self.params).clone();
         let (images, audio, video) = self.media_on(&values);
-        let mut w = wanted(&values);
+        let cfg = self.opts.space(Backend::Cpu);
+        let mut w = wanted(&values, &cfg);
         if params::flag(&values, "index_documents") {
             w.kinds.push("document");
         }
-        w.doc_media = serde_json::to_string(&docmedia::tokens(&values, images, audio, video))
+        w.doc_media = serde_json::to_string(&docmedia::tokens(&values, &cfg, images, audio, video))
             .unwrap_or_else(|_| "[]".to_string());
         for (on, kind) in [(images, "image"), (audio, "audio"), (video, "video")] {
             if on {

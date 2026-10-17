@@ -311,7 +311,7 @@ struct Shared {
 /// 向量空间的数据库行：`image_tier` 为空时是文本空间，否则是该视觉 token 档位的图像空间
 pub fn space_row(cfg: &SpaceConfig, image_tier: Option<u32>) -> Space {
     match image_tier {
-        Some(tier) => row(cfg, cfg.image(tier), true, space::image_preprocess(tier)),
+        Some(tier) => row(cfg, cfg.image(tier), true, cfg.image_version(tier)),
         None => row(cfg, cfg.text(), false, space::TEXT_PREPROCESS.to_string()),
     }
 }

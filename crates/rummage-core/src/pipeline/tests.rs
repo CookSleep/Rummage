@@ -290,6 +290,7 @@ impl Env {
             }),
             file_timeout: Some(self.timeout),
             gpus: Vec::new,
+            litert: false,
         };
         let mut values = params::defaults();
         if let Some(n) = self.threads {

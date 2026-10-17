@@ -217,6 +217,7 @@ fn throughput(
         &args.work.join("throughput"),
         &[samples.to_path_buf()],
         &[],
+        false,
     )?;
     let res = (|| {
         let p = state.pipeline().ok_or("索引流水线没有启动。")?;

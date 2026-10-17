@@ -19,8 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use rummage_embed::space;
-use rummage_embed::{Backend, Error as EmbedError, SpaceConfig, selftest};
+use rummage_embed::{Backend, Error as EmbedError, selftest};
 use rummage_proto::params;
 
 use super::{Engine, EngineSpec, Msg, Released, Shared, Start, int, lock, space_row};
@@ -65,13 +64,14 @@ impl Shared {
             self.set_error(Some(msg), out);
             return None;
         }
-        if !(opts.available)(&opts.model, &space::MODEL) {
+        let (model_file, mmproj_file) = opts.model_files();
+        if !(opts.available)(&opts.model, model_file) {
             *slot = None;
             self.set_flag(&self.no_model, true, out);
             return None;
         }
         self.set_flag(&self.no_model, false, out);
-        let has_mmproj = (opts.available)(&opts.mmproj, &space::MMPROJ);
+        let has_mmproj = (opts.available)(&opts.mmproj, mmproj_file);
         self.set_flag(&self.no_mmproj, !has_mmproj, out);
         let values = lock(&self.params).clone();
         let images = has_mmproj && params::flag(&values, "index_images");
@@ -125,7 +125,7 @@ impl Shared {
                 return None;
             }
         };
-        let cfg = SpaceConfig::current(if spec.gpu.is_some() {
+        let cfg = opts.space(if spec.gpu.is_some() {
             Backend::Vulkan
         } else {
             Backend::Cpu

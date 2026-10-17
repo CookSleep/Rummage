@@ -67,6 +67,7 @@ fn eval_args() {
             work: PathBuf::from("w"),
             subsets: Vec::new(),
             params: Vec::new(),
+            litert: false,
         }
     );
     let (_, args) = parse_eval_args(os(&[
@@ -94,6 +95,9 @@ fn eval_args() {
     assert!(parse_eval_args(os(&["E", "--param", "long_image_ratio"])).is_err());
     let (_, args) = parse_eval_args(os(&["E", "--device", "4080 SUPER"])).unwrap();
     assert_eq!(args.device, eval::Device::Gpu("4080 SUPER".into()));
+    let (_, args) = parse_eval_args(os(&["E", "--runtime", "litert"])).unwrap();
+    assert!(args.litert);
+    assert!(parse_eval_args(os(&["E", "--runtime", "onnx"])).is_err());
     assert!(parse_eval_args(os(&[])).is_err());
     assert!(parse_eval_args(os(&["E", "F"])).is_err());
     assert!(parse_eval_args(os(&["E", "--out"])).is_err());

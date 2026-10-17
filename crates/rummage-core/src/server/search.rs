@@ -13,7 +13,8 @@
 //! - 以图搜图只接受本机磁盘上的绝对路径：读取前用 `check_volume` 拒绝 UNC 路径和网络位置，设备路径直接拒绝。
 //! - `partial`：正在扫描、流水线有处理中的作业，或作业表中还有未完成的作业（含卡在没有模型时）。
 //! - 匹配度（`match_pct`）：校准分数在两个锚点之间线性换算，限制在 0–100%。文字查询 50% 处为门槛
-//!   `min_relevance`、90% 处为门槛加 `Z_SPAN_90`；以图搜图与“找相似的”用另一组锚点。低于 50% 锚点的最多 49%。
+//!   `min_relevance`、90% 处为门槛加 `span_90`；以图搜图与“找相似的”用另一组锚点。低于 50% 锚点的最多 49%。
+//!   锚点按查询向量所在空间的运行库选（`GGUF` / `LITERT`）：两者的 z 分布不同；门槛的默认值两者相同（3.0）。
 //! - 正文片段（`snippets`，命令行用）：文档结果取第一个带文字的命中片段，空白合并后截取前 `SNIPPET_CHARS` 个字符。
 //! - 日志中不记录查询文本；以图搜图的图片路径可能出现在读取失败的日志中，与索引文件的日志相同。
 use std::collections::VecDeque;
@@ -36,24 +37,41 @@ use crate::pipeline::{self, Pipeline, QueryEngine};
 /// 查询向量缓存的容量
 const CACHE_SIZE: usize = 256;
 
-/// 文字查询匹配度 90% 处比门槛高出的校准分数：门槛默认值 3.0 时为 4.2，即评测中混合库相关文件 z 的中位数 4.20
-/// （599 条）。50% 处就是门槛（参数 `min_relevance`），同一门槛也用来折叠结果
-const Z_SPAN_90: f64 = 1.2;
-/// 以图搜图与“找相似的”的两个锚点：z 按本次查询自身的分数分布换算，与文字查询不是同一尺度，也不折叠，所以不跟随门槛。
-/// 评测（混合库）中其他子集结果 z 的 90% 分位 2.54 处为 50%，第 1 名 z 的中位数 3.56 处为 90%
-const SIMILAR_Z_AT_50: f64 = 2.5;
-const SIMILAR_Z_AT_90: f64 = 3.6;
+/// 匹配度的换算锚点（见模块说明）
+struct Anchors {
+    /// 文字查询匹配度 90% 处比门槛高出的校准分数；50% 处就是门槛（参数 `min_relevance`），同一门槛也用来折叠结果
+    span_90: f64,
+    /// 以图搜图与“找相似的”50% 与 90% 处的 z：z 按本次查询自身的分数分布换算，与文字查询不是同一尺度，也不折叠，
+    /// 所以不跟随门槛
+    similar_50: f64,
+    similar_90: f64,
+}
+
+/// llama.cpp 与 GGUF：门槛默认值 3.0 时 90% 处为 4.2，即评测中混合库相关文件 z 的中位数 4.20（599 条）；
+/// 以图搜图：其他子集结果 z 的 90% 分位 2.54 处为 50%，第 1 名 z 的中位数 3.56 处为 90%
+const GGUF: Anchors = Anchors {
+    span_90: 1.2,
+    similar_50: 2.5,
+    similar_90: 3.6,
+};
+/// LiteRT-LM（图片 140 档，CPU）：混合库相关文件 z 的中位数 3.67（581 条）；以图搜图：其他子集结果 z 的 90% 分位 2.60、
+/// 第 1 名 z 的中位数 3.53
+const LITERT: Anchors = Anchors {
+    span_90: 0.7,
+    similar_50: 2.6,
+    similar_90: 3.5,
+};
 
 /// 搜索结果中正文片段的字符数
 const SNIPPET_CHARS: usize = 160;
 
 /// 匹配度百分比（见模块说明）；`similar` 为以图搜图与“找相似的”
-fn match_pct(z: Option<f32>, similar: bool, min_relevance: f64) -> Option<u8> {
+fn match_pct(z: Option<f32>, similar: bool, min_relevance: f64, a: &Anchors) -> Option<u8> {
     let z = f64::from(z?);
     let (at50, at90) = if similar {
-        (SIMILAR_Z_AT_50, SIMILAR_Z_AT_90)
+        (a.similar_50, a.similar_90)
     } else {
-        (min_relevance, min_relevance + Z_SPAN_90)
+        (min_relevance, min_relevance + a.span_90)
     };
     let pct = (50.0 + (z - at50) * 40.0 / (at90 - at50))
         .clamp(0.0, 100.0)
@@ -322,6 +340,10 @@ pub(super) fn respond(
         }
     });
     let min_relevance = params.min_relevance;
+    let anchors = match &vector {
+        Some((_, s)) if s.runtime == space::LITERT_RUNTIME => &LITERT,
+        _ => &GGUF,
+    };
     let coarse = vector
         .as_ref()
         .map(|(v, _)| rummage_embed::vector::truncate(v))
@@ -355,7 +377,7 @@ pub(super) fn respond(
             score: h.score,
             cosine: h.cosine,
             z: h.z,
-            match_pct: match_pct(h.z, by_example, min_relevance),
+            match_pct: match_pct(h.z, by_example, min_relevance, anchors),
             low_relevance: h.low,
             segments: h
                 .segments
@@ -478,25 +500,28 @@ mod tests {
     #[test]
     fn match_pct_follows_threshold() {
         // 门槛默认值处为 50%，相关文件的中位数处为 90%，之间线性换算
-        assert_eq!(match_pct(Some(3.0), false, 3.0), Some(50));
-        assert_eq!(match_pct(Some(4.2), false, 3.0), Some(90));
-        assert_eq!(match_pct(Some(3.6), false, 3.0), Some(70));
-        assert_eq!(match_pct(Some(2.7), false, 3.0), Some(40));
+        assert_eq!(match_pct(Some(3.0), false, 3.0, &GGUF), Some(50));
+        assert_eq!(match_pct(Some(4.2), false, 3.0, &GGUF), Some(90));
+        assert_eq!(match_pct(Some(3.6), false, 3.0, &GGUF), Some(70));
+        assert_eq!(match_pct(Some(2.7), false, 3.0, &GGUF), Some(40));
         // 50% 跟随门槛，90% 为门槛加 1.2
-        assert_eq!(match_pct(Some(3.5), false, 3.5), Some(50));
-        assert_eq!(match_pct(Some(4.7), false, 3.5), Some(90));
-        assert_eq!(match_pct(Some(3.0), false, 3.5), Some(33));
+        assert_eq!(match_pct(Some(3.5), false, 3.5, &GGUF), Some(50));
+        assert_eq!(match_pct(Some(4.7), false, 3.5, &GGUF), Some(90));
+        assert_eq!(match_pct(Some(3.0), false, 3.5, &GGUF), Some(33));
         // 略低于门槛的已被折叠，不显示 50%
-        assert_eq!(match_pct(Some(2.99), false, 3.0), Some(49));
+        assert_eq!(match_pct(Some(2.99), false, 3.0, &GGUF), Some(49));
         // 以图搜图与找相似的用另一组锚点，不跟随门槛
-        assert_eq!(match_pct(Some(2.5), true, 3.5), Some(50));
-        assert_eq!(match_pct(Some(3.6), true, 3.5), Some(90));
-        assert_eq!(match_pct(Some(2.49), true, 3.5), Some(49));
+        assert_eq!(match_pct(Some(2.5), true, 3.5, &GGUF), Some(50));
+        assert_eq!(match_pct(Some(3.6), true, 3.5, &GGUF), Some(90));
+        assert_eq!(match_pct(Some(2.49), true, 3.5, &GGUF), Some(49));
         // 限制在 0–100%
-        assert_eq!(match_pct(Some(5.0), false, 3.0), Some(100));
-        assert_eq!(match_pct(Some(1.0), false, 3.0), Some(0));
+        assert_eq!(match_pct(Some(5.0), false, 3.0, &GGUF), Some(100));
+        assert_eq!(match_pct(Some(1.0), false, 3.0, &GGUF), Some(0));
         // 没有校准分数时为空
-        assert_eq!(match_pct(None, false, 3.0), None);
+        assert_eq!(match_pct(None, false, 3.0, &GGUF), None);
+        // LiteRT 空间：90% 处为门槛加 0.7，以图搜图锚点为 2.6 与 3.5
+        assert_eq!(match_pct(Some(3.7), false, 3.0, &LITERT), Some(90));
+        assert_eq!(match_pct(Some(3.5), true, 3.0, &LITERT), Some(90));
     }
 
     #[test]

@@ -6,6 +6,9 @@
 //! - 模型文件的哈希用钉定版本的已知值，启动时只核对文件大小，不重新计算 800 MB 的哈希；
 //!   完整哈希由模型下载与导入保证（下载、导入时逐个校验 SHA-256）。
 //! - 修改预处理逻辑时提升对应模态的预处理参数版本，使旧向量被识别为需要重建。
+//! - 两套运行库各有自己的空间（`SpaceConfig::current` 为 llama.cpp 与 GGUF，`SpaceConfig::litert` 为 LiteRT-LM 与
+//!   `.litertlm`）：权重不同（LiteRT 为 QAT 量化的另一套），向量互不兼容。LiteRT 只有一个模型文件，文本与媒体都取它的哈希；
+//!   它的图像在我们这边缩放后由引擎再解码、预处理，图像预处理版本另带运行库标记（`LITERT_IMAGE_PREPROCESS`）。
 
 use std::fmt;
 use std::path::Path;
@@ -38,7 +41,8 @@ pub fn text_version(chunk_tokens: usize, overlap_pct: usize, min_tokens: usize) 
 /// 修改 `rummage_media::prepare` 的行为（解码、合成白底、方向、尺寸计算、缩放）时必须提升它。
 pub const IMAGE_PREPROCESS: &str = "image-v1";
 
-/// 图像向量的预处理参数版本，含视觉 token 档位，如 `image-v1-t140`；也写入 `vectors.params_version`。
+/// GGUF 图像向量的预处理参数版本，含视觉 token 档位，如 `image-v1-t140`；也写入 `vectors.params_version`。
+/// 按当前运行库取用 `SpaceConfig::image_version`
 pub fn image_preprocess(tier: u32) -> String {
     format!("{IMAGE_PREPROCESS}-t{tier}")
 }
@@ -48,12 +52,14 @@ pub fn image_preprocess(tier: u32) -> String {
 /// 普通比例的图片与长图的整图向量都不受切片影响，不必重算。修改 `rummage_media::slices` / `crop` 时必须提升它。
 pub const IMAGE_SLICE: &str = "slice-v1";
 
-/// 长图切片向量的预处理参数版本：切片档位的图像版本加切分参数，如 `image-v1-t560-slice-v1-r2.5-n12`
+/// GGUF 长图切片向量的预处理参数版本：切片档位的图像版本加切分参数，如 `image-v1-t560-slice-v1-r2.5-n12`。
+/// 按当前运行库取用 `SpaceConfig::slice_version`
 pub fn image_slice_preprocess(tier: u32, max_ratio: f64, max_slices: u32) -> String {
-    format!(
-        "{}-{IMAGE_SLICE}-r{max_ratio}-n{max_slices}",
-        image_preprocess(tier)
-    )
+    slice_version(&image_preprocess(tier), max_ratio, max_slices)
+}
+
+fn slice_version(image: &str, max_ratio: f64, max_slices: u32) -> String {
+    format!("{image}-{IMAGE_SLICE}-r{max_ratio}-n{max_slices}")
 }
 
 /// 音频预处理参数版本。修改 `rummage_media::audio` 的解码（重采样、混音）或切段、静音判定的规则时必须提升它
@@ -145,6 +151,35 @@ impl ModelFile {
     }
 }
 
+/// LiteRT-LM 运行库：PyPI `litert-lm-api==0.18.0` 轮子中的 C 接口库，只用 CPU 后端
+pub const LITERT_RUNTIME: &str = "litert-lm 0.18.0";
+/// 权重为模型文件自带的 QAT 量化，激活显式设为 FLOAT32
+pub const LITERT_PRECISION: &str = "qat, activation=f32";
+/// LiteRT 的图像预处理版本：在 `IMAGE_PREPROCESS` 的缩放之后再缩放到引擎预处理的不动点尺寸、无损编码为 PNG
+/// （`litert::fixed_size`）。修改这一步时必须提升它
+pub const LITERT_IMAGE_PREPROCESS: &str = "image-v1-litert-v1";
+
+/// LiteRT 模型的仓库与钉定的提交（只用通用版，不用芯片专用版）
+pub const LITERT_REPO: &str = "litert-community/embeddinggemma-2-740m-litert-lm";
+pub const LITERT_COMMIT: &str = "24d962e906c7d332c6428e71c9676855024569e2";
+/// 分词器（数切片长度用）取自主模型仓库
+pub const TOKENIZER_REPO: &str = "google/embeddinggemma-2";
+pub const TOKENIZER_COMMIT: &str = "914f7f89142e33e77833254d9c9b90c3cef7303b";
+/// LiteRT 模型与分词器在 `<数据目录>\models\` 下的子目录
+pub const LITERT_MODEL_DIR: &str = "embeddinggemma-2-litert";
+
+pub const LITERT_MODEL: ModelFile = ModelFile {
+    name: "embeddinggemma-2-740m.litertlm",
+    sha256: "e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c",
+    size: 484_622_336,
+};
+
+pub const TOKENIZER: ModelFile = ModelFile {
+    name: "tokenizer.json",
+    sha256: "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4",
+    size: 32_170_510,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Backend {
@@ -181,6 +216,8 @@ pub struct SpaceConfig {
     pub backend: Backend,
     pub precision: String,
     pub prefix_scheme: String,
+    /// 图像预处理版本的前缀（`IMAGE_PREPROCESS` 或 `LITERT_IMAGE_PREPROCESS`），后接档位
+    pub image_preprocess: String,
 }
 
 impl SpaceConfig {
@@ -194,7 +231,32 @@ impl SpaceConfig {
             backend,
             precision: PRECISION.to_string(),
             prefix_scheme: PREFIX_SCHEME.to_string(),
+            image_preprocess: IMAGE_PREPROCESS.to_string(),
         }
+    }
+
+    /// LiteRT-LM 的配置（只有 CPU 后端）
+    pub fn litert() -> Self {
+        SpaceConfig {
+            family: FAMILY.to_string(),
+            model_sha256: LITERT_MODEL.sha256.to_string(),
+            mmproj_sha256: LITERT_MODEL.sha256.to_string(),
+            runtime: LITERT_RUNTIME.to_string(),
+            backend: Backend::Cpu,
+            precision: LITERT_PRECISION.to_string(),
+            prefix_scheme: PREFIX_SCHEME.to_string(),
+            image_preprocess: LITERT_IMAGE_PREPROCESS.to_string(),
+        }
+    }
+
+    /// 图像向量的预处理参数版本，含视觉 token 档位，如 `image-v1-t140`；也写入 `vectors.params_version`
+    pub fn image_version(&self, tier: u32) -> String {
+        format!("{}-t{tier}", self.image_preprocess)
+    }
+
+    /// 长图切片向量的预处理参数版本，见 `image_slice_preprocess`
+    pub fn slice_version(&self, tier: u32, max_ratio: f64, max_slices: u32) -> String {
+        slice_version(&self.image_version(tier), max_ratio, max_slices)
     }
 
     pub fn text(&self) -> SpaceId {
@@ -205,7 +267,7 @@ impl SpaceConfig {
     pub fn image(&self, tier: u32) -> SpaceId {
         self.id(
             &format!("{}+{}", self.model_sha256, self.mmproj_sha256),
-            &image_preprocess(tier),
+            &self.image_version(tier),
         )
     }
 
@@ -280,6 +342,24 @@ mod tests {
         assert_eq!(
             video_av_preprocess(6, 0, 6, 140, 1152),
             "video-v2-w6-o0-f6-t140-av-m1152"
+        );
+        assert_eq!(cfg.image_version(140), image_preprocess(140));
+        assert_eq!(
+            cfg.slice_version(560, 2.5, 12),
+            image_slice_preprocess(560, 2.5, 12)
+        );
+    }
+
+    #[test]
+    fn litert_spaces_differ() {
+        let (gguf, litert) = (SpaceConfig::current(Backend::Cpu), SpaceConfig::litert());
+        assert_ne!(gguf.text(), litert.text());
+        assert_ne!(gguf.image(140), litert.image(140));
+        assert_ne!(gguf.media("a"), litert.media("a"));
+        assert_eq!(litert.image_version(140), "image-v1-litert-v1-t140");
+        assert_eq!(
+            litert.slice_version(140, 2.5, 12),
+            "image-v1-litert-v1-t140-slice-v1-r2.5-n12"
         );
     }
 

@@ -1,4 +1,6 @@
 //! 索引流水线的配置：运行库与模型的位置（`Config`）、创建推理后端的方式（`Factory`）与其他选项（`Options`）。
+//! 推理后端默认为 llama.cpp 推理子进程（`Options::local`）；评测可改用 LiteRT-LM（`Options::litert`，只用 CPU），
+//! 向量空间与所需的模型文件随之改变（`Options::space`、`Options::model_files`）。
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -6,9 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rummage_embed::space::ModelFile;
+use rummage_embed::space::{self, ModelFile};
 use rummage_embed::{
-    EmbeddingBackend, Error as EmbedError, Gpu, Limits, LocalBackend, WorkerSpec, selftest,
+    Backend, EmbeddingBackend, Error as EmbedError, Gpu, Limits, LiteRtBackend, LiteRtSpec,
+    LocalBackend, SpaceConfig, WorkerSpec, selftest,
 };
 use rummage_proto::ParamValue;
 
@@ -94,6 +97,8 @@ pub struct Options {
     pub file_timeout: Option<Duration>,
     /// 见 `Config::gpus`
     pub gpus: fn() -> Vec<String>,
+    /// 推理后端为 LiteRT-LM（`Options::litert`）：`model` 与 `mmproj` 都是 `.litertlm` 文件
+    pub litert: bool,
 }
 
 impl Options {
@@ -135,6 +140,41 @@ impl Options {
             }),
             file_timeout: None,
             gpus,
+            litert: false,
         }
+    }
+
+    /// LiteRT-LM 的 CPU 后端（评测用）：`cfg.model` 与 `cfg.mmproj` 都应是 `.litertlm` 文件，运行库在 `runtime_dir`，
+    /// 分词器为 `tokenizer`。不使用显卡，调用方应指定只用 CPU
+    pub fn litert(cfg: Config, runtime_dir: PathBuf, tokenizer: PathBuf) -> Options {
+        let model = cfg.model.clone();
+        let mut opts = Options::local(cfg);
+        opts.factory = Box::new(move |spec: &EngineSpec| {
+            let backend = LiteRtBackend::new(&LiteRtSpec {
+                runtime_dir: runtime_dir.clone(),
+                model: model.clone(),
+                tokenizer: tokenizer.clone(),
+                threads: spec.threads,
+            })?;
+            Ok(Arc::new(backend) as Arc<dyn EmbeddingBackend>)
+        });
+        opts.litert = true;
+        opts
+    }
+
+    /// 后端 `backend` 的向量空间配置
+    pub fn space(&self, backend: Backend) -> SpaceConfig {
+        if self.litert {
+            return SpaceConfig::litert();
+        }
+        SpaceConfig::current(backend)
+    }
+
+    /// 主模型与多模态模型（`model`、`mmproj`）应有的文件
+    pub fn model_files(&self) -> (&'static ModelFile, &'static ModelFile) {
+        if self.litert {
+            return (&space::LITERT_MODEL, &space::LITERT_MODEL);
+        }
+        (&space::MODEL, &space::MMPROJ)
     }
 }

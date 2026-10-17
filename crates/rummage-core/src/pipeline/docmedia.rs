@@ -25,7 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rummage_embed::Input;
+use rummage_embed::{Input, SpaceConfig};
 use rummage_extract::media::{Embedded, Loaded, MEDIA_EXTS, MediaKind, MediaOpts, Source};
 use rummage_extract::read_bytes;
 use rummage_index::{Space, ensure_local};
@@ -52,11 +52,12 @@ pub(super) struct Media {
 /// 内嵌媒体标记应含的各项：过滤参数的版本与开启的各模态的参数版本（`rummage_index::Wanted::doc_media`）
 pub(super) fn tokens(
     values: &BTreeMap<String, ParamValue>,
+    cfg: &SpaceConfig,
     images: bool,
     audio: bool,
     video: bool,
 ) -> Vec<String> {
-    let w = rebuild::wanted(values);
+    let w = rebuild::wanted(values, cfg);
     let mut out = vec![format!(
         "docmedia-v1-p{}-n{}-r{}-mp{}-mb{}",
         int(values, "embed_min_px"),
@@ -112,7 +113,13 @@ pub(super) struct Collected {
 /// 列出并解码文档的内嵌媒体（从上一批的断点继续），见模块说明
 pub(super) fn collect(shared: &Arc<Shared>, task: &Task, clock: &Clock) -> Collected {
     let (job, engine) = (&task.job, &task.engine);
-    let tokens = tokens(&task.params, engine.images, engine.audio, engine.video);
+    let tokens = tokens(
+        &task.params,
+        &engine.cfg,
+        engine.images,
+        engine.audio,
+        engine.video,
+    );
     let done = |media: Vec<Media>, resume: bool| Collected {
         media,
         meta_json: Some(serde_json::json!({ "media": tokens }).to_string()),

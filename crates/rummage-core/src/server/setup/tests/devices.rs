@@ -259,6 +259,7 @@ pub(super) fn start_with_pipeline(dir: &Path) -> Arc<State> {
         driver_events: Box::new(|_| unreachable!("没有推理后端，不会失效")),
         file_timeout: None,
         gpus: fake_gpus,
+        litert: false,
     });
     state.configure(c);
     state

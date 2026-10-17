@@ -17,6 +17,8 @@
 //! 按与种子同一子集（视为相关）、其他子集（视为不相关）分别统计 z 的分位数，供匹配度的换算锚点参考。
 //! 设备（`--device`）：默认按数据目录中的自检记录选择（与核心相同）；`cpu` 只用 CPU；其他值在临时数据目录中只对描述
 //! 包含该字符串的显卡和 CPU 重新自检，这块显卡通过检测就指定用它（CPU 更快也不改用）。
+//! 运行库（`--runtime`）：默认 `llama`（llama.cpp 与 GGUF）；`litert` 改用 LiteRT-LM 的 CPU 后端与 `.litertlm` 模型
+//! （`pipeline::Options::litert`），只用 CPU、忽略 `--device`，图片档位须为 70 或 140（如 `--param image_tokens=140`）。
 //! 无界面运行：直接在本进程中创建核心的 `State`，不开管道；暂停条件（全屏、电池）在临时数据库中关闭，不让检测打断评测。
 //! 本模块的 `Env`、`start`、`wait_indexed` 也供 `bench` 使用。
 mod set;
@@ -32,7 +34,7 @@ use std::time::{Duration, Instant};
 use rummage_core::State;
 use rummage_core::pipeline::{Config, Options};
 use rummage_embed::selftest::{self, Candidate, Modality};
-use rummage_embed::space::{MMPROJ, MODEL, MODEL_DIR};
+use rummage_embed::space::{LITERT_MODEL, LITERT_MODEL_DIR, MMPROJ, MODEL, MODEL_DIR, TOKENIZER};
 use rummage_embed::{Backend, Limits};
 use rummage_index::{Db, kind_of, normalize_root, wants_job};
 use rummage_proto::{IndexState, IndexStatus, ParamValue, Reply, Request, SearchHit};
@@ -49,11 +51,18 @@ pub struct Env {
     pub ffmpeg: PathBuf,
     /// 读取模型与自检记录的数据目录
     pub data_dir: PathBuf,
+    /// LiteRT-LM 运行库（`litert-lm.dll`）所在的目录
+    pub litert_runtime: PathBuf,
 }
 
 impl Env {
     pub fn models(&self) -> PathBuf {
         self.data_dir.join("models").join(MODEL_DIR)
+    }
+
+    /// LiteRT 模型与分词器所在的目录
+    pub fn litert_models(&self) -> PathBuf {
+        self.data_dir.join("models").join(LITERT_MODEL_DIR)
     }
 
     /// 核心在临时数据目录 `work` 中运行时的配置：模型从 `data_dir` 读取，自检记录写在 `work`
@@ -101,6 +110,8 @@ pub struct Args {
     pub subsets: Vec<String>,
     /// 覆盖参数表默认值的参数
     pub params: Vec<(String, ParamValue)>,
+    /// 用 LiteRT-LM 的 CPU 后端（见模块说明）
+    pub litert: bool,
 }
 
 /// 新建工作目录；已存在时报错，避免结束时删掉别的内容
@@ -233,7 +244,8 @@ fn request(state: &Arc<State>, body: Request) -> Result<Reply, String> {
 }
 
 /// 在数据目录 `data` 中建立核心状态：放入自检记录 `record`、加入根目录、关闭暂停条件并设置 `params`，
-/// 指定设备 `preferred`（`prepare_device` 的结果），然后启动流水线。扫描线程由调用方在需要时启动（`start_scanner`）
+/// 指定设备 `preferred`（`prepare_device` 的结果），然后启动流水线（`litert` 时用 LiteRT-LM 的 CPU 后端）。
+/// 扫描线程由调用方在需要时启动（`start_scanner`）
 pub fn start(
     env: &Env,
     preferred: Option<&str>,
@@ -241,6 +253,7 @@ pub fn start(
     data: &Path,
     roots: &[PathBuf],
     params: &[(String, ParamValue)],
+    litert: bool,
 ) -> Result<Arc<State>, String> {
     place_record(record, data)?;
     let state = State::new(String::new(), Db::open(data));
@@ -267,7 +280,11 @@ pub fn start(
         )?;
     }
     // 指定显卡时要核对自检记录，先交给核心模型与记录的位置
-    let cfg = env.config(data);
+    let mut cfg = env.config(data);
+    if litert {
+        cfg.model = env.litert_models().join(LITERT_MODEL.name);
+        cfg.mmproj = cfg.model.clone();
+    }
     state.configure(cfg.clone());
     if let Some(device) = preferred {
         request(
@@ -277,7 +294,12 @@ pub fn start(
             },
         )?;
     }
-    state.start_pipeline(Options::local(cfg));
+    state.start_pipeline(if litert {
+        let tokenizer = env.litert_models().join(TOKENIZER.name);
+        Options::litert(cfg, env.litert_runtime.clone(), tokenizer)
+    } else {
+        Options::local(cfg)
+    });
     Ok(state)
 }
 
@@ -457,7 +479,12 @@ pub fn run(env: &Env, args: &Args) -> Result<(), String> {
     new_work(&args.work)?;
     let res = (|| {
         let record = args.work.join("selftest.json");
-        let preferred = prepare_device(env, &args.device, &record)?;
+        let preferred = if args.litert {
+            emitln!("运行库：LiteRT-LM（只用 CPU）");
+            Some(rummage_proto::CPU_DEVICE.to_string())
+        } else {
+            prepare_device(env, &args.device, &record)?
+        };
         let roots: Vec<PathBuf> = subsets.iter().map(|s| s.dir.clone()).collect();
         let state = start(
             env,
@@ -466,6 +493,7 @@ pub fn run(env: &Env, args: &Args) -> Result<(), String> {
             &args.work.join("data"),
             &roots,
             &args.params,
+            args.litert,
         )?;
         let res = evaluate(&state, &subsets, &queries, args);
         release(state);

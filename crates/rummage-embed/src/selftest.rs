@@ -54,7 +54,7 @@
 
 mod cache;
 mod candidate;
-mod golden;
+pub(crate) mod golden;
 mod speed;
 
 use std::collections::BTreeMap;

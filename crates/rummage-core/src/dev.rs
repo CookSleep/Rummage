@@ -53,6 +53,9 @@ fn dev_env(data_dir: Option<PathBuf>) -> Result<eval::Env, String> {
         data_dir: data_dir.unwrap_or_else(|| {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/dev-data")
         }),
+        // 由 scripts/fetch-litert.ps1 取出，只用于评测
+        litert_runtime: Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.cache/third-party/litert-lm/0.18.0/windows_x86_64"),
     })
 }
 
@@ -99,17 +102,25 @@ fn parse_eval_args(
     let mut out = None;
     let mut subsets = Vec::new();
     let mut values = Vec::new();
+    let mut litert = false;
     for (flag, value) in d.rest {
         let value = value.to_string_lossy().into_owned();
         match flag.as_str() {
             "--out" => out = Some(PathBuf::from(value)),
             "--subset" => subsets.push(value),
             "--param" => values.push(parse_param(&value)?),
+            "--runtime" => {
+                litert = match value.as_str() {
+                    "llama" => false,
+                    "litert" => true,
+                    _ => return Err(format!("--runtime 只能是 llama 或 litert，不是 {value}。")),
+                }
+            }
             _ => return Err(format!("无法识别的参数：{flag}。")),
         }
     }
     let [set]: [OsString; 1] = d.positional.try_into().map_err(|_| {
-        "用法：rummage-core eval <评测集目录> [--out <CSV>] [--subset <子集>]… [--param <名称>=<值>]… [--device cpu|<显卡名称>] [--work-dir <目录>] [--data-dir <目录>]"
+        "用法：rummage-core eval <评测集目录> [--out <CSV>] [--subset <子集>]… [--param <名称>=<值>]… [--device cpu|<显卡名称>] [--runtime llama|litert] [--work-dir <目录>] [--data-dir <目录>]"
     })?;
     let args = eval::Args {
         set: PathBuf::from(set),
@@ -118,6 +129,7 @@ fn parse_eval_args(
         work: d.work,
         subsets,
         params: values,
+        litert,
     };
     Ok((d.data_dir, args))
 }

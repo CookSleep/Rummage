@@ -61,7 +61,7 @@ pub(crate) const VK_VISIBLE_ENV: &CStr = c"GGML_VK_VISIBLE_DEVICES";
 /// 错误信息中附带的 stderr 行数。
 const ERROR_LINES: usize = 5;
 /// 单个音频输入的采样数上限：模型最长 30 秒
-const MAX_AUDIO_SAMPLES: usize =
+pub(crate) const MAX_AUDIO_SAMPLES: usize =
     (rummage_media::audio::MAX_SEGMENT_S * rummage_media::audio::SAMPLE_RATE) as usize;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -192,7 +192,7 @@ fn retry_mismatch(mut spawn: impl FnMut() -> Result<(), Error>) -> Result<(), Er
 }
 
 /// 文本输入加上任务前缀；图像、音频与视频返回 `None`。
-fn prefixed(input: &Input) -> Option<String> {
+pub(crate) fn prefixed(input: &Input) -> Option<String> {
     Some(match input {
         Input::Query(q) => prefix::query(q),
         Input::Document { title, text } => prefix::document(title.as_deref(), text),

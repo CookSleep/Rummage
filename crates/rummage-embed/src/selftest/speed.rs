@@ -38,7 +38,7 @@ pub(super) enum Plan {
 }
 
 /// 测速的安排，所有候选设备相同
-pub(super) struct SpeedPlan {
+pub(crate) struct SpeedPlan {
     /// 黄金文本样本的正文，拼接到 `chunk_tokens` 长
     pub(super) text: String,
     pub(super) chunk_tokens: usize,
