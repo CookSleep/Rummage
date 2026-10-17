@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import type { CoreStatus, StorageInfo } from '../../types'
+import type { CoreStatus, ParamDef, StorageInfo } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { formatSize } from '../../lib/format'
 import { isAndroid } from '../../lib/platform'
@@ -12,6 +12,7 @@ import LoadError from '../LoadError'
 import { HoverTip } from '../Tip'
 import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_DANGER_BUTTON } from '../onboarding/styles'
 import PathText from '../PathText'
+import ConfigSection from './ConfigSection'
 import { ROW_DESC, SECTION_NOTICE, SECTION_TITLE } from './styles'
 
 /** 占用的各部分，固定顺序；颜色在浅色与深色模式下都取柔和的中间色 */
@@ -26,12 +27,12 @@ const PARTS: { key: keyof Omit<StorageInfo, 'dataDir'>; label: string; color: st
 const PLACEHOLDER = 'animate-pulse rounded bg-black/[0.06] dark:bg-white/[0.08]'
 
 /**
- * “数据”页：数据目录（打开、更改位置）、各部分的空间占用与清空索引。
+ * “数据”页：数据目录（打开、更改位置）、各部分的空间占用、配置的导出与导入（`ConfigSection`）与清空索引。
  * 更改位置的目录由 Rust 侧的对话框选择，确认后重启，下次启动时迁移并显示进度。
- * 只有清空索引要用后台服务，不可用（`offline`）时那一分区只显示它的状态。
+ * 配置与清空索引要用后台服务，不可用（`offline`）时这两个分区只显示它的状态。
  * Android 上数据目录是应用私有目录，其他应用打不开，也不能更改，不显示这两个按钮
  */
-export default function DataTab({ offline, coreStatus }: { offline: boolean; coreStatus: CoreStatus }) {
+export default function DataTab({ defs, offline, coreStatus }: { defs: ParamDef[]; offline: boolean; coreStatus: CoreStatus }) {
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [loadError, setLoadError] = useState('')
   const [confirmClear, setConfirmClear] = useState(false)
@@ -149,6 +150,8 @@ export default function DataTab({ offline, coreStatus }: { offline: boolean; cor
           ))}
         </div>
       </section>
+
+      <ConfigSection defs={defs} offline={offline} coreStatus={coreStatus} />
 
       <section className="space-y-3">
         <h4 className={SECTION_TITLE}>索引</h4>

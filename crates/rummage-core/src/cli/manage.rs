@@ -203,6 +203,8 @@ pub fn folders_text(kinds: &[&str], roots: &[RootInfo], index: Option<&IndexStat
     for r in roots {
         let note = if r.offline {
             "设备未连接".to_string()
+        } else if r.scanning {
+            "正在统计文件".to_string()
         } else {
             format!("{} 个文件", r.files)
         };

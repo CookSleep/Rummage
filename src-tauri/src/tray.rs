@@ -12,6 +12,7 @@ use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::progress::{next_base, round};
 use crate::{core, pause, platform};
 
 const TRAY_ID: &str = "main";
@@ -295,20 +296,6 @@ fn manual_text(until: Option<[u16; 6]>, today: [u16; 6]) -> String {
     format!("已暂停到 {}月{}日 {clock}", t[1], t[2])
 }
 
-/// 本轮的基数（本轮开始时已处理的文件数），与界面 `IndexHint` 的 `nextBase` 一致：有待处理的文件时才有，
-/// 没有时从当前的已处理数算起。失败数减少（重试了失败的文件）时，基数减去减少的量：已处理数不倒退，
-/// 重试的文件计入本轮的总数
-fn next_base(base: Option<u64>, last_failed: Option<u64>, s: &IndexStatus) -> Option<u64> {
-    if s.pending == 0 {
-        return None;
-    }
-    let Some(b) = base else {
-        return Some(s.done + s.failed);
-    };
-    let retried = last_failed.map_or(0, |f| f.saturating_sub(s.failed));
-    Some(b.saturating_sub(retried))
-}
-
 /// 与界面的索引提示一样，有待处理的文件时显示本轮的进度；`base` 为本轮开始时已处理的文件数
 fn tooltip(status: Option<&IndexStatus>, base: u64) -> String {
     let Some(s) = status
@@ -321,11 +308,8 @@ fn tooltip(status: Option<&IndexStatus>, base: u64) -> String {
     } else {
         "正在建立索引"
     };
-    format!(
-        "Rummage：{what} {} / {}",
-        thousands((s.done + s.failed).saturating_sub(base)),
-        thousands(s.total.saturating_sub(base))
-    )
+    let (done, total) = round(s, base);
+    format!("Rummage：{what} {} / {}", thousands(done), thousands(total))
 }
 
 fn thousands(n: u64) -> String {
@@ -386,33 +370,6 @@ mod tests {
             ..status(IndexState::Idle, None)
         };
         assert_eq!(tooltip(Some(&done), 0), "Rummage");
-    }
-
-    #[test]
-    fn retry_keeps_progress_and_extends_round() {
-        let s = status(IndexState::Running, None);
-        // 本轮开始：从当前已处理数算起
-        let base = next_base(None, None, &s);
-        assert_eq!(base, Some(1234));
-        // 处理中途重试了 10 个失败的文件：已处理数不倒退，总数加上它们
-        let retried = IndexStatus {
-            failed: 24,
-            pending: 3771,
-            done: 1205,
-            ..s.clone()
-        };
-        let base = next_base(base, Some(34), &retried);
-        assert_eq!(base, Some(1224));
-        assert_eq!(
-            tooltip(Some(&retried), base.unwrap()),
-            "Rummage：正在建立索引 5 / 3,776"
-        );
-        // 处理完清掉
-        let done = IndexStatus {
-            pending: 0,
-            ..retried
-        };
-        assert_eq!(next_base(base, Some(24), &done), None);
     }
 
     #[test]

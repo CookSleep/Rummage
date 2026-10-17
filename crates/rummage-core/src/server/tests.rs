@@ -182,6 +182,49 @@ fn add_root_scans() {
     }
 }
 
+/// 添加后到首次扫完之前算统计中，结束事件发出时已不算
+#[test]
+fn add_root_counting() {
+    let dir = crate::test_dir();
+    let docs = crate::test_dir();
+    std::fs::write(docs.path().join("a.txt"), b"x").unwrap();
+    let state = open(dir.path());
+    // 代替扫描线程接收任务，由测试决定何时执行
+    let (tx, jobs) = std_mpsc::channel();
+    assert!(state.scan_tx.set(tx).is_ok());
+    let body = Request::AddRoot {
+        path: docs.path().to_string_lossy().into_owned(),
+        excludes: Vec::new(),
+    };
+    let Ok(Reply::Root { root }) = respond(body, &state) else {
+        panic!("AddRoot 应回复新建的文件夹");
+    };
+    assert!(root.scanning);
+    assert!(roots(&state)[0].scanning);
+    let Ok(Reply::Estimate(e)) = respond(Request::Estimate, &state) else {
+        panic!("应返回预估");
+    };
+    assert!(e.roots[0].scanning);
+
+    let mut rx = state.events.subscribe();
+    scan::scan_job(
+        &Arc::downgrade(&state),
+        &state.events,
+        jobs.try_recv().unwrap(),
+    );
+    assert_eq!(wait_done(&mut rx).0, root.id);
+    let list = roots(&state);
+    assert_eq!((list[0].files, list[0].scanning), (1, false));
+    let Ok(Reply::Estimate(e)) = respond(Request::Estimate, &state) else {
+        panic!("应返回预估");
+    };
+    assert!(!e.roots[0].scanning);
+
+    // 其他重新对账不算统计中
+    state.queue_scan(ScanJob::All);
+    assert!(!roots(&state)[0].scanning);
+}
+
 #[test]
 fn add_root_with_excludes() {
     let dir = crate::test_dir();

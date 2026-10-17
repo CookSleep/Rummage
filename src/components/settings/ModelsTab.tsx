@@ -31,6 +31,7 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<{ mmproj: boolean } | null>(null)
   // 在这一页看到过进行中的校验，结束时显示结果；没有看到 running 的（如请求失败）不显示
   const verifying = useRef(false)
+  const importing = useRef(false)
   const task = setup.task
   const running = task?.state === 'running'
 
@@ -39,14 +40,17 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
   }, [running, onAct])
 
   useEffect(() => {
-    if (task?.kind !== 'verify') return
+    if (!task) return
     if (task.state === 'running') {
-      verifying.current = true
+      verifying.current = task.kind === 'verify'
+      importing.current = task.kind === 'import'
       return
     }
-    if (!verifying.current) return
+    if (verifying.current && task.message) showToast(task.message, task.state === 'done' ? 'success' : task.state === 'failed' ? 'error' : 'info')
+    // 取消导入同样只用胶囊通知说明
+    if (importing.current && task.state === 'cancelled' && task.message) showToast(task.message)
     verifying.current = false
-    if (task.message) showToast(task.message, task.state === 'done' ? 'success' : task.state === 'failed' ? 'error' : 'info')
+    importing.current = false
   }, [task])
 
   // `import_models` 还没返回
@@ -140,8 +144,8 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
             )}
           </div>
         )}
-        {/* 暂停的下载在行中显示已下载的大小，不再显示“已取消”；下载、导入成功时行中的状态已说明结果；校验的结果用胶囊通知显示 */}
-        {acted && !running && task?.message && task.kind !== 'verify' && !(task.kind === 'download' && task.state === 'cancelled') && !((task.kind === 'download' || task.kind === 'import') && task.state === 'done') && (
+        {/* 暂停的下载在行中显示已下载的大小；下载、导入成功时行中的状态已说明结果；校验的结果与取消导入用胶囊通知显示 */}
+        {acted && !running && task?.message && task.kind !== 'verify' && task.state !== 'cancelled' && !((task.kind === 'download' || task.kind === 'import') && task.state === 'done') && (
           <p data-selectable-text className={`text-xs ${taskMessageClass(task)}`}>
             {task.message}
           </p>

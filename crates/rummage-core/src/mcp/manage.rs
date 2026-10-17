@@ -266,6 +266,8 @@ pub fn folders_text(kinds: &[&str], roots: &[RootInfo], index: Option<&IndexStat
     for r in roots {
         if r.offline {
             let _ = write!(out, "\n  {} (device not connected)", r.path);
+        } else if r.scanning {
+            let _ = write!(out, "\n  {} (still counting files)", r.path);
         } else {
             let _ = write!(out, "\n  {} ({} files)", r.path, r.files);
         }

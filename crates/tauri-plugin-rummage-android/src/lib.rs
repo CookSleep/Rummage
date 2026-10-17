@@ -3,6 +3,7 @@
 //! - 读取被索引的文件靠“所有文件访问”权限（`MANAGE_EXTERNAL_STORAGE`），选择的文件夹换算成真实路径交给核心，
 //!   不持有文档提供者的 URI 授权；换算不了的位置（网盘等其他提供者）报告为不支持。
 //! - 选择文件时能换算成可读的真实路径就直接用，否则复制到调用方给的目录（同名加序号），由调用方用完后删除。
+//!   保存文件（导出配置、诊断包）先由调用方生成到应用私有目录，再用系统的“创建文件”选择位置，由 Kotlin 侧复制过去。
 //! - 前台服务（`mediaProcessing`）与常驻通知由 Rust 侧按索引进度启停；应用回到前台、后台额度用完（`onTimeout`）、
 //!   服务没能进入前台等情况由 `next_event` 报告（Kotlin 侧排队，Rust 侧循环等待）。
 //! - 电池优化白名单（`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`）与通知权限（Android 13 起的 `POST_NOTIFICATIONS`）。
@@ -55,6 +56,11 @@ struct Opened {
     opened: bool,
 }
 
+#[derive(Deserialize)]
+struct Saved {
+    name: String,
+}
+
 /// 安全区四边的宽度（CSS 像素）
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Insets {
@@ -91,6 +97,14 @@ struct Progress<'a> {
     done: u64,
     total: u64,
     note: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveFile<'a> {
+    name: &'a str,
+    mime_type: &'a str,
+    path: &'a Path,
 }
 
 #[derive(Serialize)]
@@ -137,6 +151,23 @@ impl<R: Runtime> Android<R> {
         };
         let res: Option<Files> = self.0.run_mobile_plugin_async("pickFiles", args).await?;
         Ok(res.map(|f| f.paths))
+    }
+
+    /// 用系统的“创建文件”（SAF）选择保存位置，把应用私有目录中的 `path` 复制过去，`name` 为建议的文件名；
+    /// 返回所选文档的显示名，取消时为 `None`
+    pub async fn save_file(
+        &self,
+        name: &str,
+        mime_type: &str,
+        path: &Path,
+    ) -> Result<Option<String>, Error> {
+        let args = SaveFile {
+            name,
+            mime_type,
+            path,
+        };
+        let res: Option<Saved> = self.0.run_mobile_plugin_async("saveFile", args).await?;
+        Ok(res.map(|s| s.name))
     }
 
     /// 主存储的根目录（`Environment.getExternalStorageDirectory()`）

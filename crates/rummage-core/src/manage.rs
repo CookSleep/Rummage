@@ -241,6 +241,7 @@ mod tests {
             offline: false,
             files: 0,
             excludes: Vec::new(),
+            scanning: false,
         };
         let roots = [root(1, r"D:\照片"), root(2, r"E:\Docs")];
         assert_eq!(find_root(&roots, r"e:/docs\").map(|r| r.id), Some(2));

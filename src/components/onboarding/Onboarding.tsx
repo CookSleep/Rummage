@@ -5,8 +5,11 @@ import { errorMessage } from '../../lib/errors'
 import { KIND_PARAMS, type Kinds, kindsOf, needsMmproj } from '../../lib/kinds'
 import { isAndroid } from '../../lib/platform'
 import { useBackLayer } from '../../hooks/useBackLayer'
+import { useConfigImport } from '../../hooks/useConfigImport'
+import { useStorageAccess } from '../../hooks/useStorageAccess'
 import CoreStatusNotice from '../CoreStatusNotice'
 import LoadError from '../LoadError'
+import { showToast } from '../Toast'
 import BackgroundRunRow from '../settings/BackgroundRunRow'
 import EstimateStep from './EstimateStep'
 import FoldersStep from './FoldersStep'
@@ -32,7 +35,9 @@ interface Props {
  * 进行到的步骤记在后台服务中（随数据目录迁移），重启后（包括更改数据目录后的重启）从这一步继续；
  * 之前某一步的必需项已不满足（如模型被删除）时退回到那一步。
  * 各步都要用后台服务：不可用时内容区只显示它的状态（步骤条保留），不能前进；重新连上后重新读取。
- * 手机宽度下按钮固定在底部；Android 的返回键回到上一步，最后一步另有“后台运行”（不强制）
+ * 手机宽度下按钮固定在底部；Android 的返回键回到上一步，最后一步另有“后台运行”（不强制）。
+ * 第 1 步可以导入在另一台同类设备上导出的配置：添加文件夹前导入，文件夹步骤直接列出导入的文件夹（`RootsChanged`），
+ * 之后各步的文件类型与参数也是导入后的值；还没有建立索引，不确认重建
  */
 export default function Onboarding({ status, coreStatus, onStatus, onDone }: Props) {
   // 恢复到上次的步骤之前为空
@@ -61,6 +66,18 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
         setParamsError(errorMessage(err, '无法读取设置，请稍后再试。'))
       })
   }, [])
+
+  const config = useConfigImport(null, loadParams)
+  // Android 授权前导入会丢掉配置中的全部文件夹：按钮显示为不可用，点击时提示先授权
+  const storage = useStorageAccess()
+  const importBlocked = storage.granted === false
+  const importConfig = () => {
+    if (importBlocked) {
+      showToast('请先授予“所有文件访问”权限')
+      return
+    }
+    config.start()
+  }
 
   const running = coreStatus === 'running'
   useEffect(() => {
@@ -194,12 +211,18 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
 
         {running && paramsError && <LoadError message={paramsError} onRetry={loadParams} className="mt-3 px-1" />}
         {error && <p data-selectable-text className={`mt-3 px-1 ${ERROR_TEXT}`}>{error}</p>}
+        {config.error && <p data-selectable-text className={`mt-3 px-1 ${ERROR_TEXT}`}>{config.error}</p>}
 
         {step !== null && (
           <footer className="mt-5 flex items-center gap-3 max-sm:sticky max-sm:bottom-0 max-sm:-mx-4 max-sm:mt-auto max-sm:bg-gray-50/85 max-sm:px-4 max-sm:pb-[calc(0.75rem+var(--safe-bottom))] max-sm:pt-5 max-sm:backdrop-blur-xl dark:max-sm:bg-gray-950/85">
             {step > 0 && (
               <button type="button" className={`shrink-0 ${BUTTON}`} disabled={!running} onClick={() => go(step - 1)}>
                 上一步
+              </button>
+            )}
+            {step === 0 && (
+              <button type="button" className={`shrink-0 ${BUTTON} ${importBlocked ? 'cursor-not-allowed opacity-50' : ''}`} aria-disabled={importBlocked || undefined} disabled={!running || config.busy} onClick={importConfig}>
+                {config.busy ? '正在导入' : '导入配置'}
               </button>
             )}
             <span className="ml-auto min-w-0 text-right text-xs text-gray-400 dark:text-gray-500">{blocker}</span>

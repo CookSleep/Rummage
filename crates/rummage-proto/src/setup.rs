@@ -256,6 +256,8 @@ pub struct RootEstimate {
     pub files: u64,
     /// 能识别内容的文件（不含网盘占位文件与超过大小上限的），键为 `document`、`image`、`audio`、`video`
     pub kinds: BTreeMap<String, KindTotal>,
+    /// 还在统计文件数，`files` 与 `kinds` 不完整（同 `RootInfo::scanning`）
+    pub scanning: bool,
 }
 
 /// 索引预估的原始数据，时间与空间由界面按自检速度换算
@@ -364,6 +366,7 @@ mod tests {
                 path: r"D:\资料".into(),
                 files: 3,
                 kinds: BTreeMap::from([("image".to_string(), KindTotal { files: 2, bytes: 9 })]),
+                scanning: true,
             }],
             free_gb: Some(12.5),
         });

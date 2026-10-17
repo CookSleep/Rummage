@@ -17,7 +17,7 @@ use rummage_proto::{ApiError, Reply, Request, params};
 
 use super::files::{derived_dir, thumb_path};
 use super::setup::release_limit;
-use super::{ScanJob, State, api_error, db, lock, opened, unavailable};
+use super::{State, api_error, db, lock, opened, unavailable};
 use crate::pipeline::{self, Hold};
 
 /// 清空索引时每批删除的文件数；批与批之间释放数据库锁，搜索不必等整个清空完成
@@ -54,7 +54,7 @@ fn clear_index(state: &Arc<State>) -> Result<Reply, ApiError> {
     }
     res?;
     log::warn!("用户清空了索引，按现有文件夹重新建立。");
-    state.queue_scan(ScanJob::All);
+    state.queue_count_all();
     state.wake_pipeline();
     // 暂停时流水线不会自己广播，计数要在这里归零
     if let Some(p) = pipeline {

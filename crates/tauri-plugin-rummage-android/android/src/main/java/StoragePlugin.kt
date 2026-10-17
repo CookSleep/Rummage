@@ -55,6 +55,15 @@ class InstallArgs {
 }
 
 @InvokeArg
+class SaveFileArgs {
+  /** 建议的文件名 */
+  lateinit var name: String
+  lateinit var mimeType: String
+  /** 要保存的文件，在应用私有目录中 */
+  lateinit var path: String
+}
+
+@InvokeArg
 class PickFilesArgs {
   lateinit var mimeTypes: Array<String>
   var multiple: Boolean = false
@@ -64,7 +73,8 @@ class PickFilesArgs {
 
 /**
  * 存储权限、文件选择、后台建立索引、安装更新与界面的几项系统功能，只由 Rust 侧调用（crates/tauri-plugin-rummage-android/src/lib.rs）。
- * 选择的文件夹与文件换算成真实路径，读取靠“所有文件访问”权限，不持有文档提供者的 URI 授权。
+ * 选择的文件夹与文件换算成真实路径，读取靠“所有文件访问”权限，不持有文档提供者的 URI 授权；
+ * 保存文件（[saveFile]）把应用私有目录中已生成的文件复制到用户选定的文档，只写这一次。
  * 前台服务见 [IndexService]；应用回到前台（[onResume]）作为 `resume` 事件交给 Rust 侧。
  * 安全区见 [load]：页面加载前算出的值写不进页面，前端启动时再用 `safeArea` 取一次
  */
@@ -334,6 +344,41 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
       Logger.error(Logger.tags("StoragePlugin"), "无法读取所选文件夹", e)
       invoke.reject(e.message ?: e.toString())
     }
+  }
+
+  /** 用系统的“创建文件”让用户选择保存位置，把 `path` 复制过去 */
+  @Command
+  fun saveFile(invoke: Invoke) {
+    val args = invoke.parseArgs(SaveFileArgs::class.java)
+    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+    intent.type = args.mimeType
+    intent.putExtra(Intent.EXTRA_TITLE, args.name)
+    startActivityForResult(invoke, intent, "saveFileResult")
+  }
+
+  /** 取消时返回 null，否则返回 `{ name }`（所选文档的显示名） */
+  @ActivityCallback
+  fun saveFileResult(invoke: Invoke, result: ActivityResult) {
+    val uri = result.data?.data
+    if (result.resultCode != Activity.RESULT_OK || uri == null) {
+      invoke.resolve()
+      return
+    }
+    // 诊断包可能有几 MB，不占主线程
+    Thread {
+      try {
+        val src = File(invoke.parseArgs(SaveFileArgs::class.java).path)
+        val out = activity.contentResolver.openOutputStream(uri) ?: throw IOException("无法写入 $uri")
+        out.use { o -> src.inputStream().use { it.copyTo(o) } }
+        val ret = JSObject()
+        ret.put("name", displayName(uri))
+        invoke.resolve(ret)
+      } catch (e: Exception) {
+        Logger.error(Logger.tags("StoragePlugin"), "无法保存文件", e)
+        invoke.reject(e.message ?: e.toString())
+      }
+    }.start()
   }
 
   @Command

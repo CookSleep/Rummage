@@ -152,6 +152,7 @@ fn root(path: &str, files: i64, excludes: &[&str]) -> RootInfo {
         offline: false,
         files,
         excludes: excludes.iter().map(|s| s.to_string()).collect(),
+        scanning: false,
     }
 }
 

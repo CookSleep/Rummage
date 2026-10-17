@@ -7,7 +7,7 @@
 //! 数据库打开失败时核心照常运行，需要数据库的请求返回 `unavailable`，消息是失败原因。
 //! 同一连接上的只读请求（`Request::is_readonly`）并发处理，修改类请求与 `Shutdown` 按收到的顺序依次处理；只读请求等在它之前
 //! 收到的修改类请求处理完才执行（先写后读）。回复按请求 ID 对应、可能乱序。请求在阻塞线程池中处理，读写数据库不占用异步执行器。
-//! 扫描线程见 `scan`：`AddRoot` 成功后扫描该根目录。
+//! 扫描线程见 `scan`：`AddRoot` 成功后统计该根目录的文件数，统计完之前 `ListRoots` 中的 `scanning` 为真。
 //! 实时监听、离线根目录的检查与定期对账见 `watch`：监听到的变化以 `ScanJob::Dirs` 排进同一个扫描线程做局部对账，
 //! 有变化的根目录也广播 `ScanProgress`（`done` 为真）。每个扫描任务结束后按根目录的增删与离线状态启停监听。
 //! 添加、移除根目录或修改排除规则后广播 `RootsChanged`，命令行与 MCP 改的也能让已打开的设置页刷新。
@@ -77,6 +77,8 @@ pub struct State {
     scan_tx: OnceLock<std_mpsc::Sender<ScanJob>>,
     /// 正在扫描的根目录（局部对账可能涉及多个）及其取消标志
     scanning: Mutex<Option<(Vec<i64>, Arc<AtomicBool>)>>,
+    /// 已排队或正在统计文件数的根目录，值为排队的统计任务数（`scan`）
+    counting: Mutex<BTreeMap<i64, usize>>,
     /// 实时监听，`start_scanner` 之后才有
     watches: OnceLock<watch::Watches>,
     /// `start_pipeline` 之后才有
@@ -154,6 +156,7 @@ impl State {
             shutdown: Notify::new(),
             scan_tx: OnceLock::new(),
             scanning: Mutex::new(None),
+            counting: Mutex::new(BTreeMap::new()),
             watches: OnceLock::new(),
             pipeline: OnceLock::new(),
             sys,
@@ -260,8 +263,9 @@ fn root_error(err: RootError) -> ApiError {
     api_error(code, err.to_string())
 }
 
-fn root_info(r: Root) -> RootInfo {
+fn root_info(r: Root, state: &State) -> RootInfo {
     RootInfo {
+        scanning: state.counting(r.id),
         id: r.id,
         path: r.path,
         offline: r.offline,
@@ -628,7 +632,7 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
                 .list_roots()
                 .map_err(|err| api_error(ApiError::UNAVAILABLE, err.to_string()))?;
             Ok(Reply::Roots {
-                roots: roots.into_iter().map(root_info).collect(),
+                roots: roots.into_iter().map(|r| root_info(r, state)).collect(),
             })
         }
         Request::AddRoot { path, excludes } => {
@@ -657,11 +661,11 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
             };
             // 先开始监听：首次扫描可能很久，期间的变化攒到扫描结束后局部对账
             watch::sync(state);
-            state.queue_scan(ScanJob::Root(root.id));
+            state.queue_count(vec![root.id]);
             state.wake_pipeline();
             let _ = state.events.send(Event::RootsChanged);
             Ok(Reply::Root {
-                root: root_info(root),
+                root: root_info(root, state),
             })
         }
         Request::RemoveRoot { id } => {

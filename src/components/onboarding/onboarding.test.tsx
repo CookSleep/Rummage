@@ -4,14 +4,15 @@ import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Estimate, RootInfo } from '../../types'
 
-import { button, click, flush, mockCore, render, selftest, setupStatus, text } from '../../test/tauri'
+import { button, click, emitEvent, flush, mockCore, render, selftest, setupStatus, text } from '../../test/tauri'
+import Toaster from '../Toast'
 import EstimateStep from './EstimateStep'
 import FoldersStep from './FoldersStep'
 import Onboarding from './Onboarding'
 
-const ROOT: RootInfo = { id: 1, path: 'D:\\照片', offline: false, files: 5, excludes: [] }
+const ROOT: RootInfo = { id: 1, path: 'D:\\照片', offline: false, files: 5, excludes: [], scanning: false }
 const KINDS = { documents: true, images: true, audio: false, video: false }
-const ESTIMATE: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000 } } }], freeGb: 100 }
+const ESTIMATE: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000 } }, scanning: false }], freeGb: 100 }
 
 /** 第一次调用失败，之后成功 */
 function failOnce(message: string, value: unknown) {
@@ -37,6 +38,20 @@ describe('FoldersStep', () => {
     expect(text()).toContain('5 个文件')
     expect(text()).not.toContain('无法读取文件夹列表')
   })
+
+  it('后台服务还在统计的文件夹显示“正在统计文件”，统计完后显示文件数', async () => {
+    let root = { ...ROOT, files: 0, scanning: true }
+    mockCore({ list_roots: () => [root] })
+    render(<FoldersStep />)
+    await flush()
+    expect(text()).toContain('正在统计文件')
+    expect(text()).not.toContain('0 个文件')
+
+    root = { ...ROOT, scanning: false }
+    await emitEvent('core-event', { type: 'ScanProgress', rootId: 1, done: true })
+    expect(text()).toContain('5 个文件')
+    expect(text()).not.toContain('正在统计文件')
+  })
 })
 
 describe('EstimateStep', () => {
@@ -50,6 +65,17 @@ describe('EstimateStep', () => {
     expect(text()).toContain('D:\\照片')
     expect(text()).toContain('图片 5')
     expect(text()).not.toContain('无法统计文件')
+  })
+
+  it('还在统计的文件夹只显示“正在统计文件”，不显示各类型的数量', async () => {
+    const est: Estimate = { ...ESTIMATE, scanning: true, roots: [{ ...ESTIMATE.roots[0], files: 0, kinds: {}, scanning: true }] }
+    mockCore({ index_estimate: () => est })
+    render(<EstimateStep kinds={KINDS} selftest={selftest()} minFreeGb={5} />)
+    await flush()
+    expect(text()).toContain('正在统计文件')
+    expect(text()).not.toContain('图片 0')
+    expect(text()).not.toContain('共 0 个文件')
+    expect(text()).toContain('还在统计文件，数量会继续增加')
   })
 })
 
@@ -160,5 +186,57 @@ describe('Onboarding', () => {
     await click(button('重试'))
     expect(text()).not.toContain('无法读取设置')
     expect(text()).toContain('希望按内容查找哪些文件')
+  })
+})
+
+describe('Onboarding 导入配置', () => {
+  it('第 1 步导入后列出导入的文件夹，文件类型也是导入后的值', async () => {
+    let roots: RootInfo[] = []
+    let params = { index_documents: true, index_images: false, index_audio: false, index_video: false }
+    const calls = mockCore({
+      get_params: () => params,
+      list_roots: () => roots,
+      import_config: () => ({ params: { index_video: true } }),
+      apply_config: () => {
+        roots = [ROOT]
+        params = { ...params, index_video: true }
+        return { added: 1, missing: 0, inaccessible: 0, failed: 0, droppedParams: 0, warning: null }
+      },
+    })
+    render(
+      <>
+        <Toaster />
+        <Onboarding status={setupStatus({ onboarded: false, step: 0 })} coreStatus="running" onStatus={vi.fn()} onDone={vi.fn()} />
+      </>,
+    )
+    await flush()
+    expect(text()).toContain('还没有添加文件夹')
+
+    await click(button('导入配置'))
+    // 引导中不确认重建，直接导入
+    expect(calls.some((c) => c.cmd === 'apply_config')).toBe(true)
+    expect(text()).toContain('配置已导入')
+    // 后台服务添加文件夹后推送 RootsChanged
+    await emitEvent('core-event', { type: 'RootsChanged' })
+    expect(text()).toContain(ROOT.path)
+
+    await click(button('下一步'))
+    const video = [...document.querySelectorAll('button[aria-pressed]')].find((b) => b.textContent?.startsWith('视频'))
+    expect(video?.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('配置来自其他平台时显示原因，不导入', async () => {
+    const calls = mockCore({
+      get_params: () => ({ index_documents: true }),
+      list_roots: () => [],
+      import_config: () => {
+        throw { code: 'bad_request', message: '这是在 Android 上导出的配置，只能导入 Android 版 Rummage。' }
+      },
+    })
+    render(<Onboarding status={setupStatus({ onboarded: false, step: 0 })} coreStatus="running" onStatus={vi.fn()} onDone={vi.fn()} />)
+    await flush()
+    await click(button('导入配置'))
+    expect(text()).toContain('这是在 Android 上导出的配置，只能导入 Android 版 Rummage。')
+    expect(calls.some((c) => c.cmd === 'apply_config')).toBe(false)
   })
 })

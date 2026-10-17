@@ -284,6 +284,8 @@ export interface RootInfo {
   files: number
   /** 用户排除规则（glob） */
   excludes: string[]
+  /** 还在统计文件数，`files` 不完整 */
+  scanning: boolean
 }
 
 /** 模型下载源，对应 Rust `rummage_proto::ModelSource` */
@@ -429,6 +431,8 @@ export interface RootEstimate {
   files: number
   /** 键为 `document`、`image`、`audio`、`video` */
   kinds: Record<string, KindTotal>
+  /** 还在统计文件数，`files` 与 `kinds` 不完整 */
+  scanning: boolean
 }
 
 /** 对应 Rust `rummage_proto::Estimate` */
@@ -490,4 +494,43 @@ export interface DbStatus {
   error: string | null
   /** 清除后重建能解决 */
   rebuildable: boolean
+}
+
+/** 配置文件中的文件夹，对应 Rust `rummage_proto::config::ConfigFolder` */
+export interface ConfigFolder {
+  path: string
+  excludes: string[]
+}
+
+/** 导出的配置文件，对应 Rust `rummage_proto::config::ConfigFile`；由 Rust 侧读写，字段名与文件中一致 */
+export interface ConfigFile {
+  format: string
+  version: number
+  platform: 'windows' | 'android'
+  app_version: string
+  /** Unix 毫秒 */
+  exported_at: number
+  folders: ConfigFolder[]
+  params: ParamValues
+}
+
+/** 导入前的预览，对应 Rust `src-tauri/src/config.rs` 的 `Preview` */
+export interface ConfigPreview {
+  /** 会改变的参数 */
+  params: ParamValues
+}
+
+/** 导入的结果，对应 Rust `src-tauri/src/config.rs` 的 `Outcome` */
+export interface ConfigImport {
+  added: number
+  /** 不存在而丢弃的文件夹 */
+  missing: number
+  /** 无法访问而丢弃的文件夹 */
+  inaccessible: number
+  /** 后台服务拒绝添加的文件夹 */
+  failed: number
+  /** 丢弃的参数 */
+  droppedParams: number
+  /** 参数已保存、但需要告诉用户的情况 */
+  warning: string | null
 }

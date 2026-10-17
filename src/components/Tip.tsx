@@ -37,8 +37,16 @@ export function HoverTip({ label, wrap, hide, longPress }: { label: string; wrap
     if (!el) return
     const show = () => setVisible(true)
     const hide = () => setVisible(false)
+    // 触屏轻点时浏览器会补发 mouseenter，而 mouseleave 要等点到别处才有；轻点后的 click 收起气泡，长按没有 click，气泡照常留着
+    let touch = false
+    const down = (e: PointerEvent) => {
+      touch = e.pointerType === 'touch'
+    }
+    const tapped = () => touch && hide()
     // 鼠标点击也会聚焦按钮，只在键盘聚焦时显示
     const focus = () => el.matches(':focus-visible') && show()
+    el.addEventListener('pointerdown', down)
+    el.addEventListener('click', tapped)
     el.addEventListener('mouseenter', show)
     el.addEventListener('mouseleave', hide)
     el.addEventListener('focus', focus)
@@ -67,6 +75,8 @@ export function HoverTip({ label, wrap, hide, longPress }: { label: string; wrap
     }
     return () => {
       clear()
+      el.removeEventListener('pointerdown', down)
+      el.removeEventListener('click', tapped)
       el.removeEventListener('mouseenter', show)
       el.removeEventListener('mouseleave', hide)
       el.removeEventListener('focus', focus)

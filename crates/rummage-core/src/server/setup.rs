@@ -574,6 +574,7 @@ fn estimate(state: &State) -> Result<Estimate, ApiError> {
         roots: roots
             .into_iter()
             .map(|r| RootEstimate {
+                scanning: state.counting(r.id),
                 id: r.id,
                 path: r.path,
                 files: r.files.max(0) as u64,

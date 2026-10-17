@@ -168,6 +168,7 @@ fn response_and_event_round_trip() {
                 offline: true,
                 files: 42,
                 excludes: vec!["*.tmp".into()],
+                scanning: true,
             }],
         }),
         Err(ApiError {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { RootInfo } from '../../types'
 import { errorMessage } from '../../lib/errors'
@@ -32,15 +32,13 @@ interface Props {
 
 /**
  * 第 1 步：选择要索引的文件夹。文件夹由 Rust 侧的系统对话框选择后直接交给核心（前端不提交路径），
- * 添加后核心立即扫描，扫描结束（`ScanProgress` 的 `done`）时刷新文件数；命令行或 MCP 增删、修改文件夹（`RootsChanged`）时刷新列表。
+ * 添加后核心立即统计文件，统计完之前（`scanning`）显示“正在统计文件”，扫描结束（`ScanProgress` 的 `done`）时刷新；命令行或 MCP 增删、修改文件夹（`RootsChanged`）时刷新列表。
  * 设置页的“文件夹”也用它。
  * Android 上读取文件需要“所有文件访问”权限：未授权时在列表上方提示前往授权，并禁用添加；已授权时可一键添加常用文件夹
  */
 export default function FoldersStep({ onCount, section, editor }: Props) {
   const storage = useStorageAccess()
   const [roots, setRoots] = useState<RootInfo[] | null>(null)
-  // 刚添加、还没扫描完的文件夹
-  const [scanning, setScanning] = useState<Set<number>>(new Set())
   // 添加、移除失败的原因
   const [error, setError] = useState('')
   const [loadError, setLoadError] = useState('')
@@ -49,20 +47,10 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
   const [removing, setRemoving] = useState<RootInfo | null>(null)
   // 展开了附加编辑的文件夹
   const [editing, setEditing] = useState<number | null>(null)
-  const known = useRef<Set<number> | null>(null)
-  // 已扫描完的文件夹：小文件夹的结束事件可能早于添加后的刷新到达
-  const finished = useRef(new Set<number>())
 
   const load = useCallback(() => {
     invoke<RootInfo[]>('list_roots')
       .then((list) => {
-        // 第一次读取之后新出现的文件夹，在扫描结束前显示“正在统计”
-        const prev = known.current
-        if (prev) {
-          const added = list.filter((r) => !prev.has(r.id) && !finished.current.has(r.id)).map((r) => r.id)
-          if (added.length) setScanning((s) => new Set([...s, ...added]))
-        }
-        known.current = new Set(list.map((r) => r.id))
         setRoots(list)
         setLoadError('')
         onCount?.(list.length)
@@ -78,19 +66,7 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
   }, [load])
 
   useCoreEvent((ev) => {
-    if (ev.type === 'RootsChanged') {
-      load()
-      return
-    }
-    if (ev.type !== 'ScanProgress' || !ev.done) return
-    const id = ev.rootId
-    finished.current.add(id)
-    setScanning((s) => {
-      const next = new Set(s)
-      next.delete(id)
-      return next
-    })
-    load()
+    if (ev.type === 'RootsChanged' || (ev.type === 'ScanProgress' && ev.done)) load()
   })
 
   // 添加期间列表不可操作：选择器关闭、页面重新可见时，以及点击页面任意处时，用胶囊通知说明原因。
@@ -189,7 +165,7 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
                   <HoverTip label={r.path} wrap />
                 </span>
                 <span className={`mt-0.5 block text-xs ${r.offline ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                  {r.offline ? '设备未连接' : scanning.has(r.id) ? '正在统计文件' : `${r.files} 个文件`}
+                  {r.offline ? '设备未连接' : r.scanning ? '正在统计文件' : `${r.files} 个文件`}
                 </span>
               </span>
               {/* 只有移除按钮时留在行尾，手机宽度下也不另起一行 */}

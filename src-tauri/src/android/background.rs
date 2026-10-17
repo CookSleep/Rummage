@@ -8,9 +8,12 @@
 //! - 后台额度（Android 15 起 `mediaProcessing` 每 24 小时共 6 小时，应用回到前台时重新计时）用完时系统回调 `onTimeout`：
 //!   Kotlin 侧先报告 `timeout` 再停止服务，这里向后台服务发送 `BackgroundQuota { exhausted: true }` 暂停领取作业；
 //!   应用回到前台时发送 `exhausted: false` 解除。
+//! - 通知中的数字与界面的索引提示一致（`shown`）：有待处理的文件时只数本轮要建的文件（`progress`），只剩按新设置重建时为重建的进度。
 //! - 事件与进度在同一个任务中按到达顺序处理，插件调用不会交错。
 //! - 通知权限（Android 13 起）在完成引导时请求一次（`request_notifications`），被拒绝时服务照常运行，不再追问。
 use rummage_proto::{IndexState, IndexStatus, PauseReason};
+
+use crate::progress;
 #[cfg(target_os = "android")]
 use {
     crate::core,
@@ -28,6 +31,17 @@ pub fn note(p: PauseReason) -> Option<&'static str> {
         PauseReason::Hot => Some("手机温度过高，已暂停"),
         _ => None,
     }
+}
+
+/// 通知中的已完成数与总数（见模块说明）；`base` 为本轮开始时已处理的文件数（`progress::next_base`）
+pub fn shown(s: &IndexStatus, base: Option<u64>) -> (u64, u64) {
+    if s.pending > 0 {
+        return progress::round(s, base.unwrap_or(0));
+    }
+    if let Some(rb) = &s.rebuild {
+        return (rb.done, rb.total);
+    }
+    (s.done, s.total)
 }
 
 /// 前台服务是否应当运行（见模块说明）
@@ -55,6 +69,9 @@ struct Service {
     /// 系统拒绝了启动，应用回到前台之前不再尝试
     blocked: bool,
     last: Option<IndexStatus>,
+    /// 本轮开始时已处理的文件数与上一次的失败数（`progress::next_base`）
+    base: Option<u64>,
+    last_failed: Option<u64>,
 }
 
 #[cfg(target_os = "android")]
@@ -74,11 +91,12 @@ async fn sync<R: Runtime>(plugin: &Android<R>, svc: &mut Service) {
     };
     let want = wanted(s);
     let text = s.paused.and_then(note);
+    let (done, total) = shown(s, svc.base);
     if want && !svc.running {
         if svc.blocked {
             return;
         }
-        match plugin.start_service(s.done, s.total, text).await {
+        match plugin.start_service(done, total, text).await {
             Ok(true) => svc.running = true,
             Ok(false) => {
                 log::warn!("系统不允许在后台启动建立索引的前台服务，应用回到前台后再启动");
@@ -99,7 +117,7 @@ async fn sync<R: Runtime>(plugin: &Android<R>, svc: &mut Service) {
         return;
     }
     if svc.running
-        && let Err(err) = plugin.update_service(s.done, s.total, text).await
+        && let Err(err) = plugin.update_service(done, total, text).await
     {
         log::warn!("无法更新建立索引的通知：{err}");
     }
@@ -137,7 +155,11 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
         let mut svc = Service::default();
         while let Some(msg) = rx.recv().await {
             match msg {
-                Msg::Status(s) => svc.last = Some(s),
+                Msg::Status(s) => {
+                    svc.base = progress::next_base(svc.base, svc.last_failed, &s);
+                    svc.last_failed = Some(s.failed);
+                    svc.last = Some(s);
+                }
                 Msg::Plugin(kind) => match kind.as_str() {
                     "resume" => {
                         svc.blocked = false;
@@ -254,5 +276,24 @@ mod tests {
             assert!(note(p).is_none(), "{p:?}");
             assert!(!wanted(&status(IndexState::Running, Some(p), 3)), "{p:?}");
         }
+    }
+
+    #[test]
+    fn notification_counts_match_index_hint() {
+        // 有待处理的文件：只数本轮（status 中 done = 10 - pending，failed = 0）
+        assert_eq!(
+            shown(&status(IndexState::Running, None, 3), Some(5)),
+            (2, 5)
+        );
+        // 只剩按新设置重建：显示重建的进度
+        let rebuilding = IndexStatus {
+            rebuild: Some(rummage_proto::RebuildStatus {
+                done: 4,
+                total: 20,
+                by_kind: BTreeMap::new(),
+            }),
+            ..status(IndexState::Running, None, 0)
+        };
+        assert_eq!(shown(&rebuilding, None), (4, 20));
     }
 }

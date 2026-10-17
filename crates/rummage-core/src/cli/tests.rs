@@ -403,6 +403,7 @@ fn roots() -> Vec<RootInfo> {
             offline: false,
             files: 1234,
             excludes: Vec::new(),
+            scanning: false,
         },
         RootInfo {
             id: 2,
@@ -410,6 +411,7 @@ fn roots() -> Vec<RootInfo> {
             offline: true,
             files: 50,
             excludes: Vec::new(),
+            scanning: false,
         },
     ]
 }

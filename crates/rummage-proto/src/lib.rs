@@ -3,6 +3,7 @@
 //! 流程：连接后客户端先发 `Hello`（协议版本与令牌），核心回 `Ok(Welcome)` 或 `Err(ApiError)`；
 //! 握手成功后客户端发 `ClientMsg::Request`，核心以同一 `id` 回 `CoreMsg::Response`，并随时推送 `CoreMsg::Event`。
 //! 两端由同一版本的本 crate 编译，协议版本不一致时在握手阶段以 `protocol_mismatch` 拒绝。
+pub mod config;
 pub mod params;
 pub mod settings;
 pub mod setup;
@@ -516,6 +517,8 @@ pub struct RootInfo {
     pub files: i64,
     /// 用户排除规则（glob）
     pub excludes: Vec<String>,
+    /// 还在统计文件数（添加后、启动对账或清空索引后首次扫完之前），`files` 不完整
+    pub scanning: bool,
 }
 
 /// 对应 `rummage_index::ScanStats`

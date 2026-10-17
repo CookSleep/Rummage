@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { ProxySetting, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { DownloadIcon } from '../icons'
+import { showToast } from '../Toast'
 import { ImportRow, MODELS, ModelRow, modelLabel, ProxyStatus, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from './ModelDownload'
 import { BUTTON, CARD, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
 
@@ -56,6 +57,18 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
     call('verify_models', { mmproj }).then(() => setStarting(false))
   }
 
+  // 取消校验、导入只用胶囊通知说明，不留在页面上；只对在这一步看到过进行中的任务提示
+  const seenRunning = useRef(false)
+  useEffect(() => {
+    if (running) {
+      seenRunning.current = true
+      return
+    }
+    if (!seenRunning.current || task?.state !== 'cancelled') return
+    seenRunning.current = false
+    if (task.kind !== 'download' && task.message) showToast(task.message)
+  }, [task, running])
+
   useEffect(() => {
     if (autoVerified.current || running || !unverified) return
     autoVerified.current = true
@@ -84,8 +97,8 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
           )}
         </div>
       )}
-      {/* 成功时模型行的状态已说明结果；暂停的下载在行中显示已下载的大小，不再显示“已取消” */}
-      {!running && task?.message && task.state !== 'done' && !(task.kind === 'download' && task.state === 'cancelled') && (
+      {/* 成功时模型行的状态已说明结果；暂停的下载在行中显示已下载的大小；取消校验、导入用胶囊通知说明 */}
+      {!running && task?.message && task.state !== 'done' && task.state !== 'cancelled' && (
         <p data-selectable-text className={`mt-3 text-xs ${taskMessageClass(task)}`}>
           {task.message}
         </p>

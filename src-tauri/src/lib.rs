@@ -13,6 +13,7 @@ mod background;
 #[path = "android/update.rs"]
 mod android_update;
 mod close_watch;
+mod config;
 mod core;
 mod data;
 #[cfg(not(target_os = "android"))]
@@ -22,6 +23,7 @@ mod failures;
 mod image_query;
 mod open_at;
 mod pause;
+mod progress;
 mod releases;
 mod search;
 mod settings;
@@ -41,6 +43,7 @@ mod platform;
 mod platform;
 
 use tauri::{AppHandle, Manager, Runtime};
+#[cfg(not(target_os = "android"))]
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 #[cfg(desktop)]
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
@@ -73,7 +76,7 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
     let builder = builder
         .plugin(tauri_plugin_opener::init())
-        // 只供 Rust 侧选择以图搜图的图片、引导中的文件夹与模型文件，不向前端开放插件命令
+        // 只供 Rust 侧选择以图搜图的图片、引导中的文件夹与模型文件、配置文件，不向前端开放插件命令
         .plugin(tauri_plugin_dialog::init());
     // 只供 Rust 侧的更新命令使用，不向前端开放插件命令；Android 的应用内更新见 android::update
     #[cfg(desktop)]
@@ -84,6 +87,7 @@ pub fn run() {
     builder
         .manage(core::Core::default())
         .manage(image_query::ImageTokens::default())
+        .manage(config::PendingConfig::default())
         .manage(data)
         // 搜索结果的缩略图、预览图与应用内播放的音视频，只按索引中的 ID 提供
         .register_asynchronous_uri_scheme_protocol("media", |ctx, request, responder| {
@@ -186,6 +190,9 @@ pub fn run() {
             data::exit_app,
             diagnostics::open_log_dir,
             diagnostics::export_diagnostics,
+            config::export_config,
+            config::import_config,
+            config::apply_config,
             releases::fetch_releases,
             #[cfg(desktop)]
             update::update_ready,
@@ -278,7 +285,8 @@ pub fn run() {
         })
 }
 
-/// 设好标题的文件对话框，主窗口在时挂到主窗口上
+/// 设好标题的文件对话框，主窗口在时挂到主窗口上；Android 上选择与保存文件走插件（`android::storage`）
+#[cfg(not(target_os = "android"))]
 pub(crate) fn file_dialog<R: Runtime>(app: &AppHandle<R>, title: &str) -> FileDialogBuilder<R> {
     let dialog = app.dialog().file().set_title(title);
     #[cfg(desktop)]

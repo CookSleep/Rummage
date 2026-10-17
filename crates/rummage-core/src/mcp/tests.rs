@@ -392,6 +392,7 @@ fn status_output() {
             offline: false,
             files: 1234,
             excludes: Vec::new(),
+            scanning: false,
         },
         RootInfo {
             id: 2,
@@ -399,6 +400,7 @@ fn status_output() {
             offline: true,
             files: 5,
             excludes: Vec::new(),
+            scanning: false,
         },
     ];
     assert_eq!(

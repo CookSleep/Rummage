@@ -1,13 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 通知栏小图标：放大镜，系统按单色显示 -->
+<!--
+  通知栏小图标：应用图标（src-tauri/icons/source.svg）中的白色图形，坐标沿用原图，系统按单色显示。
+  图形宽高 43，四周各留约 4.5 的边距，占图标的比例与系统图标相近
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:pathData="M10,4a6,6 0,1 1,0 12a6,6 0,1 1,0 -12zM14.5,14.5L20,20"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.5"
-        android:strokeLineCap="round" />
+    android:viewportWidth="52"
+    android:viewportHeight="52">
+    <group
+        android:translateX="4.5"
+        android:translateY="-12">
+        <path
+            android:pathData="M3.5,38a18,18 0,1 0,36 0a18,18 0,1 0,-36 0"
+            android:strokeWidth="7"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M39.5,20V56"
+            android:strokeWidth="7"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M12.1,34.6A10,10 0,0 1,18.1 28.6"
+            android:strokeWidth="4"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round" />
+    </group>
 </vector>

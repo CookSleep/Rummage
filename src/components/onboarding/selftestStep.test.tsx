@@ -62,7 +62,7 @@ describe('SelftestStep 高级', () => {
     Element.prototype.scrollIntoView = () => {}
   })
 
-  it('只列出影响速度的参数，修改影响索引的参数先确认再保存', async () => {
+  it('只列出影响速度的参数，修改影响索引的参数也直接保存', async () => {
     const calls = mockCore({ get_params: () => VALUES, param_defs: () => DEFS, set_param: () => null })
     render(<SelftestStep selftest={TESTED} model />)
     await flush()
@@ -79,32 +79,16 @@ describe('SelftestStep 高级', () => {
     await click(d.querySelector<HTMLElement>('[aria-haspopup="listbox"]')!)
     const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent === '较高（560 Token）')!
     await click(option)
-    expect(dialog().textContent).toContain('修改后需要重建受影响的索引（图片）')
-    expect(calls.some((c) => c.cmd === 'set_param')).toBe(false)
-
-    await click(button('修改并重建'))
+    expect(dialog().textContent).not.toContain('重建')
     expect(calls.filter((c) => c.cmd === 'set_param').map((c) => c.args)).toEqual([{ key: 'image_tokens', value: 560 }])
-    // 回到参数弹窗，显示新值
     expect(dialog().textContent).toContain('较高（560 Token）')
     await click(button('完成'))
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
-
-  it('取消确认时不保存', async () => {
-    const calls = mockCore({ get_params: () => VALUES, param_defs: () => DEFS, set_param: () => null })
-    render(<SelftestStep selftest={TESTED} model />)
-    await flush()
-    await click(button('高级'))
-    await click(dialog().querySelector<HTMLElement>('[aria-haspopup="listbox"]')!)
-    await click([...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent === '较低（140 Token）')!)
-    await click(button('取消'))
-    expect(calls.some((c) => c.cmd === 'set_param')).toBe(false)
-    expect(dialog().textContent).toContain('标准（280 Token）')
-  })
 })
 
 describe('EstimateStep 测速结果', () => {
-  const est: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000 } } }], freeGb: 100 }
+  const est: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000 } }, scanning: false }], freeGb: 100 }
   const kinds = { documents: false, images: true, audio: false, video: false }
 
   it('测速用到的参数改过时提示预估按修改前的速度', async () => {

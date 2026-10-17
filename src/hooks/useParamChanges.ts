@@ -3,7 +3,7 @@ import type { ParamDef, ParamValue, ParamValues } from '../types'
 import { useSaveParam } from './useSaveParam'
 
 /**
- * 修改参数，设置页与引导的“高级”共用：影响索引的修改先等确认（`pending`，确认文字见 `rebuildConfirmText`），
+ * 修改参数（设置页）：影响索引的修改先等确认（`pending`，确认文字见 `rebuildConfirmText`），
  * 其余直接保存。`onSaved` 在每项保存成功后调用；取消确认后 `epoch` 递增，让输入框回到当前值
  */
 export function useParamChanges(values: ParamValues, setParam: (key: string, value: ParamValue) => Promise<string | null>, onSaved?: (key: string) => void) {

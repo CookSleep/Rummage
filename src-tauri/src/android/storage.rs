@@ -5,7 +5,9 @@
 //! - 导入模型、以图搜图选中的文件换算不出可读的真实路径时，由插件复制到 `<数据目录>/cache/import`、`cache/pick`：
 //!   导入的副本在导入任务结束（`ModelTask` 事件不再是进行中）或请求失败时删除；以图搜图只保留最近选的一张，
 //!   新选的图片放进新的子目录，选好后删除之前的副本。
-//!   两个目录在后台服务启动时清空（`clear_copies`），不留下上次异常退出时的副本
+//!   导入配置选中的文件同样复制到 `cache/config`，读完即删。
+//!   这几个目录（连同 `cache/export`）在后台服务启动时清空（`clear_copies`），不留下上次异常退出时的副本。
+//! - 导出配置与诊断包先生成到 `<数据目录>/cache/export`，再用系统的“创建文件”选择保存位置，由插件复制过去，之后删除
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -35,9 +37,9 @@ fn remove_dir(dir: &Path) {
     }
 }
 
-/// 清空导入模型与以图搜图的副本；后台服务启动时调用
+/// 清空导入模型、以图搜图、导入配置的副本与导出时生成的文件；后台服务启动时调用
 pub fn clear_copies(data: &Path) {
-    for name in ["import", "pick"] {
+    for name in ["import", "pick", "config", "export"] {
         remove_dir(&copies_dir(data, name));
     }
 }
@@ -210,4 +212,75 @@ pub async fn pick_image<R: Runtime>(app: AppHandle<R>) -> Option<ImageQuery> {
         }
     }
     Some(app.state::<ImageTokens>().insert(path))
+}
+
+/// 选择配置文件并读出内容（`config::read`）；取消时为空
+pub async fn pick_config<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, ApiError> {
+    let dir = copies_dir(app.state::<DataDir>().dir()?, "config");
+    let picked = app
+        .state::<Android<R>>()
+        .pick_files(&["application/json"], false, &dir)
+        .await
+        .map_err(|err| failed("无法读取所选文件，请重新选择。", err))?;
+    let Some(path) = picked.and_then(|p| p.into_iter().next()) else {
+        return Ok(None);
+    };
+    let copy = path.starts_with(&dir);
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let text = crate::config::read(&path);
+        if copy {
+            remove_files(&[path]);
+        }
+        text
+    })
+    .await
+    .map_err(|err| error(ApiError::INTERNAL, format!("读取配置文件时出错：{err}")))?;
+    res.map(Some)
+}
+
+/// 导出文件：先用 `write` 生成到 `<数据目录>/cache/export/<name>`，再用系统的“创建文件”复制到用户选择的位置，之后删除；
+/// 返回所选文档的显示名，取消时为空。生成或保存失败时回 `message`
+pub async fn save_export<R, F>(
+    app: &AppHandle<R>,
+    name: &str,
+    mime_type: &str,
+    message: &str,
+    write: F,
+) -> Result<Option<String>, ApiError>
+where
+    R: Runtime,
+    F: FnOnce(&Path) -> std::io::Result<()> + Send + 'static,
+{
+    let dir = copies_dir(app.state::<DataDir>().dir()?, "export");
+    let file = dir.join(name);
+    let path = file.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::create_dir_all(&dir)?;
+        write(&path)
+    })
+    .await
+    .map_err(|err| error(ApiError::INTERNAL, format!("生成导出文件时出错：{err}")))?
+    .map_err(|err| {
+        log::warn!("{message}：{err}");
+        error(ApiError::INTERNAL, message)
+    })?;
+    let res = app
+        .state::<Android<R>>()
+        .save_file(name, mime_type, &file)
+        .await;
+    if let Err(err) = fs::remove_file(&file) {
+        log::warn!("无法删除导出时生成的文件 {}：{err}", file.display());
+    }
+    res.map_err(|err| failed(message, err))
+}
+
+/// 是否已有“所有文件访问”权限，导入配置时据此判断文件夹能否访问；读取失败时按没有处理
+pub async fn files_granted<R: Runtime>(app: &AppHandle<R>) -> bool {
+    match app.state::<Android<R>>().all_files_access().await {
+        Ok(granted) => granted,
+        Err(err) => {
+            log::warn!("无法读取存储权限：{err}");
+            false
+        }
+    }
 }

@@ -154,7 +154,7 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
     // 外观、数据、网络页只有部分依赖后台服务，不可用时只在那一分区显示它的状态；其余各页整页显示
     if (tab === 'about') return <AboutTab />
     if (tab === 'appearance') return <AppearanceTab appearance={appearance} onChange={onAppearance} offline={offline} coreStatus={coreStatus} />
-    if (tab === 'data') return <DataTab offline={offline} coreStatus={coreStatus} />
+    if (tab === 'data') return <DataTab defs={defs} offline={offline} coreStatus={coreStatus} />
     if (tab === 'network') {
       return (
         <div className="space-y-8">

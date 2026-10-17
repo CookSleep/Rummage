@@ -6,12 +6,12 @@ const est: Estimate = {
   scanning: false,
   freeGb: null,
   roots: [
-    { id: 1, path: 'D:\资料', files: 120, kinds: { document: { files: 10, bytes: 160_000 }, other: { files: 5, bytes: 1000 } } },
-    { id: 2, path: 'E:\照片', files: 50, kinds: { image: { files: 40, bytes: 80_000_000 } } },
+    { id: 1, path: 'D:\资料', files: 120, kinds: { document: { files: 10, bytes: 160_000 }, other: { files: 5, bytes: 1000 } }, scanning: false },
+    { id: 2, path: 'E:\照片', files: 50, kinds: { image: { files: 40, bytes: 80_000_000 } }, scanning: false },
     // 2 个约 1 小时的 128 kbps 录音（共 115 MB）
-    { id: 3, path: 'F:\录音', files: 2, kinds: { audio: { files: 2, bytes: 115_200_000 } } },
+    { id: 3, path: 'F:\录音', files: 2, kinds: { audio: { files: 2, bytes: 115_200_000 } }, scanning: false },
     // 3 个视频共 360 MB：按 16 Mbps 约 3 分钟，按 1 Mbps 约 48 分钟
-    { id: 4, path: 'G:\视频', files: 3, kinds: { video: { files: 3, bytes: 360_000_000 } } },
+    { id: 4, path: 'G:\视频', files: 3, kinds: { video: { files: 3, bytes: 360_000_000 } }, scanning: false },
   ],
 }
 

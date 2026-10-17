@@ -1,0 +1,8 @@
+[[permission]]
+identifier = "config"
+description = "允许主窗口导出与导入配置（文件夹、排除规则和参数）：保存位置与导入的文件都由 Rust 侧的对话框选择，前端不提交路径"
+commands.allow = [
+  "export_config",
+  "import_config",
+  "apply_config",
+]

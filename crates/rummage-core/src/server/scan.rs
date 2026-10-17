@@ -1,6 +1,8 @@
 //! 扫描线程：按顺序处理排队的扫描任务，同一时间只做一个；启动时对全部根目录对账一次，
 //! 进度以 `ScanProgress` 事件广播。监听到的变化以 `ScanJob::Dirs` 排进同一个线程做局部对账（`watch`）。
 //! 线程只持有 `State` 的 `Weak`，扫描一个根目录期间才临时升级，发出结束事件前已释放。
+//! 统计文件数的扫描（`ScanJob::Count`：添加文件夹、清空索引后）排队时就把根目录记为统计中，
+//! 扫完、发出结束事件前取消，界面在此之前显示“正在统计文件”而不是不完整的数量；启动对账、局部对账与其他重新对账不算。
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard, Weak, mpsc as std_mpsc};
@@ -14,6 +16,8 @@ use super::{State, data, lock, watch};
 pub(super) enum ScanJob {
     All,
     Root(i64),
+    /// 统计文件数，扫完前这些根目录算统计中（`State::counting`）
+    Count(Vec<i64>),
     /// 监听到变化的目录，局部对账（`watch`）
     Dirs(BTreeMap<i64, Vec<Dirty>>),
     /// 全量清扫缩略图（`data::sweep_thumbs`），启动对账之后排一次
@@ -47,6 +51,7 @@ impl State {
             log::error!("无法启动扫描线程：{err}");
             return;
         }
+        // 启动对账不算统计中：数据库中的文件数是上次统计的结果，对账期间照常显示
         self.queue_scan(ScanJob::All);
         self.queue_scan(ScanJob::SweepThumbs);
         watch::start(self, &core.dir);
@@ -58,6 +63,35 @@ impl State {
             // 接收端只在 State 释放后才关闭
             let _ = tx.send(job);
         }
+    }
+
+    /// 排队统计这些根目录的文件数；扫描线程未启动时不排队，也不记为统计中
+    pub(super) fn queue_count(&self, ids: Vec<i64>) {
+        if self.scan_tx.get().is_none() {
+            return;
+        }
+        let mut counting = lock(&self.counting);
+        for id in &ids {
+            *counting.entry(*id).or_default() += 1;
+        }
+        drop(counting);
+        self.queue_scan(ScanJob::Count(ids));
+    }
+
+    /// 排队统计全部根目录的文件数
+    pub(super) fn queue_count_all(&self) {
+        let Ok(core) = &self.db else {
+            return;
+        };
+        match lock(&core.db).list_roots() {
+            Ok(roots) => self.queue_count(roots.iter().map(|r| r.id).collect()),
+            Err(err) => log::error!("无法读取根目录列表，本次不扫描：{err}"),
+        }
+    }
+
+    /// 根目录已排队或正在统计文件数
+    pub(super) fn counting(&self, id: i64) -> bool {
+        lock(&self.counting).contains_key(&id)
     }
 
     pub(super) fn scanning(&self) -> MutexGuard<'_, Option<(Vec<i64>, Arc<AtomicBool>)>> {
@@ -81,7 +115,8 @@ fn proto_stats(s: &rummage_index::ScanStats) -> ScanStats {
     }
 }
 
-fn scan_job(weak: &Weak<State>, events: &broadcast::Sender<Event>, job: ScanJob) {
+pub(super) fn scan_job(weak: &Weak<State>, events: &broadcast::Sender<Event>, job: ScanJob) {
+    let count = matches!(job, ScanJob::Count(_));
     let ids = match job {
         ScanJob::SweepThumbs => {
             if let Some(state) = weak.upgrade() {
@@ -90,6 +125,7 @@ fn scan_job(weak: &Weak<State>, events: &broadcast::Sender<Event>, job: ScanJob)
             return;
         }
         ScanJob::Root(id) => vec![id],
+        ScanJob::Count(ids) => ids,
         ScanJob::Dirs(dirs) => {
             scan_dirs(weak, events, dirs);
             vec![]
@@ -111,8 +147,18 @@ fn scan_job(weak: &Weak<State>, events: &broadcast::Sender<Event>, job: ScanJob)
         }
     };
     for id in ids {
+        let stats = scan_one(weak, events, id);
+        if count && let Some(state) = weak.upgrade() {
+            let mut counting = lock(&state.counting);
+            if let Some(n) = counting.get_mut(&id) {
+                *n -= 1;
+                if *n == 0 {
+                    counting.remove(&id);
+                }
+            }
+        }
         // 没有事件的情况：State 已释放，或根目录在排队期间被移除
-        if let Some(stats) = scan_one(weak, events, id) {
+        if let Some(stats) = stats {
             // 没有订阅者时 send 返回错误，忽略
             let _ = events.send(Event::ScanProgress {
                 root_id: id,

@@ -145,6 +145,7 @@ fn folders_output() {
         offline: false,
         files: 12,
         excludes: vec!["*.tmp".into()],
+        scanning: false,
     };
     assert_eq!(
         folders_text(&["document"], &[root], None),

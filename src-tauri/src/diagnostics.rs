@@ -3,7 +3,8 @@
 //!   数据目录不可用或日志文件不能追加写入时只输出到后两者。参数 `write_log_file` 只控制文件，
 //!   核心连上后和参数变化时由 `core` 调用 `apply_params`；连上之前按开启处理。
 //! - 打开日志目录：只打开日志目录本身，不向前端开放任意路径的打开权限。
-//! - 诊断包：系统保存对话框在 Rust 侧弹出，只在本地生成 ZIP，不上传。内容为日志、自检记录（`cache\selftest.json`）、
+//! - 诊断包：系统保存对话框在 Rust 侧弹出，只在本地生成 ZIP，不上传；Android 上先生成到缓存目录，
+//!   再用系统的“创建文件”复制到所选位置（`android::storage::save_export`）。内容为日志、自检记录（`cache\selftest.json`）、
 //!   软件与系统版本、显卡与驱动版本、设置（参数、外观、代理、文件夹、自检与索引状态）；不含搜索历史与索引内容。
 //!   所有文本中地址里的用户名和密码一律遮盖（`mask_credentials`）；文件路径默认替换为占位符（`redact`），
 //!   用户选择保留时原样写入。
@@ -275,37 +276,73 @@ fn build(
     zip.finish()
 }
 
-/// 选择保存位置并导出诊断包，返回保存的路径；取消选择时返回空
+/// 选择保存位置并导出诊断包，返回保存的路径（Android 上为所选文档的名称）；取消选择时返回空
 #[tauri::command]
 pub async fn export_diagnostics<R: Runtime>(
     app: AppHandle<R>,
     keep_paths: bool,
 ) -> Result<Option<String>, ApiError> {
-    let dir = app.state::<DataDir>().dir()?.to_path_buf();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let dialog = crate::file_dialog(&app, "导出诊断包")
-        .set_file_name("Rummage 诊断包.zip")
-        .add_filter("ZIP 压缩包", &["zip"]);
-    dialog.save_file(move |path| {
-        let _ = tx.send(path);
-    });
-    let Some(target) = rx.await.ok().flatten() else {
-        return Ok(None);
-    };
-    let target = target.into_path().map_err(|err| {
-        log::warn!("无法读取所选的保存位置：{err}");
-        error(
-            ApiError::BAD_REQUEST,
-            "无法读取所选的保存位置，请重新选择。",
+    #[cfg(not(target_os = "android"))]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let dialog = crate::file_dialog(&app, "导出诊断包")
+            .set_file_name("Rummage 诊断包.zip")
+            .add_filter("ZIP 压缩包", &["zip"]);
+        dialog.save_file(move |path| {
+            let _ = tx.send(path);
+        });
+        let Some(target) = rx.await.ok().flatten() else {
+            return Ok(None);
+        };
+        let target = target.into_path().map_err(|err| {
+            log::warn!("无法读取所选的保存位置：{err}");
+            error(
+                ApiError::BAD_REQUEST,
+                "无法读取所选的保存位置，请重新选择。",
+            )
+        })?;
+        let write = package(&app, keep_paths).await?;
+        let saved = target.clone();
+        tauri::async_runtime::spawn_blocking(move || write(&target))
+            .await
+            .map_err(|err| error(ApiError::INTERNAL, format!("生成诊断包时出错：{err}")))?
+            .map_err(|err| {
+                log::warn!("无法生成诊断包：{err}");
+                error(
+                    ApiError::INTERNAL,
+                    "诊断包未能保存，请确认所选位置可以写入后重试。",
+                )
+            })?;
+        Ok(Some(saved.display().to_string()))
+    }
+    // 系统的“创建文件”只给出文档地址，先生成到缓存目录再复制过去
+    #[cfg(target_os = "android")]
+    {
+        let write = package(&app, keep_paths).await?;
+        crate::android::storage::save_export(
+            &app,
+            "Rummage 诊断包.zip",
+            "application/zip",
+            "诊断包未能保存，请确认所选位置可以写入后重试。",
+            write,
         )
-    })?;
-    let roots = fetch(&app, Request::ListRoots).await;
+        .await
+    }
+}
+
+/// 收集诊断包的内容，返回把诊断包写到指定路径的函数（在阻塞线程中调用）
+async fn package<R: Runtime>(
+    app: &AppHandle<R>,
+    keep_paths: bool,
+) -> Result<impl FnOnce(&Path) -> std::io::Result<()> + Send + 'static, ApiError> {
+    let dir = app.state::<DataDir>().dir()?.to_path_buf();
+    let roots = fetch(app, Request::ListRoots).await;
     let settings = json!({
-        "params": fetch(&app, Request::GetParams).await,
-        "appearance": fetch(&app, Request::GetAppearance).await,
-        "setup": fetch(&app, Request::SetupStatus).await,
+        "params": fetch(app, Request::GetParams).await,
+        "appearance": fetch(app, Request::GetAppearance).await,
+        "setup": fetch(app, Request::SetupStatus).await,
         "roots": roots,
-        "index": fetch(&app, Request::IndexStatus).await,
+        "index": fetch(app, Request::IndexStatus).await,
     });
     let system = json!({
         "appVersion": env!("CARGO_PKG_VERSION"),
@@ -336,21 +373,10 @@ pub async fn export_diagnostics<R: Runtime>(
         // 长的在前：数据目录常在安装目录或用户目录之中
         known.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
     }
-    let saved = target.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    Ok(move |target: &Path| {
         let bytes = build(&dir, settings, system, (!keep_paths).then_some(&known[..]))?;
-        fs::write(&target, bytes)
+        fs::write(target, bytes)
     })
-    .await
-    .map_err(|err| error(ApiError::INTERNAL, format!("生成诊断包时出错：{err}")))?
-    .map_err(|err| {
-        log::warn!("无法生成诊断包：{err}");
-        error(
-            ApiError::INTERNAL,
-            "诊断包未能保存，请确认所选位置可以写入后重试。",
-        )
-    })?;
-    Ok(Some(saved.display().to_string()))
 }
 
 #[cfg(test)]

@@ -583,7 +583,7 @@ pub static PARAMS: &[ParamDef] = &[
         affects_index: false,
         index_kinds: &[],
         label: "建立索引线程数",
-        help: "越多建立索引越快，CPU 占用也越高。修改后需重新启动 Rummage 才能完全生效。",
+        help: "大小核 CPU 上，等于大核数时最快，再多会被小核拖慢。修改后需重新启动 Rummage 才能完全生效。",
         basis: "留出至少 2 个核心给系统和前台程序，按 CPU 核数减 2；Android 上按大核数，至少留 1 个核心（SM8550 实测 5 线程最快）",
         platform: "",
     },

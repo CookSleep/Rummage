@@ -15,7 +15,7 @@ import FoldersStep from './FoldersStep'
 const CARD_TITLE = '需要“所有文件访问”权限'
 
 function root(id: number, path: string): RootInfo {
-  return { id, path, offline: false, files: 0, excludes: [] }
+  return { id, path, offline: false, files: 0, excludes: [], scanning: false }
 }
 
 function addButton() {

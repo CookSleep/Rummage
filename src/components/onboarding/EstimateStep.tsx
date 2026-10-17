@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { Estimate, SelftestStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
-import { cpuName, deviceName, speedStale, switchedDevice, switchedText } from '../../lib/device'
+import { speedStale, switchedDevice, switchedText } from '../../lib/device'
 import type { Kinds } from '../../lib/kinds'
 import { diskShort, estimateDevice, estimateIndex, formatSizeRange, formatTimeRange, pickSpeeds } from '../../lib/estimate'
 import { formatSize } from '../../lib/format'
@@ -58,9 +58,6 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
   })
 
   const st = selftest
-  // 原本要用的设备本次运行中出了问题时，核心已把 selected 改为剩下的设备中最快的（附 failed），这里按实际生效的设备显示
-  const sel = st.preferred === 'cpu' || st.selected === null ? undefined : st.devices[st.selected]
-  const device = sel ? deviceName(sel, st.devices) : cpuName(st)
   const switched = switchedDevice(st)
   const r = est && estimateIndex(est, kinds, pickSpeeds(st), preset)
   const measured = estimateDevice(st)
@@ -88,7 +85,7 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
                   <PathText path={root.path} />
                   <HoverTip label={root.path} wrap />
                 </p>
-                <p className="text-xs text-gray-400 dark:text-gray-500">{parts.join(' · ')}</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500">{root.scanning ? '正在统计文件' : parts.join(' · ')}</p>
               </li>
             )
           })}
@@ -98,7 +95,7 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
       {r && (
         <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
           <dt className="text-gray-500 dark:text-gray-400">预计用时</dt>
-          <dd className="text-gray-700 dark:text-gray-200">{formatTimeRange(r.time)}<span className="whitespace-nowrap">（使用「{device}」）</span></dd>
+          <dd className="text-gray-700 dark:text-gray-200">{formatTimeRange(r.time)}</dd>
           <dt className="text-gray-500 dark:text-gray-400">占用空间</dt>
           <dd className="text-gray-700 dark:text-gray-200">{formatSizeRange(r.disk)}</dd>
         </dl>
