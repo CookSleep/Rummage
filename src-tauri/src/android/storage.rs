@@ -20,7 +20,7 @@ use crate::core;
 use crate::data::DataDir;
 use crate::image_query::{ImageQuery, ImageTokens};
 use crate::search::{error, unexpected};
-use crate::setup::common_root;
+use crate::setup::{AddedRoot, common_root};
 
 /// 选中文件的副本目录（`<数据目录>/cache/<name>`）
 fn copies_dir(data: &Path, name: &str) -> PathBuf {
@@ -80,27 +80,27 @@ pub async fn request_storage_access<R: Runtime>(app: AppHandle<R>) -> Result<boo
         })
 }
 
-async fn add<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), ApiError> {
+async fn add<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<AddedRoot, ApiError> {
     let body = Request::AddRoot {
         path: path.to_string_lossy().into_owned(),
         excludes: Vec::new(),
     };
     match core::request(app, body).await? {
-        Reply::Root { .. } => Ok(()),
+        Reply::Root { root } => Ok(AddedRoot::new(root)),
         other => Err(unexpected(&other)),
     }
 }
 
-/// 选择文件夹并添加；取消选择时返回 false
+/// 选择文件夹并添加；取消选择时返回空
 #[tauri::command]
-pub async fn add_root<R: Runtime>(app: AppHandle<R>) -> Result<bool, ApiError> {
+pub async fn add_root<R: Runtime>(app: AppHandle<R>) -> Result<Option<AddedRoot>, ApiError> {
     let picked = app
         .state::<Android<R>>()
         .pick_folder()
         .await
         .map_err(|err| failed("无法打开文件夹选择器，请重试。", err))?;
     let Some(path) = picked else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(path) = path else {
         return Err(error(
@@ -108,7 +108,7 @@ pub async fn add_root<R: Runtime>(app: AppHandle<R>) -> Result<bool, ApiError> {
             "无法使用此位置：只支持手机存储和存储卡中的文件夹。",
         ));
     };
-    add(&app, &path).await.map(|()| true)
+    add(&app, &path).await.map(Some)
 }
 
 /// 添加手机存储中的常用文件夹（`setup::common_root`）
@@ -119,7 +119,7 @@ pub async fn add_common_root<R: Runtime>(app: AppHandle<R>, name: String) -> Res
         .storage_root()
         .await
         .map_err(|err| failed("无法读取手机存储的位置，请重试。", err))?;
-    add(&app, &common_root(&storage, &name)?).await
+    add(&app, &common_root(&storage, &name)?).await.map(drop)
 }
 
 /// 导入任务结束后删除 `files`：核心在后台复制，请求返回时还在用它们

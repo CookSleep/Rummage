@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use chrono::{Local, TimeZone};
 use rummage_proto::{
     FailedFile, Group, IndexStatus, PROTOCOL_VERSION, ParamDef, ParamKind, ParamValue, Reply,
-    Request, RootInfo, params,
+    Request, RootInfo, params, whole_drive,
 };
 use serde::Serialize;
 
@@ -177,6 +177,9 @@ fn excludes_text(rules: &[String]) -> String {
     rules.join("、")
 }
 
+/// 整个磁盘或存储（`whole_drive`）的提醒
+const WHOLE_DRIVE_NOTE: &str = "这是整个磁盘或存储。Rummage 不是为全盘索引设计的，系统与程序文件大多只能按文件名搜索，文件过多会拖慢建立索引和搜索，建议用 folders remove 移除它，只添加需要搜索的文件夹。";
+
 pub fn folders_text(kinds: &[&str], roots: &[RootInfo], index: Option<&IndexStatus>) -> String {
     let mut out = format!(
         "识别内容的文件类型：{}（所有文件夹共用）",
@@ -201,7 +204,9 @@ pub fn folders_text(kinds: &[&str], roots: &[RootInfo], index: Option<&IndexStat
     }
     out.push_str("\n已索引的文件夹：");
     for r in roots {
-        let note = if r.offline {
+        let note = if r.missing {
+            "找不到文件夹".to_string()
+        } else if r.offline {
             "设备未连接".to_string()
         } else if r.scanning {
             "正在统计文件".to_string()
@@ -211,6 +216,9 @@ pub fn folders_text(kinds: &[&str], roots: &[RootInfo], index: Option<&IndexStat
         let _ = write!(out, "\n  {}（{note}）", r.path);
         if !r.excludes.is_empty() {
             let _ = write!(out, "\n    排除：{}", excludes_text(&r.excludes));
+        }
+        if whole_drive(&r.path) {
+            let _ = write!(out, "\n    注意：{WHOLE_DRIVE_NOTE}");
         }
     }
     out
@@ -476,12 +484,15 @@ pub(super) async fn run(s: &mut Session, cmd: Cmd, json: bool) -> Result<Outcome
             let kinds = set_kinds(s, kinds.as_deref())
                 .await
                 .map_err(|err| format!("文件夹已添加，但文件类型未能保存：{err}"))?;
-            let msg = format!(
+            let mut msg = format!(
                 "已添加 {}，正在后台扫描并建立索引。\n排除规则：{}\n识别内容的文件类型：{}（所有文件夹共用）",
                 root.path,
                 excludes_text(&root.excludes),
                 kinds_text(&kinds)
             );
+            if whole_drive(&root.path) {
+                let _ = write!(msg, "\n注意：{WHOLE_DRIVE_NOTE}");
+            }
             print(&if json {
                 done_json(&msg, Some(&root))
             } else {

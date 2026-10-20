@@ -25,6 +25,7 @@ const HIT: SearchHit = {
   mtime: 1_700_000_000_000,
   cloud: false,
   offline: false,
+  missing: false,
   score: 1,
   cosine: null,
   z: null,
@@ -131,7 +132,7 @@ describe('Android 返回键', () => {
   it('引导中回到上一步，第一步时交给系统', async () => {
     const calls = mockCore({
       get_params: () => ({ index_documents: true, index_images: false, index_audio: false, index_video: false }),
-      list_roots: () => [{ id: 1, path: '/storage/emulated/0/DCIM', offline: false, files: 5, excludes: [], scanning: false }],
+      list_roots: () => [{ id: 1, path: '/storage/emulated/0/DCIM', offline: false, missing: false, files: 5, excludes: [], scanning: false }],
     })
     render(<Onboarding status={setupStatus({ onboarded: false, step: 1 })} coreStatus="running" onStatus={vi.fn()} onDone={vi.fn()} />)
     await flush()

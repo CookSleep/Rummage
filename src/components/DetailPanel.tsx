@@ -143,7 +143,7 @@ function Details({ hit, query, onOpen, onReveal, onSimilar, onShare }: DetailsPr
           <Row label="大小">{formatSize(info?.size ?? hit.size)}</Row>
           <Row label="修改时间">{formatTime(info?.mtime ?? hit.mtime)}</Row>
           {(hit.kind === 'image' || hit.kind === 'video') && width && height ? <Row label="尺寸">{width} × {height}</Row> : null}
-          {hit.offline && <Row label="位置">设备未连接</Row>}
+          {hit.offline && <Row label="位置">{hit.missing ? '找不到所在的文件夹' : '设备未连接'}</Row>}
           {hit.cloud && <Row label="位置">仅在云端</Row>}
         </Section>
 

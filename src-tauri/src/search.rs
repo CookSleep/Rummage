@@ -145,6 +145,7 @@ pub async fn search<R: Runtime>(
         until: filter.until,
         limit: None,
         snippets: false,
+        supersede: true,
     };
     match core::request(&app, body).await? {
         Reply::Results {
@@ -237,7 +238,11 @@ async fn shell<R: Runtime>(
     if info.offline {
         return Err(error(
             ApiError::BAD_REQUEST,
-            "文件所在的设备未连接，请连接后重试。",
+            if info.missing {
+                "找不到文件所在的文件夹，它可能已被删除、改名或移走。"
+            } else {
+                "文件所在的设备未连接，请连接后重试。"
+            },
         ));
     }
     let res =
@@ -445,6 +450,9 @@ async fn play<R: Runtime>(
         Some(m) if matches!(info.kind.as_str(), "audio" | "video") => m,
         _ => return not_found("应用内不能播放这种格式。"),
     };
+    if info.missing {
+        return not_found("找不到文件所在的文件夹。");
+    }
     if info.offline {
         return not_found("文件所在的设备未连接。");
     }
@@ -537,6 +545,9 @@ async fn original<R: Runtime>(
     };
     if info.size.max(0) as u64 > params::max_image_bytes(&values) {
         return thumb().await;
+    }
+    if info.missing {
+        return Err("找不到文件所在的文件夹。".into());
     }
     if info.offline {
         return Err("文件所在的设备未连接。".into());

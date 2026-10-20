@@ -150,6 +150,7 @@ fn root(path: &str, files: i64, excludes: &[&str]) -> RootInfo {
         id: 1,
         path: path.into(),
         offline: false,
+        missing: false,
         files,
         excludes: excludes.iter().map(|s| s.to_string()).collect(),
         scanning: false,
@@ -181,15 +182,28 @@ fn folders_output() {
     };
     let mut offline = root(r"E:\移动硬盘", 0, &[]);
     offline.offline = true;
-    let roots = [root(r"D:\照片", 1234, &["*.tmp", "/草稿"]), offline];
+    let mut missing = root(r"D:\旧资料", 0, &[]);
+    missing.offline = true;
+    missing.missing = true;
+    let roots = [
+        root(r"D:\照片", 1234, &["*.tmp", "/草稿"]),
+        offline,
+        missing,
+        root(r"C:\", 9000, &[]),
+    ];
     assert_eq!(
         folders_text(&["document", "image"], &roots, Some(&index)),
-        "识别内容的文件类型：文档、图片（所有文件夹共用）
+        format!(
+            "识别内容的文件类型：文档、图片（所有文件夹共用）
 索引进度：160 / 200（80%），失败 10，未接电源，已暂停
 已索引的文件夹：
   D:\\照片（1234 个文件）
     排除：*.tmp、/草稿
-  E:\\移动硬盘（设备未连接）"
+  E:\\移动硬盘（设备未连接）
+  D:\\旧资料（找不到文件夹）
+  C:\\（9000 个文件）
+    注意：{WHOLE_DRIVE_NOTE}"
+        )
     );
     assert_eq!(
         folders_text(&[], &[], None),

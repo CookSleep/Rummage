@@ -24,10 +24,10 @@
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc as std_mpsc};
 
-use rummage_index::{Db, DbError, Filter, Root, RootError, VIndex, normalize_root};
+use rummage_index::{Cancel, Db, DbError, Root, RootError, VIndex, normalize_root};
 use rummage_proto::{
     ApiError, ClientMsg, CoreMsg, Event, Hello, PROTOCOL_VERSION, ParamValue, Reply, Request,
     RootInfo, Welcome, decode, encode, params,
@@ -269,6 +269,7 @@ fn root_info(r: Root, state: &State) -> RootInfo {
         id: r.id,
         path: r.path,
         offline: r.offline,
+        missing: r.missing,
         files: r.files,
         excludes: r.excludes,
     }
@@ -373,7 +374,7 @@ where
     let (s, w) = (state.clone(), tx.clone());
     let serial = tokio::spawn(async move {
         while let Some((id, body)) = wrx.recv().await {
-            let result = process(body, &s).await;
+            let result = process(body, &s, None).await;
             done_tx.send_modify(|n| *n += 1);
             if w.send(encode(&CoreMsg::Response { id, result }))
                 .await
@@ -384,6 +385,8 @@ where
         }
     });
     let inflight = Arc::new(Semaphore::new(MAX_INFLIGHT));
+    // 可被取代的搜索（`supersede`）的最新序号：新的到来时，同一连接上更早的随即中止
+    let searches = Arc::new(AtomicU64::new(0));
     let mut stop = false;
     let result = loop {
         let line = match read_line(&mut rd, &mut buf, MAX_LINE).await {
@@ -412,10 +415,21 @@ where
                 let tx = tx.clone();
                 let mut done = done.clone();
                 let before = received;
+                let cancel = matches!(
+                    body,
+                    Request::Search {
+                        supersede: true,
+                        ..
+                    }
+                )
+                .then(|| Cancel {
+                    latest: searches.clone(),
+                    ticket: searches.fetch_add(1, Ordering::Relaxed) + 1,
+                });
                 tokio::spawn(async move {
                     // 处理任务已退出时 `wait_for` 返回错误，此时也不会再有修改，照常执行
                     let _ = done.wait_for(|n| *n >= before).await;
-                    let result = process(body, &state).await;
+                    let result = process(body, &state, cancel).await;
                     let _ = tx.send(encode(&CoreMsg::Response { id, result })).await;
                     drop(permit);
                 });
@@ -456,18 +470,25 @@ where
     result
 }
 
-/// 在阻塞线程池中处理一个请求
-async fn process(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
+/// 在阻塞线程池中处理一个请求；`cancel` 只用于可被取代的搜索
+async fn process(
+    body: Request,
+    state: &Arc<State>,
+    cancel: Option<Cancel>,
+) -> Result<Reply, ApiError> {
     let state = state.clone();
-    tokio::task::spawn_blocking(move || respond(body, &state))
-        .await
-        .unwrap_or_else(|err| {
-            log::error!("处理请求时出错：{err}");
-            Err(api_error(
-                ApiError::INTERNAL,
-                "后台服务处理时出错，请重试。",
-            ))
-        })
+    tokio::task::spawn_blocking(move || match cancel {
+        Some(c) => search::request(&state, body, Some(c)),
+        None => respond(body, &state),
+    })
+    .await
+    .unwrap_or_else(|err| {
+        log::error!("处理请求时出错：{err}");
+        Err(api_error(
+            ApiError::INTERNAL,
+            "后台服务处理时出错，请重试。",
+        ))
+    })
 }
 
 /// 数据库不可用时返回 `unavailable`
@@ -655,6 +676,7 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
                     id,
                     path: root,
                     offline: false,
+                    missing: false,
                     files: 0,
                     excludes,
                 }
@@ -697,26 +719,7 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
                 .map(Reply::Index)
                 .map_err(|err| api_error(ApiError::UNAVAILABLE, err.to_string()))
         }
-        Request::Search {
-            text,
-            image_path,
-            similar,
-            kinds,
-            root_ids,
-            since,
-            until,
-            limit,
-            snippets,
-        } => {
-            let filter = Filter {
-                kinds,
-                root_ids,
-                since,
-                until,
-                exclude_file: None,
-            };
-            search::respond(state, text, image_path, similar, filter, limit, snippets)
-        }
+        body @ Request::Search { .. } => search::request(state, body, None),
         Request::FailedFiles { after, limit } => failures::list(state, after, limit),
         Request::RetryFailed { file_id } => failures::retry(state, Some(file_id)),
         Request::RetryAllFailed => failures::retry(state, None),

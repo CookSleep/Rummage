@@ -42,11 +42,19 @@ pub enum RootError {
     Db(#[from] DbError),
 }
 
+/// `roots.offline`：所在的磁盘或存储未连接
+pub const OFFLINE_DEVICE: i64 = 1;
+/// `roots.offline`：磁盘或存储已连接，文件夹不存在（被删除、改名或移走）
+pub const OFFLINE_MISSING: i64 = 2;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Root {
     pub id: i64,
     pub path: String,
+    /// 不可访问（`missing` 或设备未连接）
     pub offline: bool,
+    /// 文件夹不存在，所在的磁盘或存储已连接
+    pub missing: bool,
     /// 已记录的文件数
     pub files: i64,
     /// 用户排除规则；设置不是合法 JSON 时为空（扫描同样忽略）
@@ -273,8 +281,8 @@ impl Db {
         Ok(out)
     }
 
-    /// 各根目录的 (id, 路径, 是否离线)：监听与离线检查用，不统计文件数
-    pub fn root_states(&self) -> Result<Vec<(i64, String, bool)>, DbError> {
+    /// 各根目录的 (id, 路径, `roots.offline`)：监听与离线检查用，不统计文件数
+    pub fn root_states(&self) -> Result<Vec<(i64, String, i64)>, DbError> {
         self.conn
             .prepare("SELECT id, path, offline FROM roots ORDER BY id")
             .and_then(|mut stmt| {
@@ -284,11 +292,22 @@ impl Db {
             .map_err(|err| self.err(err))
     }
 
+    /// 记下根目录不可访问的原因（`OFFLINE_DEVICE`、`OFFLINE_MISSING`），可以访问时为 0
+    pub fn set_root_offline(&self, id: i64, state: i64) -> Result<(), DbError> {
+        self.conn
+            .execute(
+                "UPDATE roots SET offline = ?2 WHERE id = ?1",
+                params![id, state],
+            )
+            .map(drop)
+            .map_err(|err| self.err(err))
+    }
+
     pub fn list_roots(&self) -> Result<Vec<Root>, DbError> {
         self.conn
             .prepare(
                 "SELECT r.id, r.path, r.offline, (SELECT COUNT(*) FROM files f WHERE f.root_id = r.id),
-                   r.settings_json
+                   r.settings_json, r.offline = 2
                  FROM roots r ORDER BY r.id",
             )
             .and_then(|mut stmt| {
@@ -297,6 +316,7 @@ impl Db {
                         id: row.get(0)?,
                         path: row.get(1)?,
                         offline: row.get(2)?,
+                        missing: row.get(5)?,
                         files: row.get(3)?,
                         excludes: excludes_of(&row.get::<_, String>(4)?),
                     })

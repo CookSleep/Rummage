@@ -48,7 +48,7 @@ CREATE TABLE spaces (
   preprocess TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
--- 索引的根目录；offline 为所在设备未连接，离线时保留索引
+-- 索引的根目录；offline 为不可访问的原因（0 可以访问，1 所在设备未连接，2 文件夹不存在），离线时保留索引
 CREATE TABLE roots (
   id INTEGER PRIMARY KEY,
   path TEXT NOT NULL UNIQUE,
@@ -213,6 +213,9 @@ pub enum DbError {
     Corrupt,
     #[error("索引数据库被其他程序占用，请关闭后重试。")]
     Busy,
+    /// 搜索被之后的搜索取代（`search::Cancel`）
+    #[error("这次搜索已被新的搜索取代。")]
+    Cancelled,
     #[error(
         "索引数据库无法打开。请重新启动 Rummage；仍然失败时，请附上数据目录中 logs 文件夹里的日志反馈问题。"
     )]
@@ -261,6 +264,10 @@ fn unwritable(dir: &Path, err: io::Error) -> DbError {
 
 /// 按错误码归为用户能自行处理的几类
 fn sqlite(dir: &Path, err: rusqlite::Error) -> DbError {
+    // 只有搜索装了进度回调，中止是它要求的，不是出错
+    if err.sqlite_error_code() == Some(ErrorCode::OperationInterrupted) {
+        return DbError::Cancelled;
+    }
     log::error!("索引数据库出错：{err}");
     match err.sqlite_error_code() {
         Some(ErrorCode::DiskFull) => DbError::DiskFull,

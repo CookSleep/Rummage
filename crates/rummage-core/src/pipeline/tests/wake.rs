@@ -1,4 +1,4 @@
-//! 睡眠与唤醒验证：验证通过、跳过已失效的引擎、GPU 出错时改用 CPU、跨过睡眠的失败不屏蔽、验证期间再次挂起、
+//! 睡眠与唤醒验证：验证通过、睡眠中手动暂停优先显示、跳过已失效的引擎、GPU 出错时改用 CPU、跨过睡眠的失败不屏蔽、验证期间再次挂起、
 //! 余弦不达标时重启后改用 CPU。
 use super::*;
 
@@ -22,7 +22,7 @@ fn wake_verification_passes() {
     let engine = lock(&p.shared.engine).clone().unwrap();
     let mut rx = e.events.subscribe();
     p.suspend();
-    // 睡眠时报为 sleeping 并立即广播（不等写库线程）；手动暂停优先
+    // 睡眠时报为 sleeping 并立即广播（不等写库线程）
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match rx.try_recv() {
@@ -32,11 +32,6 @@ fn wake_verification_passes() {
         }
         assert!(Instant::now() < deadline, "挂起时应立即广播");
     }
-    let manual = PauseReason::Manual { until: None };
-    p.set_paused(Some(manual));
-    assert_eq!(e.status().paused, Some(manual));
-    p.set_paused(None);
-    assert_eq!(e.status().paused, Some(PauseReason::Sleeping));
     // 睡眠期间新出现的作业不领取
     e.put("b.txt", "乙".as_bytes());
     e.scan();
@@ -56,6 +51,22 @@ fn wake_verification_passes() {
     assert_eq!(last, Some(None));
     e.wait_idle(0);
     assert!(e.stored("b.txt"));
+}
+
+#[test]
+fn manual_pause_shown_over_sleep() {
+    let mut e = env(&[]);
+    e.start(true, true);
+    e.wait_idle(0);
+    let p = e.pipeline.as_ref().unwrap();
+    p.suspend();
+    let manual = PauseReason::Manual { until: None };
+    p.set_paused(Some(manual));
+    assert_eq!(e.status().paused, Some(manual));
+    p.set_paused(None);
+    assert_eq!(e.status().paused, Some(PauseReason::Sleeping));
+    p.resume(Some(&wake_sample()));
+    assert_eq!(e.status().paused, None);
 }
 
 #[test]
@@ -213,6 +224,7 @@ fn wake_low_cosine_restarts_then_falls_back_to_cpu() {
             cfg: cpu.cfg.clone(),
             failed: AtomicBool::new(false),
             driver_failed: AtomicBool::new(false),
+            retired: AtomicBool::new(false),
             released: Released(Arc::new(AtomicBool::new(false))),
         })
     };

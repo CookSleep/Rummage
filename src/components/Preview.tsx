@@ -292,6 +292,7 @@ function MediaPreview({ hit }: { hit: SearchHit }) {
 /** 详情栏顶部的预览；`query` 为文字查询，文档预览中高亮其中的词 */
 export default function Preview({ hit, query }: { hit: SearchHit; query: string }) {
   // 占位文件与离线设备上的文件不预览
+  if (hit.missing) return <Note>找不到文件所在的文件夹，无法预览</Note>
   if (hit.offline) return <Note>文件所在的设备未连接，无法预览</Note>
   if (hit.cloud) return <Note>文件仅在云端，打开时由系统下载，这里不预览</Note>
   if (hit.kind === 'image') {

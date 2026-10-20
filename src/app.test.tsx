@@ -245,7 +245,7 @@ describe('搜索页：后台服务重新连上后重新读取', () => {
     expect(count('list_roots')).toBe(1)
 
     await emitEvent('core-status', 'restarting')
-    handlers.list_roots = () => [{ id: 1, path: 'D:\\照片', offline: false, files: 3, excludes: [], scanning: false }]
+    handlers.list_roots = () => [{ id: 1, path: 'D:\\照片', offline: false, missing: false, files: 3, excludes: [], scanning: false }]
     await emitEvent('core-status', 'running')
     expect(count('list_roots')).toBe(2)
 

@@ -221,6 +221,7 @@ impl Server {
             until,
             limit: Some(params::request_limit(&s)),
             snippets: true,
+            supersede: false,
         };
         let Reply::Results {
             hits,

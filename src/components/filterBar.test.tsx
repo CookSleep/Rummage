@@ -8,7 +8,7 @@ import { button, click, emitEvent, flush, mockCore, render } from '../test/tauri
 import { DEFAULT_FILTERS } from '../lib/filter'
 import FilterBar from './FilterBar'
 
-const root = (id: number, path: string): RootInfo => ({ id, path, offline: false, files: 10, excludes: [], scanning: false })
+const root = (id: number, path: string): RootInfo => ({ id, path, offline: false, missing: false, files: 10, excludes: [], scanning: false })
 
 /** 展开“文件夹”菜单，返回其中的选项文字 */
 async function folderOptions() {

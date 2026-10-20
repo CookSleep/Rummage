@@ -16,11 +16,14 @@
 //!   正文还没校准，或某个模态的内嵌片段还没有 z 时（小库、首次建立索引期间），这些内嵌片段照旧留在所属模态的列表中，
 //!   只靠内嵌媒体命中的文档（扫描件）仍能搜到。以图搜图与“找相似的”只检索一个模态，内嵌图片照旧与独立图片一起排名。
 //! - 文件名通道：查询按空白拆成若干词，全部命中才算。每个词都不少于 3 个字符时用 `fts_names` 的 trigram 匹配
-//!   （每个词一个短语，只匹配 `name` 列，按 bm25 排序），否则退回每个词一个 `files.name LIKE`（按修改时间从新到旧）；
-//!   同样应用过滤条件，最多取 200 条。
+//!   （每个词一个短语，只匹配 `name` 列，按 bm25 排序），否则退回每个词一个 `files.name LIKE`（按修改时间从新到旧逐个文件查找，
+//!   取够即停）；同样应用过滤条件，最多取 200 条。
 //! - 正文通道：同样的规则作用于片段正文（`fts_text` / `segments.text LIKE`），按文件聚合：文件的名次取它最好的片段，
-//!   并按匹配度记下全部命中片段；最多取 200 个文件。只有 1 个字符的查询不走正文通道。以图搜图时没有文字查询，
+//!   并按匹配度记下全部命中片段；最多取 200 个文件。LIKE 按修改时间从新到旧逐个文件查找，取够即停，
+//!   常见的短词不必扫完全部片段。只有 1 个字符的查询不走正文通道。以图搜图时没有文字查询，
 //!   文件名与正文通道都不参加。
+//! - 取代：带 `cancel` 的检索在之后的同源搜索到来时中止（SQLite 的进度回调，从精排起），回 `DbError::Cancelled`；
+//!   界面边输入边搜索时，慢的旧查询不会一直占着数据库让新查询排队。
 //! - 融合：`score = Σ w / (k + rank)`，rank 从 1 起；各模态的语义列表、文件名、正文的权重分别为
 //!   `weight_semantic`、`weight_name`、`weight_text`。同分时依次比较最高余弦、文件 id。
 //! - 匹配度门槛：最高 z 低于 `min_relevance`、文件名与正文都没有命中的结果标为 `low`，排在其余结果之后
@@ -30,7 +33,8 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use rusqlite::types::Value;
@@ -73,6 +77,30 @@ pub struct SearchParams {
     pub min_relevance: f64,
 }
 
+/// 搜索被取代的判定：`latest` 是同一来源最新一次可取代的搜索的序号，与本次的 `ticket` 不同时本次已被取代
+#[derive(Debug, Clone)]
+pub struct Cancel {
+    pub latest: Arc<AtomicU64>,
+    pub ticket: u64,
+}
+
+/// 检索期间装在连接上的进度回调，被取代时让正在执行的语句中止；离开时卸下，连接交还给其他用途
+struct Interruptible<'a>(&'a Db);
+
+impl Cancel {
+    fn superseded(&self) -> bool {
+        self.latest.load(AtomicOrdering::Relaxed) != self.ticket
+    }
+}
+
+impl Drop for Interruptible<'_> {
+    fn drop(&mut self) {
+        if let Err(err) = self.0.conn.progress_handler(0, None::<fn() -> bool>) {
+            log::warn!("无法卸下搜索的进度回调：{err}");
+        }
+    }
+}
+
 pub struct Query<'a> {
     /// 已归一化的查询向量及其空间：文本查询为文本空间，以图搜图为图像空间，“找相似的”为被拿来查的向量所在的空间
     pub vector: Option<(&'a [f32], &'a Space)>,
@@ -86,6 +114,8 @@ pub struct Query<'a> {
     pub text: Option<&'a str>,
     pub filter: &'a Filter,
     pub params: SearchParams,
+    /// 可被之后的搜索取代；被取代时返回 `DbError::Cancelled`
+    pub cancel: Option<Cancel>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,8 +135,10 @@ pub struct Hit {
     pub size: i64,
     pub mtime: i64,
     pub cloud: bool,
-    /// 所在根目录离线
+    /// 所在根目录不可访问
     pub offline: bool,
+    /// 所在根目录不存在，它的磁盘或存储已连接
+    pub missing: bool,
     pub score: f64,
     /// 最高余弦；没有语义命中时为空
     pub cosine: Option<f32>,
@@ -237,11 +269,10 @@ fn likes(col: &str, words: &[&str], args: &mut Vec<Value>) -> String {
     vec![format!("{col} LIKE ? ESCAPE '\\'"); words.len()].join(" AND ")
 }
 
-/// 文件名通道，返回按匹配度排好的文件 id
-fn names(db: &Db, query: &str, filter: &Filter) -> rusqlite::Result<Vec<i64>> {
-    let words: Vec<&str> = query.split_whitespace().collect();
+/// 文件名通道的查询与参数
+fn names_sql(words: &[&str], filter: &Filter) -> (String, Vec<Value>) {
     let mut args = Vec::new();
-    let (head, order) = match fts_query(&words) {
+    let (head, order) = match fts_query(words) {
         Some(expr) => {
             args.push(Value::Text(format!("name : ({expr})")));
             (
@@ -249,29 +280,37 @@ fn names(db: &Db, query: &str, filter: &Filter) -> rusqlite::Result<Vec<i64>> {
                 "bm25(fts_names)",
             )
         }
+        // 固定沿 files_mtime 从新到旧逐个文件（按根目录等过滤时也是：不符合的文件只比较一行），
+        // 不用把全部命中排一遍序，取够即停
         None => (
             format!(
-                "SELECT f.id FROM files f WHERE {}",
-                likes("f.name", &words, &mut args)
+                "SELECT f.id FROM files f INDEXED BY files_mtime WHERE {}",
+                likes("f.name", words, &mut args)
             ),
-            "f.mtime DESC",
+            "f.mtime DESC, f.id DESC",
         ),
     };
     let sql = format!(
         "{head}{} ORDER BY {order} LIMIT {KEYWORD_LIMIT}",
         filter_sql(filter, &mut args)
     );
+    (sql, args)
+}
+
+/// 文件名通道，返回按匹配度排好的文件 id
+fn names(db: &Db, query: &str, filter: &Filter) -> rusqlite::Result<Vec<i64>> {
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let (sql, args) = names_sql(&words, filter);
     db.conn
         .prepare(&sql)?
         .query_map(params_from_iter(args), |row| row.get(0))?
         .collect()
 }
 
-/// 正文通道，返回按最好的片段排好的文件及其命中的片段 id（最匹配的在前）
-fn texts(db: &Db, query: &str, filter: &Filter) -> rusqlite::Result<Vec<(i64, Vec<i64>)>> {
-    let words: Vec<&str> = query.split_whitespace().collect();
+/// 正文通道的查询与参数；第三项为是否走 FTS
+fn texts_sql(words: &[&str], filter: &Filter) -> (String, Vec<Value>, bool) {
     let mut args = Vec::new();
-    let expr = fts_query(&words);
+    let expr = fts_query(words);
     let fts = expr.is_some();
     let (head, order) = match expr {
         Some(expr) => {
@@ -283,18 +322,27 @@ fn texts(db: &Db, query: &str, filter: &Filter) -> rusqlite::Result<Vec<(i64, Ve
                 "bm25(fts_text)",
             )
         }
+        // 同文件名通道先沿 files_mtime 逐个文件，再按 segments_file 查它的片段，取够文件后停下读取即结束查询
         None => (
             format!(
-                "SELECT s.file_id, s.id FROM segments s JOIN files f ON f.id = s.file_id WHERE {}",
-                likes("s.text", &words, &mut args)
+                "SELECT s.file_id, s.id FROM files f INDEXED BY files_mtime CROSS JOIN segments s ON s.file_id = f.id
+                 WHERE {}",
+                likes("s.text", words, &mut args)
             ),
-            "f.mtime DESC, f.id",
+            "f.mtime DESC, f.id DESC",
         ),
     };
     let sql = format!(
         "{head}{} ORDER BY {order}, s.id",
         filter_sql(filter, &mut args)
     );
+    (sql, args, fts)
+}
+
+/// 正文通道，返回按最好的片段排好的文件及其命中的片段 id（最匹配的在前）
+fn texts(db: &Db, query: &str, filter: &Filter) -> rusqlite::Result<Vec<(i64, Vec<i64>)>> {
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let (sql, args, fts) = texts_sql(&words, filter);
     let mut stmt = db.conn.prepare(&sql)?;
     let mut rows = stmt.query(params_from_iter(args))?;
     let mut out: Vec<(i64, Vec<i64>)> = Vec::new();
@@ -408,6 +456,10 @@ pub fn search(db: &Mutex<Db>, index: &Mutex<VIndex>, q: &Query) -> Result<Vec<Hi
     let t = Instant::now();
     let mut vi = lock(index);
     let db = lock(db);
+    // 等锁期间已被取代的不再开始
+    if q.cancel.as_ref().is_some_and(Cancel::superseded) {
+        return Err(DbError::Cancelled);
+    }
     let mods: Vec<&str> = match q.vector {
         Some((_, space)) => q
             .modality
@@ -426,6 +478,18 @@ pub fn search(db: &Mutex<Db>, index: &Mutex<VIndex>, q: &Query) -> Result<Vec<Hi
     };
     drop(vi);
     log::debug!("粗排用时 {:.1} 毫秒", ms(t));
+
+    // 只从精排起中止：同步内存索引中途中止会留下不完整的状态。之后都是只读查询，中止不影响数据
+    let _interruptible = match &q.cancel {
+        Some(c) => {
+            let c = c.clone();
+            db.conn
+                .progress_handler(1000, Some(move || c.superseded()))
+                .map_err(|err| db.err(err))?;
+            Some(Interruptible(&db))
+        }
+        None => None,
+    };
 
     let t = Instant::now();
     let mut lists: Vec<(f64, Vec<i64>)> = Vec::new();
@@ -648,7 +712,7 @@ fn build(
     p: &SearchParams,
 ) -> rusqlite::Result<Vec<Hit>> {
     let mut file = db.conn.prepare_cached(
-        "SELECT f.rel_path, f.name, f.kind, f.size, f.mtime, f.cloud, r.path, r.offline, f.width, f.height
+        "SELECT f.rel_path, f.name, f.kind, f.size, f.mtime, f.cloud, r.path, r.offline, f.width, f.height, r.offline = 2
          FROM files f JOIN roots r ON r.id = f.root_id WHERE f.id = ?1",
     )?;
     let mut locator = db
@@ -669,6 +733,7 @@ fn build(
                     mtime: row.get(4)?,
                     cloud: row.get(5)?,
                     offline: row.get(7)?,
+                    missing: row.get(10)?,
                     score,
                     cosine: None,
                     z: None,

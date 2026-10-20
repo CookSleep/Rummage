@@ -8,6 +8,30 @@ fn round_trip<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(msg
 }
 
 #[test]
+fn whole_drive_roots() {
+    for path in [
+        r"C:\",
+        "d:",
+        "E:/",
+        "/storage/emulated/0",
+        "/storage/1A2B-3c4d/",
+    ] {
+        assert!(whole_drive(path), "{path}");
+    }
+    for path in [
+        r"C:\Users",
+        r"\\server\share",
+        "/storage/emulated/0/DCIM",
+        "/storage/emulated",
+        "/storage/1A2B-3C4",
+        "/storage/1A2B_3C4D",
+        "/storage",
+    ] {
+        assert!(!whole_drive(path), "{path}");
+    }
+}
+
+#[test]
 fn handshake_round_trip() {
     round_trip(Hello {
         protocol: PROTOCOL_VERSION,
@@ -70,6 +94,7 @@ fn request_round_trip() {
             until: None,
             limit: Some(20),
             snippets: true,
+            supersede: false,
         },
         Request::FileInfo { file_id: 3 },
         Request::Thumbnail { file_id: 3 },
@@ -166,6 +191,7 @@ fn response_and_event_round_trip() {
                 id: 1,
                 path: r"E:\照片".into(),
                 offline: true,
+                missing: false,
                 files: 42,
                 excludes: vec!["*.tmp".into()],
                 scanning: true,
@@ -185,6 +211,7 @@ fn response_and_event_round_trip() {
                 mtime: 1,
                 cloud: false,
                 offline: true,
+                missing: false,
                 score: 0.03,
                 cosine: Some(0.5),
                 z: Some(2.5),
@@ -224,6 +251,7 @@ fn response_and_event_round_trip() {
             kind: "document".into(),
             cloud: true,
             offline: false,
+            missing: false,
             size: 10,
             mtime: 1,
             width: None,

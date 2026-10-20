@@ -16,7 +16,7 @@ use chrono::{Local, TimeZone};
 use rmcp::schemars::{self, JsonSchema, Schema, SchemaGenerator, json_schema};
 use rummage_proto::{
     FailedFile, Group, IndexStatus, ParamDef, ParamKind, ParamValue, Reply, Request, RootInfo,
-    params,
+    params, whole_drive,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
@@ -240,6 +240,9 @@ fn rules_list(rules: &[String]) -> String {
     rules.join(", ")
 }
 
+/// 整个磁盘或存储（`whole_drive`）的提醒
+const WHOLE_DRIVE_NOTE: &str = "This is a whole drive or storage root. Rummage is not designed for whole-drive indexing: system and program files are mostly searchable by file name only, and too many files slow down indexing and search. Consider remove_folder and adding only the folders you need to search.";
+
 pub fn folders_text(kinds: &[&str], roots: &[RootInfo], index: Option<&IndexStatus>) -> String {
     let mut out = format!(
         "Content recognition: {} (shared by all folders)",
@@ -264,7 +267,9 @@ pub fn folders_text(kinds: &[&str], roots: &[RootInfo], index: Option<&IndexStat
     }
     out.push_str("\nIndexed folders:");
     for r in roots {
-        if r.offline {
+        if r.missing {
+            let _ = write!(out, "\n  {} (folder not found)", r.path);
+        } else if r.offline {
             let _ = write!(out, "\n  {} (device not connected)", r.path);
         } else if r.scanning {
             let _ = write!(out, "\n  {} (still counting files)", r.path);
@@ -273,6 +278,9 @@ pub fn folders_text(kinds: &[&str], roots: &[RootInfo], index: Option<&IndexStat
         }
         if !r.excludes.is_empty() {
             let _ = write!(out, "\n    excludes: {}", rules_list(&r.excludes));
+        }
+        if whole_drive(&r.path) {
+            let _ = write!(out, "\n    note: {WHOLE_DRIVE_NOTE}");
         }
     }
     out
@@ -482,12 +490,16 @@ impl Server {
         let kinds = self.set_kinds(p.kinds.as_deref()).await.map_err(|err| {
             format!("The folder was added, but the file types were not saved. {err}")
         })?;
-        Ok(format!(
+        let mut out = format!(
             "Added {}; Rummage is scanning and indexing it in the background.\nexcludes: {}\nContent recognition: {} (shared by all folders)",
             root.path,
             rules_list(&root.excludes),
             kind_list(&kinds)
-        ))
+        );
+        if whole_drive(&root.path) {
+            let _ = write!(out, "\nNote: {WHOLE_DRIVE_NOTE}");
+        }
+        Ok(out)
     }
 
     pub(super) async fn update_folder_text(&self, p: UpdateFolderParams) -> Result<String, String> {

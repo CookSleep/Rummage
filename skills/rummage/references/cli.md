@@ -30,7 +30,7 @@ rummage-core search [<查询>] [--image <图片>] [--type <类型,…>] [--folde
 {"protocol":2,"hits":[…],"tookMs":12,"partial":false,"semanticUnavailable":false,"unavailable":null,"weakOmitted":0}
 ```
 
-- `hits[]` 的常用字段：`path`、`name`、`kind`、`size`（字节）、`mtime`（Unix 毫秒）、`matchPct`（0–100，可能为 null）、`lowRelevance`、`cloud`（仅在云端）、`offline`（设备未连接）、`segments[]`（`segmentId`、`locatorJson`）、`nameHit`、`textSegments`、`snippet`（`segmentId` 即命中 ID，`text`）。
+- `hits[]` 的常用字段：`path`、`name`、`kind`、`size`（字节）、`mtime`（Unix 毫秒）、`matchPct`（0–100，可能为 null）、`lowRelevance`、`cloud`（仅在云端）、`offline`（所在文件夹不可访问）、`missing`（所在文件夹不存在，磁盘已连接；为假而 `offline` 为真时是设备未连接）、`segments[]`（`segmentId`、`locatorJson`）、`nameHit`、`textSegments`、`snippet`（`segmentId` 即命中 ID，`text`）。
 - `partial`：索引尚未完成，结果可能不完整。
 - `semanticUnavailable` / `unavailable`：内容识别不可用及原因（`paused`、`no_model`、`images_off`、`no_mmproj`、`engine`、`query_too_long`），此时只有文件名和正文原词的匹配。
 - `weakOmitted`：没有列出的匹配度较低的结果，至少这么多。
@@ -42,7 +42,7 @@ rummage-core status [--json]
 ```
 
 显示版本、首次设置是否完成、索引状态与暂停原因、进度（各类型）、失败数、推理设备、已索引的文件夹。
-JSON：`{"protocol":2,"coreVersion":…,"onboarded":…,"index":{…},"roots":[{"id","path","offline","files","excludes"}]}`。
+JSON：`{"protocol":2,"coreVersion":…,"onboarded":…,"index":{…},"roots":[{"id","path","offline","missing","files","excludes"}]}`。
 
 ## context
 
@@ -70,7 +70,7 @@ rummage-core folders remove <文件夹> [--json]
 | `--no-exclude` | 清空排除规则（Windows PowerShell 5.1 不会把空字符串参数传给程序，不要用 `--exclude ""`） |
 
 `folders` 列出识别内容的文件类型、索引进度和每个文件夹的文件数与排除规则；没有已索引的文件夹时退出码为 1。`remove` 只移除索引，不删除文件。
-JSON：`folders` 为 `{"protocol":2,"kinds":[…],"roots":[{"id","path","offline","files","excludes"}],"index":{…}|null}`；`add`、`set` 为 `{"protocol":2,"message":…,"root":{…}}`，`remove` 为 `{"protocol":2,"message":…}`。
+JSON：`folders` 为 `{"protocol":2,"kinds":[…],"roots":[{"id","path","offline","missing","files","excludes"}],"index":{…}|null}`；`add`、`set` 为 `{"protocol":2,"message":…,"root":{…}}`，`remove` 为 `{"protocol":2,"message":…}`。
 
 ## settings
 

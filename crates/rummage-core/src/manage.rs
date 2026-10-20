@@ -239,6 +239,7 @@ mod tests {
             id,
             path: path.into(),
             offline: false,
+            missing: false,
             files: 0,
             excludes: Vec::new(),
             scanning: false,

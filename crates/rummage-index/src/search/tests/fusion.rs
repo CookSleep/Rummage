@@ -288,6 +288,7 @@ fn similar_uses_stored_vector() {
             text: None,
             filter,
             params: PARAMS,
+            cancel: None,
         };
         file_names(&f.search(&index, &query))
             .into_iter()
@@ -351,6 +352,7 @@ fn similar_from_slice_uses_whole_image() {
         text: None,
         filter: &filter,
         params: PARAMS,
+        cancel: None,
     };
     assert_eq!(file_names(&f.search(&index, &query)), ["photo.jpg"]);
 

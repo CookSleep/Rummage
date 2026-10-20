@@ -16,8 +16,10 @@ pub struct FileRow {
     pub ext: String,
     pub kind: String,
     pub cloud: bool,
-    /// 所在根目录离线
+    /// 所在根目录不可访问
     pub offline: bool,
+    /// 所在根目录不存在，它的磁盘或存储已连接
+    pub missing: bool,
     pub quick_hash: Option<Vec<u8>>,
     pub width: Option<u32>,
     pub height: Option<u32>,
@@ -82,7 +84,7 @@ impl Db {
         self.conn
             .query_row(
                 "SELECT r.path, f.rel_path, f.name, f.ext, f.kind, f.cloud, r.offline, f.quick_hash,
-                   f.width, f.height, f.size, f.mtime, f.status
+                   f.width, f.height, f.size, f.mtime, f.status, r.offline = 2
                  FROM files f JOIN roots r ON r.id = f.root_id WHERE f.id = ?1",
                 [id],
                 |row| {
@@ -101,6 +103,7 @@ impl Db {
                         kind: row.get(4)?,
                         cloud: row.get(5)?,
                         offline: row.get(6)?,
+                        missing: row.get(13)?,
                         quick_hash: row.get(7)?,
                         width: dim(8)?,
                         height: dim(9)?,

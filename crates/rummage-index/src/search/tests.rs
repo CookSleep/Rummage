@@ -161,6 +161,7 @@ fn semantic<'a>(v: &'a [f32], space: &'a Space, filter: &'a Filter) -> Query<'a>
         text: None,
         filter,
         params: PARAMS,
+        cancel: None,
     }
 }
 
@@ -173,6 +174,7 @@ fn by_name<'a>(name: &'a str, filter: &'a Filter) -> Query<'a> {
         text: Some(name),
         filter,
         params: PARAMS,
+        cancel: None,
     }
 }
 

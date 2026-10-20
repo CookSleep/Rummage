@@ -573,6 +573,7 @@ mod tests {
                 text: None,
                 filter: &filter,
                 params,
+                cancel: None,
             };
             search(&e.fx.db, &index, &q)
                 .unwrap()

@@ -203,7 +203,9 @@ pub fn search_text(p: &Page, n: &Notes) -> String {
             format!("modified: {}", format_date(h.mtime)),
             format!("size: {}", format_size(h.size)),
         ];
-        if h.offline {
+        if h.missing {
+            info.push("its folder no longer exists".into());
+        } else if h.offline {
             info.push("device not connected".into());
         } else if h.cloud {
             info.push("cloud-only, not downloaded".into());
@@ -351,7 +353,9 @@ pub fn status_text(
     }
     out.push_str("\nIndexed folders (use these values for search_files.folder):");
     for r in roots {
-        if r.offline {
+        if r.missing {
+            let _ = write!(out, "\n  {} (folder not found)", r.path);
+        } else if r.offline {
             let _ = write!(out, "\n  {} (device not connected)", r.path);
         } else {
             let _ = write!(out, "\n  {} ({} files)", r.path, r.files);

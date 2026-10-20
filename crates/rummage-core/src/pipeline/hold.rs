@@ -34,6 +34,7 @@ impl Shared {
     /// 丢弃槽中的引擎，记下它的释放标志（`wait_released` 等它）；返回该标志。调用方持有引擎槽的锁
     pub(super) fn retire(&self, slot: &mut Option<Arc<Engine>>) -> Option<Arc<AtomicBool>> {
         let old = slot.take()?;
+        old.retired.store(true, Ordering::Relaxed);
         let flag = old.released.0.clone();
         *lock(&self.last_released) = Some(flag.clone());
         Some(flag)

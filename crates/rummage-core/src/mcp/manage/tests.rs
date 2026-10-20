@@ -143,16 +143,27 @@ fn folders_output() {
         id: 1,
         path: r"D:\照片".into(),
         offline: false,
+        missing: false,
         files: 12,
         excludes: vec!["*.tmp".into()],
         scanning: false,
     };
+    let disk = RootInfo {
+        id: 2,
+        path: r"C:\".into(),
+        excludes: Vec::new(),
+        ..root.clone()
+    };
     assert_eq!(
-        folders_text(&["document"], &[root], None),
-        "Content recognition: document (shared by all folders)
+        folders_text(&["document"], &[root, disk], None),
+        format!(
+            "Content recognition: document (shared by all folders)
 Indexed folders:
   D:\\照片 (12 files)
-    excludes: *.tmp"
+    excludes: *.tmp
+  C:\\ (12 files)
+    note: {WHOLE_DRIVE_NOTE}"
+        )
     );
     assert_eq!(
         folders_text(&[], &[], None),

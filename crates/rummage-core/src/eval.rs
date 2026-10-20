@@ -394,6 +394,7 @@ fn search(
         until: None,
         limit: Some(DEPTH),
         snippets: false,
+        supersede: false,
     };
     results(state, body)
 }
@@ -763,6 +764,7 @@ fn similar(
                 until: None,
                 limit: Some(DEPTH),
                 snippets: false,
+                supersede: false,
             };
             let (hits, ms) = results(state, body)?;
             took.push(ms);

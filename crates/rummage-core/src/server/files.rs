@@ -75,6 +75,7 @@ pub(super) fn info(state: &State, id: i64) -> Result<Reply, ApiError> {
         kind: f.kind,
         cloud: f.cloud,
         offline: f.offline,
+        missing: f.missing,
         size: f.size,
         mtime: f.mtime,
         width: f.width,
@@ -193,6 +194,9 @@ fn local_file(state: &State, id: i64) -> Result<(FileRow, &Path, Vec<u8>), ApiEr
     let bad = |msg: String| api_error(ApiError::BAD_REQUEST, msg);
     let f = row(state, id)?;
     let dir = &opened(state)?.dir;
+    if f.missing {
+        return Err(bad("找不到文件所在的文件夹。".into()));
+    }
     if f.offline {
         return Err(bad("文件所在的设备未连接。".into()));
     }

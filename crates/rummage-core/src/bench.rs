@@ -431,6 +431,7 @@ fn search(text: String) -> Request {
         until: None,
         limit: None,
         snippets: false,
+        supersede: false,
     }
 }
 
@@ -635,6 +636,7 @@ fn check(synth: &Synth, data: &Path) -> Result<(), String> {
             text: None,
             filter: &filter,
             params: sp,
+            cancel: None,
         };
         let hits = rummage_index::search(&db, &vi, &query).map_err(|err| err.to_string())?;
         let same = hits.iter().filter(|h| exact.contains(&h.file_id)).count();

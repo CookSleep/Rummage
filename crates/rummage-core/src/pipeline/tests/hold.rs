@@ -1,4 +1,4 @@
-//! 引擎的挂起与重建：绑定旧引擎的作业放回、自检期间挂起与 `reload`、引导未完成时挂起、关闭图片索引。
+//! 引擎的挂起与重建：绑定旧引擎（失效或已丢弃）的作业放回、自检期间挂起与 `reload`、引导未完成时挂起、关闭图片索引。
 use super::*;
 
 #[test]
@@ -111,4 +111,35 @@ fn reload_records_released_engine() {
     assert!(p.held());
     p.hold(Hold::Models, false);
     assert!(!p.held());
+}
+
+#[test]
+fn retired_engine_jobs_released() {
+    let files: Vec<(String, Vec<u8>)> = (0..8)
+        .map(|i| (format!("{i}.txt"), format!("内容{i}").into_bytes()))
+        .collect();
+    let refs: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
+    let mut e = env(&refs);
+    e.threads = Some(1);
+    *lock(&e.stub.hold) = true;
+    e.start(true, true);
+    wait_entered(&e);
+    thread::sleep(Duration::from_millis(500));
+    let p = e.pipeline.as_ref().unwrap();
+    let old = lock(&p.shared.engine).clone().unwrap();
+    let claimed = e.count("SELECT COUNT(*) FROM jobs WHERE stage <> 'pending'");
+    // 设备检测开始时丢弃引擎：正在推理的文件算完，已领取、还没推理的放回 pending，不在旧引擎上算
+    p.hold(Hold::Selftest, true);
+    release_hold(&e);
+    let s = e.wait_until(|s| s.state == IndexState::Idle && s.done + s.pending == 8);
+    assert!(s.done > 0 && (s.done as i64) < claimed, "{s:?} {claimed}");
+    assert_eq!(s.failed, 0);
+    // 检测结束后由新引擎接着算
+    p.hold(Hold::Selftest, false);
+    let s = e.wait_idle(0);
+    assert_eq!(s.done, 8);
+    assert!(!Arc::ptr_eq(&lock(&p.shared.engine).clone().unwrap(), &old));
 }

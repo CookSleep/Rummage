@@ -1,4 +1,4 @@
-//! 暂停、降温与空闲卸载：暂停时不领取新作业但查询照常、暂停期间不显示剩余时间、降温时处理中的作业完成前不再领取、
+//! 暂停、降温与空闲卸载：暂停时不领取新作业、丢弃推理引擎但查询照常、暂停期间不显示剩余时间、降温时处理中的作业完成前不再领取、
 //! 空闲卸载时限的修改立即生效。
 use super::*;
 
@@ -37,23 +37,25 @@ fn paused_claims_nothing_but_queries_work() {
         assert!(Instant::now() < deadline, "没有收到暂停时的进度事件");
     }
     let claimed = e.count("SELECT COUNT(*) FROM jobs WHERE stage <> 'pending'");
+    // 暂停时丢弃推理引擎
+    assert!(lock(&p.shared.engine).is_none());
 
-    // 查询照常可用
+    // 查询照常可用，需要时新建引擎
     let mut q = p.query_engine().unwrap();
     p.embed_query(&mut q, Input::Query("暂停时的查询".into()))
         .unwrap();
     assert_eq!(e.stub.queries.load(Ordering::Relaxed), 1);
 
-    // 已领取的照常完成，之后不再领取
+    // 正在推理的文件算完，已领取、还没推理的放回 pending，之后不再领取
     release_hold(&e);
-    let s = e.wait_until(|s| s.state == IndexState::Idle && s.done as i64 == claimed);
+    let s = e.wait_until(|s| s.state == IndexState::Idle && s.done + s.pending == 8);
     assert_eq!(s.paused, Some(reason));
-    assert!(s.pending > 0 && s.done > 0, "{s:?}");
+    assert!(s.done > 0 && (s.done as i64) < claimed, "{s:?} {claimed}");
     thread::sleep(Duration::from_millis(500));
     assert_eq!(e.status().done, s.done);
     assert_eq!(
         e.count("SELECT COUNT(*) FROM jobs WHERE stage <> 'pending'"),
-        claimed
+        s.done as i64
     );
 
     // 解除后继续
@@ -164,6 +166,7 @@ fn engine_idle_applied() {
         cfg: cpu.cfg.clone(),
         failed: AtomicBool::new(false),
         driver_failed: AtomicBool::new(false),
+        retired: AtomicBool::new(false),
         released: Released(Arc::new(AtomicBool::new(false))),
     }));
     lock(&p.shared.params).insert("engine_idle_min".into(), ParamValue::Int(3));

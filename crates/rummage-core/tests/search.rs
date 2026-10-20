@@ -73,6 +73,7 @@ fn query(text: Option<&str>, image_path: Option<&Path>, kinds: &[&str]) -> Reque
         until: None,
         limit: None,
         snippets: false,
+        supersede: false,
     }
 }
 

@@ -13,7 +13,7 @@ globset = { version = "=0.4.20", default-features = false }
 half = "=2.7.1"
 log = "=0.4.34"
 # bundled 自带 SQLite（含 FTS5 与 trigram 分词器），不依赖系统库
-rusqlite = { version = "=0.40.2", features = ["bundled"] }
+rusqlite = { version = "=0.40.2", features = ["bundled", "hooks"] }
 serde_json = "=1.0.154"
 thiserror = "=2.0.21"
 

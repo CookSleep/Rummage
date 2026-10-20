@@ -10,7 +10,9 @@ import EstimateStep from './EstimateStep'
 import FoldersStep from './FoldersStep'
 import Onboarding from './Onboarding'
 
-const ROOT: RootInfo = { id: 1, path: 'D:\\照片', offline: false, files: 5, excludes: [], scanning: false }
+const ROOT: RootInfo = { id: 1, path: 'D:\\照片', offline: false, missing: false, files: 5, excludes: [], scanning: false }
+/** 添加按钮连同其下一直显示的提示 */
+const ADD = '添加文件夹只添加需要搜索的文件夹，不建议添加整个磁盘'
 const KINDS = { documents: true, images: true, audio: false, video: false }
 const ESTIMATE: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000 } }, scanning: false }], freeGb: 100 }
 
@@ -51,6 +53,54 @@ describe('FoldersStep', () => {
     await emitEvent('core-event', { type: 'ScanProgress', rootId: 1, done: true })
     expect(text()).toContain('5 个文件')
     expect(text()).not.toContain('正在统计文件')
+  })
+
+  it('不可访问的文件夹区分设备未连接与找不到文件夹', async () => {
+    mockCore({
+      list_roots: () => [
+        { ...ROOT, path: 'E:\\移动硬盘', offline: true },
+        { ...ROOT, id: 2, path: 'D:\\旧资料', offline: true, missing: true },
+      ],
+    })
+    render(<FoldersStep />)
+    await flush()
+    expect(text()).toContain('E:\\移动硬盘设备未连接')
+    expect(text()).toContain('D:\\旧资料找不到文件夹')
+  })
+
+  it('添加处一直提示只添加需要的文件夹；添加整个磁盘后建议移除，可当场移除', async () => {
+    let roots = [ROOT]
+    const calls = mockCore({
+      list_roots: () => roots,
+      add_root: () => {
+        roots = [...roots, { ...ROOT, id: 2, path: 'C:\\' }]
+        return { id: 2, path: 'C:\\', wholeDrive: true }
+      },
+      remove_root: () => {
+        roots = roots.filter((r) => r.id !== 2)
+      },
+    })
+    render(<FoldersStep />)
+    await flush()
+    expect(text()).toContain('只添加需要搜索的文件夹，不建议添加整个磁盘')
+    expect(text()).not.toContain('建议只添加需要的文件夹')
+
+    await click(button(ADD))
+    await flush()
+    expect(text()).toContain('「C:\\」是整个磁盘')
+
+    await click(button('移除'))
+    expect(calls.find((c) => c.cmd === 'remove_root')?.args).toEqual({ id: 2 })
+    expect(text()).not.toContain('「C:\\」是整个磁盘')
+  })
+
+  it('添加普通文件夹时不弹窗', async () => {
+    mockCore({ list_roots: () => [ROOT], add_root: () => ({ id: 1, path: 'D:\\照片', wholeDrive: false }) })
+    render(<FoldersStep />)
+    await flush()
+    await click(button(ADD))
+    await flush()
+    expect(text()).not.toContain('建议只添加需要的文件夹')
   })
 })
 

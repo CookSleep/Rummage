@@ -18,6 +18,7 @@ const hit = (fileId: number): SearchHit => ({
   mtime: 1_700_000_000_000,
   cloud: false,
   offline: false,
+  missing: false,
   score: 1,
   cosine: null,
   z: null,

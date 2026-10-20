@@ -104,7 +104,7 @@ describe('formatDuration', () => {
 
 describe('indexStateText', () => {
   const base: FileInfo = {
-    fileId: 1, path: 'D:\a.md', name: 'a.md', ext: 'md', kind: 'document', cloud: false, offline: false,
+    fileId: 1, path: 'D:\a.md', name: 'a.md', ext: 'md', kind: 'document', cloud: false, offline: false, missing: false,
     size: 1, mtime: 0, width: null, height: null, status: 'stored', job: null, segments: 0, indexedAt: null, spaces: [],
   }
 
@@ -142,7 +142,7 @@ describe('unavailableText', () => {
 describe('matchText', () => {
   it('列出命中的通道', () => {
     const hit: SearchHit = {
-      fileId: 1, path: 'D:\a.md', name: 'a.md', kind: 'document', size: 1, mtime: 0, cloud: false, offline: false,
+      fileId: 1, path: 'D:\a.md', name: 'a.md', kind: 'document', size: 1, mtime: 0, cloud: false, offline: false, missing: false,
       score: 0, cosine: null, z: null, matchPct: null, lowRelevance: false, segments: [], nameHit: false, textSegments: [], width: null, height: null, snippet: null,
     }
     expect(matchText({ ...hit, textSegments: [3] })).toBe('正文含搜索词')
@@ -152,7 +152,7 @@ describe('matchText', () => {
 
 describe('matchPercent', () => {
   const hit: SearchHit = {
-    fileId: 1, path: 'D:\a.md', name: 'a.md', kind: 'document', size: 1, mtime: 0, cloud: false, offline: false,
+    fileId: 1, path: 'D:\a.md', name: 'a.md', kind: 'document', size: 1, mtime: 0, cloud: false, offline: false, missing: false,
     score: 0, cosine: 0.4, z: 3.4, matchPct: null, lowRelevance: false, segments: [], nameHit: false, textSegments: [], width: null, height: null, snippet: null,
   }
 

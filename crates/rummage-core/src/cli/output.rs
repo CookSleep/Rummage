@@ -227,7 +227,9 @@ pub fn search_text(r: &Results) -> String {
             format!("修改于 {}", format_date(h.mtime)),
             format_size(h.size),
         ];
-        if h.offline {
+        if h.missing {
+            info.push("找不到所在的文件夹".into());
+        } else if h.offline {
             info.push("设备未连接".into());
         } else if h.cloud {
             info.push("仅在云端".into());
@@ -409,7 +411,9 @@ pub fn status_text(s: &Status) -> String {
     }
     out.push_str("\n已索引的文件夹：");
     for r in s.roots {
-        let note = if r.offline {
+        let note = if r.missing {
+            "找不到文件夹".to_string()
+        } else if r.offline {
             "设备未连接".to_string()
         } else {
             format!("{} 个文件", r.files)

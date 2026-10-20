@@ -47,6 +47,7 @@ use crate::fsx::{
     self, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_RECALL_ON_OPEN,
     FILE_ATTRIBUTE_SYSTEM,
 };
+use crate::roots::{OFFLINE_DEVICE, OFFLINE_MISSING};
 use crate::{lock, platform};
 
 mod exclude;
@@ -298,6 +299,28 @@ pub fn root_reachable(root: &Path) -> bool {
     fs::read_dir(root).is_ok()
 }
 
+/// 不可访问的根目录的原因（`roots.offline`）：所在的磁盘或存储（盘符、网络共享，Android 的
+/// `/storage/emulated/<用户>` 与 `/storage/<存储卡>`）也访问不了时是设备未连接，否则是文件夹不存在
+pub fn offline_state(root: &Path) -> i64 {
+    let s = root.to_string_lossy().replace('\\', "/");
+    let depth = if s.starts_with("/storage/emulated/") {
+        4
+    } else if s.starts_with("/storage/") {
+        3
+    } else {
+        usize::MAX
+    };
+    let volume = match depth {
+        usize::MAX => root.ancestors().last().unwrap_or(root).to_path_buf(),
+        n => root.components().take(n).collect(),
+    };
+    if root_reachable(&volume) {
+        OFFLINE_MISSING
+    } else {
+        OFFLINE_DEVICE
+    }
+}
+
 /// 一个根目录遍历完、写入了普通的新增与变化之后，等待配对的部分
 struct Walk {
     root_id: i64,
@@ -459,7 +482,7 @@ fn walk(
 ) -> Result<Walk, ScanError> {
     let (root, settings, offline, data_dir, mut known) = {
         let db = lock(db);
-        let row: Option<(String, String, bool)> = db
+        let row: Option<(String, String, i64)> = db
             .conn
             .query_row(
                 "SELECT path, settings_json, offline FROM roots WHERE id = ?1",
@@ -486,28 +509,27 @@ fn walk(
         gone: Vec::new(),
         deferred: Vec::new(),
     };
-    let set_offline = |value: bool| -> Result<(), ScanError> {
-        let db = lock(db);
-        db.conn
-            .execute(
-                "UPDATE roots SET offline = ?2 WHERE id = ?1",
-                params![root_id, value],
-            )
-            .map_err(|err| db.err(err))?;
-        Ok(())
-    };
+    let set_offline = |state: i64| lock(db).set_root_offline(root_id, state);
 
     let root_path = PathBuf::from(&root);
-    // 移动硬盘断开、盘符变化等：标为离线，保留全部记录
+    // 移动硬盘断开、盘符变化、文件夹被删除或改名等：标为离线，保留全部记录
     if !root_reachable(&root_path) {
-        log::warn!("根目录 {root} 不可访问，标为离线。");
-        if !offline {
-            set_offline(true)?;
+        let state = offline_state(&root_path);
+        log::warn!(
+            "根目录 {root} 不可访问（{}），标为离线。",
+            if state == OFFLINE_MISSING {
+                "文件夹不存在"
+            } else {
+                "设备未连接"
+            }
+        );
+        if offline != state {
+            set_offline(state)?;
         }
         return Ok(out);
     }
-    if offline {
-        set_offline(false)?;
+    if offline != 0 {
+        set_offline(0)?;
     }
 
     let globs = user_globs(&settings);

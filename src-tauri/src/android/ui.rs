@@ -17,7 +17,11 @@ pub async fn open_file<R: Runtime>(app: AppHandle<R>, file_id: i64) -> Result<()
     if info.offline {
         return Err(error(
             ApiError::BAD_REQUEST,
-            "文件所在的设备未连接，请连接后重试。",
+            if info.missing {
+                "找不到文件所在的文件夹，它可能已被删除、改名或移走。"
+            } else {
+                "文件所在的设备未连接，请连接后重试。"
+            },
         ));
     }
     let opened = app
@@ -37,7 +41,11 @@ pub async fn share_file<R: Runtime>(app: AppHandle<R>, file_id: i64) -> Result<(
     if info.offline {
         return Err(error(
             ApiError::BAD_REQUEST,
-            "文件所在的设备未连接，请连接后重试。",
+            if info.missing {
+                "找不到文件所在的文件夹，它可能已被删除、改名或移走。"
+            } else {
+                "文件所在的设备未连接，请连接后重试。"
+            },
         ));
     }
     app.state::<Android<R>>()

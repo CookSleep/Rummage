@@ -426,6 +426,7 @@ async fn run_search(s: &mut Session, a: SearchArgs, json: bool) -> Result<Outcom
         until,
         limit: Some(a.limit.max(limit_range().0)),
         snippets: true,
+        supersede: false,
     };
     let Reply::Results {
         hits,

@@ -16,6 +16,8 @@
 //!   `min_relevance`、90% 处为门槛加 `span_90`；以图搜图与“找相似的”用另一组锚点。低于 50% 锚点的最多 49%。
 //!   锚点按查询向量所在空间的运行库选（`GGUF` / `LITERT`）：两者的 z 分布不同；门槛的默认值两者相同（3.0）。
 //! - 正文片段（`snippets`，命令行用）：文档结果取第一个带文字的命中片段，空白合并后截取前 `SNIPPET_CHARS` 个字符。
+//! - 可被取代的搜索（`supersede`，界面边输入边搜索）：同一连接上更新的这类搜索到来时中止（`rummage_index::Cancel`），
+//!   回 `cancelled`；界面只采用最后一次搜索的结果。
 //! - 日志中不记录查询文本；以图搜图的图片路径可能出现在读取失败的日志中，与索引文件的日志相同。
 use std::collections::VecDeque;
 use std::path::{Component, Path, Prefix};
@@ -24,10 +26,11 @@ use std::time::Instant;
 use rummage_embed::space;
 use rummage_embed::{Error as EmbedError, Input};
 use rummage_index::{
-    Filter, FsError, Query, QueryKind, SearchParams, Space, check_volume, ensure_local,
+    Cancel, DbError, Filter, FsError, Query, QueryKind, SearchParams, Space, check_volume,
+    ensure_local,
 };
 use rummage_proto::{
-    ApiError, ParamKind, Reply, SearchHit, SegmentHit, SemanticUnavailable, SimilarTo, Snippet,
+    ApiError, ParamKind, Reply, Request, SearchHit, SegmentHit, SemanticUnavailable, Snippet,
     params,
 };
 
@@ -204,15 +207,34 @@ fn clamp_limit(limit: u32) -> usize {
     }
 }
 
-pub(super) fn respond(
+/// 处理 `Request::Search`；`cancel` 只给可被取代的搜索
+pub(super) fn request(
     state: &State,
-    text: Option<String>,
-    image_path: Option<String>,
-    similar: Option<SimilarTo>,
-    mut filter: Filter,
-    limit: Option<u32>,
-    snippets: bool,
+    body: Request,
+    cancel: Option<Cancel>,
 ) -> Result<Reply, ApiError> {
+    let Request::Search {
+        text,
+        image_path,
+        similar,
+        kinds,
+        root_ids,
+        since,
+        until,
+        limit,
+        snippets,
+        supersede: _,
+    } = body
+    else {
+        unreachable!("只把搜索请求交给这里：{body:?}");
+    };
+    let mut filter = Filter {
+        kinds,
+        root_ids,
+        since,
+        until,
+        exclude_file: None,
+    };
     let start = Instant::now();
     let core = opened(state)?;
     let (db, index) = (&core.db, &core.index);
@@ -360,9 +382,12 @@ pub(super) fn respond(
         text: query_text,
         filter: &filter,
         params,
+        cancel,
     };
-    let hits = rummage_index::search(db, index, &query)
-        .map_err(|err| api_error(ApiError::UNAVAILABLE, err.to_string()))?;
+    let hits = rummage_index::search(db, index, &query).map_err(|err| match err {
+        DbError::Cancelled => api_error(ApiError::CANCELLED, err.to_string()),
+        err => api_error(ApiError::UNAVAILABLE, err.to_string()),
+    })?;
     let mut hits: Vec<SearchHit> = hits
         .into_iter()
         .map(|h| SearchHit {
@@ -374,6 +399,7 @@ pub(super) fn respond(
             mtime: h.mtime,
             cloud: h.cloud,
             offline: h.offline,
+            missing: h.missing,
             score: h.score,
             cosine: h.cosine,
             z: h.z,

@@ -144,6 +144,7 @@ impl Shared {
             cfg,
             failed: AtomicBool::new(false),
             driver_failed: AtomicBool::new(false),
+            retired: AtomicBool::new(false),
             released: Released(Arc::new(AtomicBool::new(false))),
         });
         *slot = Some(engine.clone());

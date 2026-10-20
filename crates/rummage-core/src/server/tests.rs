@@ -414,6 +414,7 @@ fn query_too_long_reported() {
         until: None,
         limit: None,
         snippets: false,
+        supersede: false,
     };
     let Ok(Reply::Results {
         semantic_unavailable,
@@ -472,6 +473,7 @@ fn search_without_inference_skips_engine() {
         until: None,
         limit: None,
         snippets: false,
+        supersede: false,
     };
     // 空查询与不带描述的找相似不推理，不取引擎
     assert!(respond(search(" ", None), &state).is_ok());

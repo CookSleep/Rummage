@@ -99,9 +99,9 @@ pub(super) fn sync(state: &State) {
         }
     };
     let mut map = lock(&w.map);
-    map.retain(|id, (path, _)| roots.iter().any(|r| r.0 == *id && r.1 == *path && !r.2));
+    map.retain(|id, (path, _)| roots.iter().any(|r| r.0 == *id && r.1 == *path && r.2 == 0));
     for (id, path, offline) in roots {
-        if offline || map.contains_key(&id) {
+        if offline != 0 || map.contains_key(&id) {
             continue;
         }
         let tx = w.tx.clone();
@@ -231,7 +231,7 @@ fn flush(state: &State, batch: Batch) {
     }
 }
 
-/// 离线的根目录能访问了就完整对账
+/// 离线的根目录能访问了就完整对账；仍不能访问时更新原因（设备连上了、文件夹仍不存在）
 fn poll_offline(state: &State) {
     let Ok(core) = &state.db else {
         return;
@@ -244,9 +244,19 @@ fn poll_offline(state: &State) {
         }
     };
     for (id, path, offline) in roots {
-        if offline && rummage_index::root_reachable(Path::new(&path)) {
+        if offline == 0 {
+            continue;
+        }
+        if rummage_index::root_reachable(Path::new(&path)) {
             log::info!("文件夹 {path} 可以访问了，开始对账。");
             state.queue_scan(ScanJob::Root(id));
+            continue;
+        }
+        let now = rummage_index::offline_state(Path::new(&path));
+        if now != offline
+            && let Err(err) = lock(&core.db).set_root_offline(id, now)
+        {
+            log::warn!("无法记下文件夹 {path} 不可访问的原因：{err}");
         }
     }
 }

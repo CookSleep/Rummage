@@ -12,6 +12,7 @@ function hit(kind: string, name: string, locatorJson?: string): SearchHit {
     mtime: 1,
     cloud: false,
     offline: false,
+    missing: false,
     score: 1,
     cosine: 0.5,
     z: 3,

@@ -64,6 +64,8 @@ impl ApiError {
     pub const BAD_REQUEST: &str = "bad_request";
     pub const INTERNAL: &str = "internal";
     pub const UNAVAILABLE: &str = "unavailable";
+    /// 搜索被同一连接上之后的搜索取代（`Request::Search` 的 `supersede`）
+    pub const CANCELLED: &str = "cancelled";
 }
 
 /// 客户端发出的消息
@@ -148,7 +150,8 @@ pub enum Request {
     /// 文字描述，与图片合成一条查询），路径只用于计算查询向量；
     /// 否则按 `text` 做语义与文件名检索。
     /// `kinds`、`root_ids` 为空表示不限，`since`、`until` 为修改时间（Unix 毫秒，含两端），
-    /// `limit` 为空时用参数 `result_limit`；`snippets` 为真时给文档结果附正文片段（`SearchHit::snippet`，命令行用）
+    /// `limit` 为空时用参数 `result_limit`；`snippets` 为真时给文档结果附正文片段（`SearchHit::snippet`，命令行用）。
+    /// `supersede` 为真时（界面边输入边搜索）可被取代：同一连接上又收到带此标记的搜索时，本次中止并回 `cancelled`
     Search {
         text: Option<String>,
         image_path: Option<String>,
@@ -159,6 +162,7 @@ pub enum Request {
         until: Option<i64>,
         limit: Option<u32>,
         snippets: bool,
+        supersede: bool,
     },
     /// 按索引中的文件 ID 取路径等信息（打开、在资源管理器中显示、预览），回复 `Reply::File`；
     /// 界面只能用索引中的 ID，不能传任意路径
@@ -381,8 +385,10 @@ pub struct SearchHit {
     pub mtime: i64,
     /// 网盘占位文件
     pub cloud: bool,
-    /// 所在文件夹的设备未连接
+    /// 所在文件夹不可访问（`missing` 或设备未连接）
     pub offline: bool,
+    /// 所在文件夹不存在，它的磁盘或存储已连接
+    pub missing: bool,
     /// RRF 融合分数
     pub score: f64,
     /// 最高余弦；没有语义命中时为空
@@ -443,7 +449,10 @@ pub struct FileInfo {
     pub ext: String,
     pub kind: String,
     pub cloud: bool,
+    /// 所在文件夹不可访问（`missing` 或设备未连接）
     pub offline: bool,
+    /// 所在文件夹不存在，它的磁盘或存储已连接
+    pub missing: bool,
     pub size: i64,
     /// Unix 毫秒
     pub mtime: i64,
@@ -505,14 +514,41 @@ pub struct FailedCursor {
     pub file_id: i64,
 }
 
+/// 文件夹是整个磁盘或存储：Windows 的盘符根目录（`C:\`），Android 的手机存储（`/storage/emulated/<用户>`）
+/// 与存储卡（`/storage/XXXX-XXXX`）根目录。本项目不面向全盘索引，添加这类文件夹时界面、命令行与 MCP 都提醒
+pub fn whole_drive(path: &str) -> bool {
+    let b = path.as_bytes();
+    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        return matches!(&b[2..], b"" | b"\\" | b"/");
+    }
+    let Some(rest) = path.strip_prefix("/storage/") else {
+        return false;
+    };
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    if let Some(user) = rest.strip_prefix("emulated/") {
+        return !user.is_empty() && user.bytes().all(|c| c.is_ascii_digit());
+    }
+    let card = rest.as_bytes();
+    card.len() == 9
+        && card.iter().enumerate().all(|(i, c)| {
+            if i == 4 {
+                *c == b'-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
+}
+
 /// 对应 `rummage_index::Root`
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RootInfo {
     pub id: i64,
     pub path: String,
-    /// 所在设备未连接，索引保留
+    /// 不可访问（`missing` 或设备未连接），索引保留
     pub offline: bool,
+    /// 文件夹不存在（被删除、改名或移走），它的磁盘或存储已连接
+    pub missing: bool,
     /// 已记录的文件数
     pub files: i64,
     /// 用户排除规则（glob）

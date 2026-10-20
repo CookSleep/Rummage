@@ -38,9 +38,12 @@
 //! 停止：`stop` 让各线程在手头的文件处理完后退出，并把处理中的作业放回 `pending`（不计失败）；
 //! 核心崩溃时没有这一步，下次启动由 `Db::recover_jobs` 计一次失败。
 //! 降温：`set_slow` 打开时调度线程一次只处理一个作业，完成后休息与它处理时长相同的时间再领取下一个（`schedule`）。
-//! 暂停：`set_paused` 给出原因（`resource`）时调度线程不再领取新作业，已领取的照常处理完；原因变化时立即广播一次
-//! `IndexProgress`。系统睡眠与唤醒验证期间同样不领取新作业，报为 `sleeping`（`wake`）。查询不受暂停影响，
-//! 暂停期间照常创建推理引擎；只有唤醒验证进行中时查询先等它结束。
+//! 暂停：`set_paused` 给出原因（`resource`）时调度线程不再领取新作业，并丢弃推理引擎，推理进程随正在推理的片段算完而退出，
+//! 不再占用显卡与内存；原因变化时立即广播一次 `IndexProgress`。系统睡眠与唤醒验证期间同样不领取新作业，报为
+//! `sleeping`（`wake`）。查询不受暂停影响，暂停期间需要时新建推理引擎，空闲后按 `engine_idle_min` 卸载；只有唤醒验证
+//! 进行中时查询先等它结束。
+//! 引擎从槽中丢弃（暂停、设备检测、选择的设备或参数改变，`Shared::retire`）后，还绑定它的文件算完手头的片段就放回
+//! `pending`、不计失败，由新引擎重算：检测完成或换设备后立即用新设备，不等已领取的文件在旧设备上算完。
 //! 进度广播（写库线程的与状态变化时立即发的）都在 `paused` 锁内读取状态并发出，旧状态不会晚于新状态。
 //! 空闲卸载的时限（`engine_idle_min`）修改后由 `apply_engine_idle` 交给当前引擎，新建的引擎从参数中读取。
 //! 分数校准：校准线程（`calib`）每 60 秒检查一次，有“空间 × 模态”需要时在后台计算背景分布。
@@ -173,6 +176,8 @@ struct Engine {
     failed: AtomicBool,
     /// 出现过驱动类错误（已停用所有显卡并下过结论）
     driver_failed: AtomicBool,
+    /// 已从引擎槽丢弃（暂停、设备检测、换设备、参数变化）：还绑定它、没算完的文件放回 `pending`，改用新引擎
+    retired: AtomicBool,
     /// 放在最后：字段按声明顺序释放，它释放时推理后端（及其推理进程）已经结束
     released: Released,
 }
@@ -614,7 +619,7 @@ impl Pipeline {
         self.shared.broadcast();
     }
 
-    /// 设置暂停原因；有变化时立即广播进度，解除时唤醒调度线程
+    /// 设置暂停原因；有变化时立即广播进度。暂停时丢弃推理引擎，解除时唤醒调度线程
     pub fn set_paused(&self, reason: Option<PauseReason>) {
         let mut cur = lock(&self.shared.paused);
         if *cur == reason {
@@ -625,6 +630,10 @@ impl Pipeline {
             self.shared.wake();
         }
         self.shared.send_status(reason);
+        drop(cur);
+        if reason.is_some() {
+            self.shared.retire(&mut lock(&self.shared.engine));
+        }
     }
 
     /// 打开或关闭降温；关闭后调度线程不再等完剩下的休息时间

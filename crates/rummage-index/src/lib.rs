@@ -35,10 +35,12 @@ pub use jobs::{
 pub use rebuild::{MEDIA_EXTS, Wanted};
 pub use roots::{Root, RootError, normalize_root};
 pub use scan::{
-    Dirty, ScanError, ScanLimits, ScanStats, dirty_of, kind_of, root_reachable, scan_dirs,
-    scan_root, wants_job,
+    Dirty, ScanError, ScanLimits, ScanStats, dirty_of, kind_of, offline_state, root_reachable,
+    scan_dirs, scan_root, wants_job,
 };
-pub use search::{Filter, Hit, Query, SearchParams, SegmentHit, comparable, search, stored_vector};
+pub use search::{
+    Cancel, Filter, Hit, Query, SearchParams, SegmentHit, comparable, search, stored_vector,
+};
 pub use vindex::{VIndex, quantize};
 
 /// 取得锁；持锁的线程 panic 过也照常使用

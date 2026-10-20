@@ -62,8 +62,10 @@ export interface SearchHit {
   mtime: number
   /** 网盘占位文件 */
   cloud: boolean
-  /** 所在文件夹的设备未连接 */
+  /** 所在文件夹不可访问（`missing` 或设备未连接） */
   offline: boolean
+  /** 所在文件夹不存在，它的磁盘或存储已连接 */
+  missing: boolean
   score: number
   /** 最高余弦；没有语义命中时为空 */
   cosine: number | null
@@ -259,7 +261,10 @@ export interface FileInfo {
   ext: string
   kind: string
   cloud: boolean
+  /** 所在文件夹不可访问（`missing` 或设备未连接） */
   offline: boolean
+  /** 所在文件夹不存在，它的磁盘或存储已连接 */
+  missing: boolean
   size: number
   /** Unix 毫秒 */
   mtime: number
@@ -279,8 +284,10 @@ export interface FileInfo {
 export interface RootInfo {
   id: number
   path: string
-  /** 所在设备未连接 */
+  /** 不可访问（`missing` 或设备未连接） */
   offline: boolean
+  /** 文件夹不存在（被删除、改名或移走），它的磁盘或存储已连接 */
+  missing: boolean
   files: number
   /** 用户排除规则（glob） */
   excludes: string[]
@@ -422,6 +429,14 @@ export interface SetupStatus {
 export interface KindTotal {
   files: number
   bytes: number
+}
+
+/** 刚添加的文件夹，对应 Rust `src-tauri` 的 `setup::AddedRoot` */
+export interface AddedRoot {
+  id: number
+  path: string
+  /** 整个磁盘或存储 */
+  wholeDrive: boolean
 }
 
 /** 对应 Rust `rummage_proto::RootEstimate` */

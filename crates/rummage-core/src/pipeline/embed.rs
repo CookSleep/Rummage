@@ -3,6 +3,7 @@
 //! 出错时整个文件计一次失败；推理后端失效时同时按驱动证据门槛换设备（`Shared::engine_failed`）：拔出、显存不足、
 //! 显卡算出无效结果换剩下的设备中最快的，其余停用所有显卡、改用 CPU。之后取到的、还绑定已失效引擎的文件放回 `pending`，
 //! 不计失败。显卡算出无效结果（NaN 等）时这个文件也放回、不计失败：不是文件的问题。
+//! 引擎已从槽中丢弃（`Engine::retired`）时，还没开始的文件放回，正在算的文件算完手头的片段后放回，都不计失败。
 //! 带音频的视频：第一个窗口推理失败（后端失效除外），或任一窗口超过 token 上限时，整段视频改为纯画面从头再算，
 //! 同一视频的向量格式一致，参数版本仍记带音频的版本（改了上限才重建，`rebuild`）；片段的模态为 `video_av` 或 `video_v`。
 //! 文档的内嵌媒体（`docmedia`）在正文之后逐个推理，各自的模态与空间与单独的文件相同；某个媒体出错只跳过它，
@@ -39,8 +40,8 @@ pub(super) fn run(shared: &Shared, ready: Receiver<Prepared>, out: &Sender<Msg>)
         if shared.stop.load(Ordering::Relaxed) {
             return;
         }
-        // 预处理用的引擎已失效：放回去用新引擎重算，不计失败
-        if p.engine.failed.load(Ordering::Relaxed) {
+        // 预处理用的引擎已失效或已丢弃：放回去用新引擎重算，不计失败
+        if p.engine.failed.load(Ordering::Relaxed) || p.engine.retired.load(Ordering::Relaxed) {
             if out.send(Msg::Outcome(p.job, Outcome::Released)).is_err() {
                 return;
             }
@@ -218,6 +219,9 @@ fn embed_items(
     let mut segments = Vec::new();
     let mut keys = Vec::new();
     for (i, item) in items.into_iter().enumerate() {
+        if p.engine.retired.load(Ordering::Relaxed) {
+            return Err(Fail::Released);
+        }
         let start = Start {
             at: Instant::now(),
             generation: p.generation,

@@ -32,6 +32,7 @@ fn device_lost_blacklists_gpu() {
             cfg: cpu.cfg.clone(),
             failed: AtomicBool::new(false),
             driver_failed: AtomicBool::new(false),
+            retired: AtomicBool::new(false),
             released: Released(Arc::new(AtomicBool::new(false))),
         })
     };
@@ -177,6 +178,7 @@ fn missing_gpu_falls_back_without_blacklist() {
         cfg: cpu.cfg.clone(),
         failed: AtomicBool::new(false),
         driver_failed: AtomicBool::new(false),
+        retired: AtomicBool::new(false),
         released: Released(Arc::new(AtomicBool::new(false))),
     });
     drop(cpu);
@@ -223,6 +225,7 @@ fn cpu_only_during_auto_selftest() {
         cfg: cpu.cfg.clone(),
         failed: AtomicBool::new(false),
         driver_failed: AtomicBool::new(false),
+        retired: AtomicBool::new(false),
         released: Released(Arc::new(AtomicBool::new(false))),
     });
     *lock(&shared.engine) = Some(gpu.clone());
@@ -470,6 +473,7 @@ fn driver_error_after_oom_disables_all() {
         cfg: cpu.cfg.clone(),
         failed: AtomicBool::new(false),
         driver_failed: AtomicBool::new(false),
+        retired: AtomicBool::new(false),
         released: Released(Arc::new(AtomicBool::new(false))),
     });
     // 显存不足不是驱动问题：只停用这块显卡，换下一块

@@ -11,6 +11,7 @@ use rummage_proto::{
     ApiError, Estimate, ModelSource, ParamValue, ProxySetting, Reply, Request, RootInfo,
     SetupStatus,
 };
+use serde::Serialize;
 use tauri::{AppHandle, Runtime};
 
 use crate::core;
@@ -47,16 +48,36 @@ pub async fn list_roots<R: Runtime>(app: AppHandle<R>) -> Result<Vec<RootInfo>, 
     }
 }
 
-/// 选择文件夹并添加；取消选择时返回 false
+/// 添加的文件夹，对应前端 `src/types.ts` 的 `AddedRoot`
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddedRoot {
+    id: i64,
+    path: String,
+    /// 整个磁盘或存储（`rummage_proto::whole_drive`），界面据此建议只添加需要的文件夹
+    whole_drive: bool,
+}
+
+impl AddedRoot {
+    pub fn new(root: RootInfo) -> AddedRoot {
+        AddedRoot {
+            id: root.id,
+            whole_drive: rummage_proto::whole_drive(&root.path),
+            path: root.path,
+        }
+    }
+}
+
+/// 选择文件夹并添加；取消选择时返回空
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn add_root<R: Runtime>(app: AppHandle<R>) -> Result<bool, ApiError> {
+pub async fn add_root<R: Runtime>(app: AppHandle<R>) -> Result<Option<AddedRoot>, ApiError> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     crate::file_dialog(&app, "选择要索引的文件夹").pick_folder(move |dir| {
         let _ = tx.send(dir);
     });
     let Some(dir) = rx.await.ok().flatten() else {
-        return Ok(false);
+        return Ok(None);
     };
     let path = dir.into_path().map_err(|err| {
         log::warn!("无法读取所选文件夹的路径：{err}");
@@ -70,7 +91,7 @@ pub async fn add_root<R: Runtime>(app: AppHandle<R>) -> Result<bool, ApiError> {
         excludes: Vec::new(),
     };
     match core::request(&app, body).await? {
-        Reply::Root { .. } => Ok(true),
+        Reply::Root { root } => Ok(Some(AddedRoot::new(root))),
         other => Err(unexpected(&other)),
     }
 }

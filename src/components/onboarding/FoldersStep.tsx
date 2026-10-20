@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import type { RootInfo } from '../../types'
+import type { AddedRoot, RootInfo } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { isAndroid } from '../../lib/platform'
 import { useCoreEvent } from '../../hooks/useCoreEvent'
@@ -34,7 +34,8 @@ interface Props {
  * 第 1 步：选择要索引的文件夹。文件夹由 Rust 侧的系统对话框选择后直接交给核心（前端不提交路径），
  * 添加后核心立即统计文件，统计完之前（`scanning`）显示“正在统计文件”，扫描结束（`ScanProgress` 的 `done`）时刷新；命令行或 MCP 增删、修改文件夹（`RootsChanged`）时刷新列表。
  * 设置页的“文件夹”也用它。
- * Android 上读取文件需要“所有文件访问”权限：未授权时在列表上方提示前往授权，并禁用添加；已授权时可一键添加常用文件夹
+ * Android 上读取文件需要“所有文件访问”权限：未授权时在列表上方提示前往授权，并禁用添加；已授权时可一键添加常用文件夹。
+ * 本项目不面向全盘索引：添加处一直提示只添加需要的文件夹；添加的是整个磁盘或存储时弹窗建议移除
  */
 export default function FoldersStep({ onCount, section, editor }: Props) {
   const storage = useStorageAccess()
@@ -47,6 +48,8 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
   const [removing, setRemoving] = useState<RootInfo | null>(null)
   // 展开了附加编辑的文件夹
   const [editing, setEditing] = useState<number | null>(null)
+  // 刚添加的整个磁盘或存储，等用户决定是否移除
+  const [wholeDrive, setWholeDrive] = useState<AddedRoot | null>(null)
 
   const load = useCallback(() => {
     invoke<RootInfo[]>('list_roots')
@@ -90,9 +93,11 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
   const add = () => {
     setBusy(true)
     setError('')
-    invoke<boolean>('add_root')
+    invoke<AddedRoot | null>('add_root')
       .then((added) => {
-        if (added) load()
+        if (!added) return
+        load()
+        if (added.wholeDrive) setWholeDrive(added)
       })
       .catch((err) => {
         console.warn('无法添加文件夹：', err)
@@ -165,7 +170,7 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
                   <HoverTip label={r.path} wrap />
                 </span>
                 <span className={`mt-0.5 block text-xs ${r.offline ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                  {r.offline ? '设备未连接' : r.scanning ? '正在统计文件' : `${r.files} 个文件`}
+                  {r.missing ? '找不到文件夹' : r.offline ? '设备未连接' : r.scanning ? '正在统计文件' : `${r.files} 个文件`}
                 </span>
               </span>
               {/* 只有移除按钮时留在行尾，手机宽度下也不另起一行 */}
@@ -201,7 +206,7 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-sm text-gray-700 dark:text-gray-200">添加文件夹</span>
-            {roots && !roots.length && <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">还没有添加文件夹</span>}
+            <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{roots && !roots.length ? '还没有添加文件夹，' : ''}只添加需要搜索的文件夹，不建议添加{isAndroid ? '整个存储' : '整个磁盘'}</span>
           </span>
         </button>
         {isAndroid && storage.granted && (
@@ -229,6 +234,21 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
             setRemoving(null)
           }}
           onCancel={() => setRemoving(null)}
+        />
+      )}
+      {wholeDrive && (
+        <ConfirmDialog
+          title="建议只添加需要的文件夹"
+          message={`「${wholeDrive.path}」是${isAndroid ? '整个存储' : '整个磁盘'}，其中的系统与程序文件大多只能按文件名搜索。Rummage 不是为全盘索引设计的，文件过多会拖慢建立索引和搜索。\n\n请尽量只添加需要搜索的文件夹。`}
+          confirmText="移除"
+          danger
+          hideCancel
+          extra={{ label: '保留', onClick: () => setWholeDrive(null) }}
+          onConfirm={() => {
+            remove(wholeDrive.id)
+            setWholeDrive(null)
+          }}
+          onCancel={() => setWholeDrive(null)}
         />
       )}
     </div>

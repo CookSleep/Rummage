@@ -637,6 +637,7 @@ fn gpu_engine(stub: &Arc<Stub>, cpu: &Engine) -> Arc<Engine> {
         cfg: cpu.cfg.clone(),
         failed: AtomicBool::new(false),
         driver_failed: AtomicBool::new(false),
+        retired: AtomicBool::new(false),
         released: Released(Arc::new(AtomicBool::new(false))),
     })
 }

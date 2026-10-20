@@ -114,8 +114,8 @@ impl Env {
             .unwrap()
     }
 
-    fn offline(&self) -> bool {
-        self.count(&format!("SELECT offline FROM roots WHERE id = {}", self.id)) == 1
+    fn offline(&self) -> i64 {
+        self.count(&format!("SELECT offline FROM roots WHERE id = {}", self.id))
     }
 
     fn scan_limits(&self, limits: ScanLimits) -> ScanStats {
@@ -371,15 +371,41 @@ fn offline_root_keeps_records() {
     fs::rename(e.root.path(), &moved).unwrap();
     let s = e.scan();
     assert_eq!(s, ScanStats::default());
-    assert!(e.offline());
+    // 所在的磁盘还在，是文件夹不存在，不是设备未连接
+    assert_eq!(e.offline(), OFFLINE_MISSING);
     assert_eq!(e.names().len(), 2);
     assert_eq!(e.jobs().len(), 2);
 
     fs::rename(&moved, e.root.path()).unwrap();
     e.put("c.md", b"x");
     let s = e.scan();
-    assert!(!e.offline());
+    assert_eq!(e.offline(), 0);
     assert_eq!((s.added, s.updated, s.removed), (1, 0, 0));
+}
+
+#[test]
+fn offline_state_by_volume() {
+    let e = env();
+    assert_eq!(
+        offline_state(&e.root.path().join("没有这个文件夹")),
+        OFFLINE_MISSING
+    );
+    // Android 的存储卡按 /storage/<卷> 判断，不看根目录 /
+    assert_eq!(
+        offline_state(Path::new("/storage/ABCD-1234/DCIM")),
+        OFFLINE_DEVICE
+    );
+    #[cfg(windows)]
+    {
+        let gone = (b'D'..=b'Z')
+            .map(|c| format!("{}:\\", c as char))
+            .find(|d| !Path::new(d).exists())
+            .expect("没有空闲的盘符");
+        assert_eq!(
+            offline_state(&Path::new(&gone).join("照片")),
+            OFFLINE_DEVICE
+        );
+    }
 }
 
 #[test]

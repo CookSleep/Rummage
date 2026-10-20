@@ -13,7 +13,7 @@ function Flags({ hit }: { hit: SearchHit }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
       {hit.offline ? <UnplugIcon className="h-3 w-3" /> : <CloudIcon className="h-3 w-3" />}
-      {hit.offline ? '设备未连接' : '仅在云端'}
+      {hit.missing ? '找不到文件夹' : hit.offline ? '设备未连接' : '仅在云端'}
     </span>
   )
 }

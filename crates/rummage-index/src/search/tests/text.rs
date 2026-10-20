@@ -218,3 +218,90 @@ fn text_channel_special_chars_safe() {
     assert!(f.search(&index, &by_name("v%", &none)).is_empty());
     assert!(f.search(&index, &by_name("a_", &none)).is_empty());
 }
+
+#[test]
+fn like_takes_newest_files_and_stops() {
+    let f = Fixture::new();
+    let r = f.root("D:\\资料");
+    // 取修改时间最新的文件，同一修改时间的按文件 id 从大到小；同一文件的多个命中片段都记下
+    let mut files = Vec::new();
+    for i in 0..(KEYWORD_LIMIT as i64 + 5) {
+        let id = f.file(r, &format!("{i}.txt"), "document", i / 2);
+        f.text(id, "季度报告");
+        f.text(id, "无关");
+        f.text(id, "报告附录");
+        files.push(id);
+    }
+    let index = f.index();
+    let none = Filter::default();
+    let mut q = by_name("报告", &none);
+    q.params.limit = 300;
+    let hits = f.search(&index, &q);
+    let mut ids: Vec<i64> = hits.iter().map(|h| h.file_id).collect();
+    ids.sort_by(|a, b| b.cmp(a));
+    let newest: Vec<i64> = files.iter().rev().take(KEYWORD_LIMIT).copied().collect();
+    assert_eq!(ids, newest);
+    assert!(hits.iter().all(|h| h.text_segments.len() == 2));
+}
+
+#[test]
+fn superseded_search_is_cancelled() {
+    let f = Fixture::new();
+    let r = f.root("D:\\资料");
+    let id = f.file(r, "报告.docx", "document", 1);
+    f.text(id, "季度报告");
+    let index = f.index();
+    let none = Filter::default();
+    let latest = Arc::new(AtomicU64::new(1));
+    let query = |ticket| Query {
+        cancel: Some(Cancel {
+            latest: latest.clone(),
+            ticket,
+        }),
+        ..by_name("报告", &none)
+    };
+    assert_eq!(f.search(&index, &query(1)).len(), 1);
+    assert!(matches!(
+        search(&f.db, &index, &query(0)),
+        Err(DbError::Cancelled)
+    ));
+    // 中止后进度回调已卸下，不带 cancel 的检索照常
+    latest.store(5, AtomicOrdering::Relaxed);
+    assert_eq!(f.search(&index, &by_name("报告", &none)).len(), 1);
+}
+
+/// 短词的 LIKE 沿修改时间索引逐个文件读取，不另外排序：否则要先找出全部命中，取够即停就没有意义。
+/// 按根目录、种类、时间过滤时也一样
+#[test]
+fn like_reads_in_mtime_order() {
+    let f = Fixture::new();
+    let db = f.db.lock().unwrap();
+    let filters = [
+        Filter::default(),
+        Filter {
+            kinds: vec!["image".into()],
+            root_ids: vec![1, 2],
+            since: Some(0),
+            until: Some(9),
+            exclude_file: Some(3),
+        },
+    ];
+    for filter in &filters {
+        for words in [vec!["报告"], vec!["季度报告", "ab"]] {
+            let (names, name_args) = names_sql(&words, filter);
+            let (texts, text_args, fts) = texts_sql(&words, filter);
+            assert!(!fts);
+            for (sql, args) in [(names, name_args), (texts, text_args)] {
+                let plan: Vec<String> = db
+                    .conn
+                    .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                    .unwrap()
+                    .query_map(params_from_iter(args), |row| row.get(3))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                assert!(plan.iter().all(|p| !p.contains("TEMP B-TREE")), "{plan:?}");
+            }
+        }
+    }
+}
