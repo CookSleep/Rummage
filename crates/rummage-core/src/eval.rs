@@ -78,6 +78,7 @@ impl Env {
             ffmpeg: self.ffmpeg.clone(),
             embed_tmp: Config::embed_tmp_dir(work),
             gpus: rummage_embed::selftest::gpu_adapters,
+            litert: None,
         }
     }
 }
@@ -179,6 +180,7 @@ pub fn prepare_device(env: &Env, device: &Device, record: &Path) -> Result<Optio
         images: true,
         only: None,
         video: rummage_core::pipeline::speed_video(&values),
+        litert: None,
     };
     let report = selftest::run(
         &opts,
@@ -284,6 +286,12 @@ pub fn start(
     if litert {
         cfg.model = env.litert_models().join(LITERT_MODEL.name);
         cfg.mmproj = cfg.model.clone();
+        cfg.litert = Some(selftest::LiteRtFiles {
+            runtime_dir: env.litert_runtime.clone(),
+            tokenizer: env.litert_models().join(TOKENIZER.name),
+            cache_dir: data.join("cache").join("litert"),
+            npu: None,
+        });
     }
     state.configure(cfg.clone());
     if let Some(device) = preferred {
@@ -295,8 +303,7 @@ pub fn start(
         )?;
     }
     state.start_pipeline(if litert {
-        let tokenizer = env.litert_models().join(TOKENIZER.name);
-        Options::litert(cfg, env.litert_runtime.clone(), tokenizer)
+        Options::litert(cfg)
     } else {
         Options::local(cfg)
     });

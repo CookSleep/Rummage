@@ -1,8 +1,8 @@
 //! `local` 的单元测试。
 use super::supervisor::Dead;
 use super::*;
-use crate::MAX_FAILURES;
 use crate::space::SpaceId;
+use crate::{MAX_FAILURES, WorkerArgs};
 
 #[test]
 fn queue_order() {
@@ -151,6 +151,7 @@ fn worker_args() {
             description: "NVIDIA GeForce RTX 4080 SUPER".to_string(),
             pci_id: Some("0000:06:00.0".to_string()),
         }),
+        litert: None,
     };
     let args = |mmproj| -> Vec<String> {
         spec.args(mmproj)
@@ -178,6 +179,47 @@ fn worker_args() {
             "0000:06:00.0",
         ]
     );
+    // LiteRT 不传 mmproj 与显卡，NPU 带分发库目录
+    let litert = WorkerSpec {
+        model: PathBuf::from("m.litertlm"),
+        mmproj: Some(PathBuf::from("m.litertlm")),
+        litert: Some(LiteRtArgs {
+            accel: Accel::Npu(PathBuf::from("qnn")),
+            tokenizer: PathBuf::from("tokenizer.json"),
+            cache_dir: Some(PathBuf::from("cache")),
+        }),
+        ..spec.clone()
+    };
+    let args: Vec<String> = litert
+        .args(true)
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        args,
+        [
+            "worker",
+            "--runtime-dir",
+            "rt",
+            "--model",
+            "m.litertlm",
+            "--threads",
+            "6",
+            "--litert",
+            "npu",
+            "--tokenizer",
+            "tokenizer.json",
+            "--cache-dir",
+            "cache",
+            "--dispatch-dir",
+            "qnn",
+        ]
+    );
+    let parsed = WorkerArgs::parse(litert.args(true).into_iter().skip(1)).unwrap();
+    assert!(matches!(
+        parsed,
+        WorkerArgs::Embed { litert: Some(l), mmproj: None, .. } if l == *litert.litert.as_ref().unwrap()
+    ));
 }
 
 fn test_spec() -> WorkerSpec {
@@ -188,6 +230,7 @@ fn test_spec() -> WorkerSpec {
         mmproj: Some(PathBuf::from("p.gguf")),
         threads: 1,
         gpu: None,
+        litert: None,
     }
 }
 

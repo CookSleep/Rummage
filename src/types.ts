@@ -399,14 +399,18 @@ export interface SelftestStatus {
 
 /** 一个模型文件，对应 Rust `rummage_proto::ModelFileStatus` */
 export interface ModelFileStatus {
+  /** 主文件名；与它一起下载的文件（分词器、QNN 运行库）不单独列出 */
   name: string
+  /** 全部文件的大小 */
   bytes: number
-  /** 本地文件可用 */
+  /** 全部文件都可用 */
   ready: boolean
   /** 已下载了一部分的 .part 文件的大小，没有时为 0 */
   partialBytes: number
   /** 上次完整校验的结果；没有记录、记录与文件现在的大小或修改时间不符，或文件不可用时为空 */
   verified: boolean | null
+  /** 钉定版本的主文件页面，用户自行下载时打开 */
+  url: string
 }
 
 /** 引导状态，对应 Rust `rummage_proto::SetupStatus` */
@@ -416,13 +420,17 @@ export interface SetupStatus {
   step: number
   /** 主模型 */
   model: ModelFileStatus
-  /** 多模态模型 */
+  /** 多模态模型；Android 上与 `model` 相同（LiteRT 通用模型含全部模态） */
   mmproj: ModelFileStatus
+  /** Android：本机芯片的 NPU 模型；芯片没有 NPU 版或不是 Android 时为空 */
+  npu: ModelFileStatus | null
+  /** Android：NPU 模型对应的芯片，如“高通 SM8550” */
+  npuChip: string | null
+  /** Android：分词器 tokenizer.json 的下载页（与模型不在同一个仓库），手动导入时也要它；电脑上为空 */
+  tokenizerUrl: string | null
   task: ModelTask | null
   selftest: SelftestStatus
   proxy: ProxySetting
-  /** 钉定版本的模型文件页面的前缀，后接文件名 */
-  modelUrl: string
 }
 
 /** 对应 Rust `rummage_proto::KindTotal` */

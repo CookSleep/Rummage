@@ -125,14 +125,24 @@ pub async fn set_param<R: Runtime>(
     }
 }
 
-/// 下载主模型，`mmproj` 为真时再下载图片与音视频模型
+/// 下载主模型，`mmproj` 为真时再下载图片与音视频模型；Android 上 `npu` 为真时改为下载本机芯片的 NPU 模型
 #[tauri::command]
 pub async fn download_models<R: Runtime>(
     app: AppHandle<R>,
     source: ModelSource,
     mmproj: bool,
+    npu: Option<bool>,
 ) -> Result<(), ApiError> {
-    core::done(&app, Request::DownloadModels { source, mmproj }).await
+    let npu = npu.unwrap_or(false);
+    core::done(
+        &app,
+        Request::DownloadModels {
+            source,
+            mmproj,
+            npu,
+        },
+    )
+    .await
 }
 
 /// 手机存储中可以一键添加的文件夹（Android 的 `add_common_root`）
@@ -190,22 +200,38 @@ pub async fn cancel_model_task<R: Runtime>(app: AppHandle<R>) -> Result<(), ApiE
     core::done(&app, Request::CancelModelTask).await
 }
 
-/// 完整校验一个已安装的模型文件，进度同下载
+/// 完整校验一个已安装的模型，进度同下载；Android 上 `npu` 为真时校验 NPU 模型
 #[tauri::command]
-pub async fn verify_model<R: Runtime>(app: AppHandle<R>, mmproj: bool) -> Result<(), ApiError> {
-    core::done(&app, Request::VerifyModel { mmproj }).await
+pub async fn verify_model<R: Runtime>(
+    app: AppHandle<R>,
+    mmproj: bool,
+    npu: Option<bool>,
+) -> Result<(), ApiError> {
+    let npu = npu.unwrap_or(false);
+    core::done(&app, Request::VerifyModel { mmproj, npu }).await
 }
 
-/// 依次完整校验已安装、没有校验记录的模型文件（引导中进入下载模型一步时）：文字模型，`mmproj` 为真时再加图片与音视频模型
+/// 依次完整校验已安装、没有校验记录的模型文件（引导中进入下载模型一步时）：文字模型，`mmproj` 为真时再加图片与音视频模型；
+/// Android 上 `npu` 为真时再加 NPU 模型
 #[tauri::command]
-pub async fn verify_models<R: Runtime>(app: AppHandle<R>, mmproj: bool) -> Result<(), ApiError> {
-    core::done(&app, Request::VerifyModels { mmproj }).await
+pub async fn verify_models<R: Runtime>(
+    app: AppHandle<R>,
+    mmproj: bool,
+    npu: Option<bool>,
+) -> Result<(), ApiError> {
+    let npu = npu.unwrap_or(false);
+    core::done(&app, Request::VerifyModels { mmproj, npu }).await
 }
 
-/// 删除一个模型文件：`mmproj` 为真时删除图片与音视频模型，否则删除文字模型
+/// 删除一个模型：`mmproj` 为真时删除图片与音视频模型，否则删除文字模型；Android 上 `npu` 为真时删除 NPU 模型
 #[tauri::command]
-pub async fn delete_model<R: Runtime>(app: AppHandle<R>, mmproj: bool) -> Result<(), ApiError> {
-    core::done(&app, Request::DeleteModel { mmproj }).await
+pub async fn delete_model<R: Runtime>(
+    app: AppHandle<R>,
+    mmproj: bool,
+    npu: Option<bool>,
+) -> Result<(), ApiError> {
+    let npu = npu.unwrap_or(false);
+    core::done(&app, Request::DeleteModel { mmproj, npu }).await
 }
 
 #[tauri::command]
@@ -232,13 +258,15 @@ pub async fn set_preferred_device<R: Runtime>(
     core::done(&app, Request::SetPreferredDevice { device }).await
 }
 
-/// 解除屏蔽；没能当场重新检测时返回原因
+/// 解除屏蔽，`failed` 时改为重测未通过的设备；没能当场重新检测时返回原因
 #[tauri::command]
 pub async fn unblock_gpu<R: Runtime>(
     app: AppHandle<R>,
     device: String,
+    failed: Option<bool>,
 ) -> Result<Option<String>, ApiError> {
-    match core::request(&app, Request::UnblockGpu { device }).await? {
+    let failed = failed.unwrap_or(false);
+    match core::request(&app, Request::UnblockGpu { device, failed }).await? {
         Reply::Done => Ok(None),
         Reply::DoneWithWarning { message } => Ok(Some(message)),
         other => Err(unexpected(&other)),

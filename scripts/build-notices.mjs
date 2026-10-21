@@ -1,8 +1,10 @@
 // 生成第三方许可清单 src/assets/third-party-notices.txt（npm run notices），由“设置 → 关于 → 第三方许可”弹窗显示。
 // 生成结果提交进仓库，前端构建与打包不需要 cargo-about；Rust 或前端依赖变化后重新运行并提交。
-// 内容：third_party/ 与 third-party-licenses/ 中随程序分发的组件（llama.cpp、LLVM OpenMP、FFmpeg、字体、移植的代码），
+// 内容：third_party/ 与 third-party-licenses/ 中随程序分发的组件（llama.cpp、LLVM OpenMP、FFmpeg、Android 的 LiteRT-LM 与 LiteRT NPU 分发库、
+// 字体、移植的代码），
 // cargo-about 汇总的 Rust 依赖（配置见 about.toml，Windows 与 Android 目标的普通与构建依赖），以及 npm ls --omit=dev 列出的前端依赖。
-// Android 的 llama.cpp 运行库不依赖 OpenMP；其中静态链接的 LLVM libc++ 属 Apache-2.0 WITH LLVM-exception，分发编译产物无需附许可。
+// LiteRT NPU 分发库的许可与第三方声明取自 Google Maven 的 litert-npu-runtime-{qualcomm,mediatek,google-tensor}:2.3.0（三者的 LICENSE 相同）。
+// 高通的 QNN 运行库由用户的设备从 Maven Central 下载，不随程序分发，不在此列。
 // 需要 cargo-about：cargo install cargo-about --version 0.9.2 --locked --features cli
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -23,9 +25,17 @@ const parts = [
 
 const section = (title, body) => parts.push('', '', RULE, title, RULE, '', body)
 
-section('llama.cpp / ggml（安装目录中的 llama\\cpu\\、llama\\vulkan\\，Android 版 APK 中的 lib/arm64-v8a/）', read('third_party/llama.cpp/b11461/LICENSE'))
+section('llama.cpp / ggml（安装目录中的 llama\\cpu\\、llama\\vulkan\\）', read('third_party/llama.cpp/b11461/LICENSE'))
 section('LLVM OpenMP 运行库 libomp.dll（安装目录中的 llama\\cpu\\、llama\\vulkan\\）', read('.cache/third-party/llama.cpp/b11461/win-cpu-x64/LICENSE-LLVM-OpenMP'))
 section('FFmpeg（安装目录中的 ffmpeg\\，LGPL 许可全文见其中的 LICENSE.txt）', read('third-party-licenses/FFmpeg-NOTICE.txt'))
+section('LiteRT-LM（Android 版 APK 中的 lib/arm64-v8a/liblitert-lm.so、libLiteRtOpenClAccelerator.so、libLiteRtGpuAccelerator.so）', read('third_party/litert-lm/v0.18.0/LICENSE'))
+section(
+  'LiteRT NPU 分发库（Android 版 APK 中的 lib/arm64-v8a/libLiteRtDispatch_Qualcomm.so、libLiteRtDispatch_MediaTek.so、libLiteRtDispatch_GoogleTensor.so）',
+  [
+    read('third-party-licenses/LiteRT-NPU/LICENSE'),
+    ...['qualcomm', 'mediatek', 'google-tensor'].map((v) => `${v} 分发库包含的第三方组件：\n\n${read(`third-party-licenses/LiteRT-NPU/THIRD_PARTY_NOTICE-${v}.txt`)}`),
+  ].join(`\n\n${THIN}\n\n`),
+)
 section('HarmonyOS Sans SC 字体', [
   '版权方：Huawei Device Co., Ltd.',
   '许可：HarmonyOS Sans Fonts License Agreement',

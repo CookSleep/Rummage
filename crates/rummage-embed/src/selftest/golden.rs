@@ -1,4 +1,6 @@
 //! 黄金样本：读取 `assets/golden` 的清单与当前模型的参考向量。
+//! 参考向量有两份（`Refs`）：电脑用 GGUF（llama.cpp CPU）算出的，手机用 LiteRT 通用版（在电脑上用 LiteRT CPU 算出）的；
+//! 手机的 CPU 与 GPU 与 LiteRT 那份比较；NPU 模型是另一个文件、另一个向量空间，不比较。LiteRT 只有 70、140 两档。
 //! 参考向量覆盖全部档位组合：图片在每个 `image_tokens` 档位各一条，视频窗口的每个变体（与三个视频预设对应）在每个
 //! `video_frame_tokens` 档位各一条，两者都按编号与 `tokens` 查找。自检只取与当前参数对应的组合（`Pick`），
 //! 参考向量中没有当前档位时报黄金样本错误。
@@ -85,6 +87,40 @@ pub(super) struct ImageItem {
     pub(super) file: String,
 }
 
+/// 参考向量对应的模型（见模块说明）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refs {
+    Gguf,
+    Litert,
+}
+
+impl Refs {
+    /// 本平台的参考向量：Android 为 LiteRT，其余为 GGUF
+    pub fn platform() -> Refs {
+        if cfg!(target_os = "android") {
+            Refs::Litert
+        } else {
+            Refs::Gguf
+        }
+    }
+
+    /// 黄金样本目录中的文件名，按模型哈希的前 16 位区分
+    pub fn file_name(self) -> String {
+        match self {
+            Refs::Gguf => format!("vectors-gguf-q8-{}.json", &space::MODEL.sha256[..16]),
+            Refs::Litert => format!("vectors-litert-{}.json", &space::LITERT_MODEL.sha256[..16]),
+        }
+    }
+
+    /// 生成参考向量所用的主模型与 mmproj 的 SHA-256
+    pub fn models(self) -> (&'static str, &'static str) {
+        match self {
+            Refs::Gguf => (space::MODEL.sha256, space::MMPROJ.sha256),
+            Refs::Litert => (space::LITERT_MODEL.sha256, space::LITERT_MODEL.sha256),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct VectorsFile {
     model_sha256: String,
@@ -155,15 +191,23 @@ fn variant(variants: &[VideoVariant], video: Option<VideoSpeed>) -> Option<&Vide
     same.or_else(|| variants.get(preset.checked_sub(1)?))
 }
 
-fn parse(manifest: &str, vectors: &str, pick: &Pick) -> Result<Parsed, Error> {
+/// `vectors` 为空时不读参考向量（生成参考向量时），各项的 `want` 为空
+fn parse(manifest: &str, vectors: Option<&str>, refs: Refs, pick: &Pick) -> Result<Parsed, Error> {
     let m: Manifest =
         serde_json::from_str(manifest).map_err(|err| bad(format!("清单无法解析：{err}。")))?;
-    let v: VectorsFile =
-        serde_json::from_str(vectors).map_err(|err| bad(format!("参考向量无法解析：{err}。")))?;
-    if v.model_sha256 != space::MODEL.sha256 || v.mmproj_sha256 != space::MMPROJ.sha256 {
+    let v: Option<VectorsFile> = vectors
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|err| bad(format!("参考向量无法解析：{err}。")))?;
+    if let Some(v) = &v
+        && (v.model_sha256.as_str(), v.mmproj_sha256.as_str()) != refs.models()
+    {
         return Err(bad("参考向量不是用当前钉定的模型文件算出的。".to_string()));
     }
     let want = |id: &str, tokens: Option<u32>| {
+        let Some(v) = &v else {
+            return Ok(Vec::new());
+        };
         v.vectors
             .iter()
             .find(|x| x.id == id && x.tokens == tokens)
@@ -262,23 +306,25 @@ pub(super) fn manifest(dir: &Path) -> Result<Manifest, Error> {
     serde_json::from_str(&text).map_err(|err| bad(format!("清单无法解析：{err}。")))
 }
 
-/// 读取并核对清单与当前模型的参考向量，不读图像文件。
-fn read(dir: &Path, pick: &Pick) -> Result<Parsed, Error> {
+/// 读取并核对清单与 `refs` 的参考向量（为空时不读参考向量），不读图像文件。
+fn read(dir: &Path, pick: &Pick, refs: Option<Refs>) -> Result<Parsed, Error> {
     let read = |name: &str| {
         fs::read_to_string(dir.join(name))
             .map_err(|err| bad(format!("无法读取 \"{}\"：{err}", dir.join(name).display())))
     };
     let manifest = read("manifest.json")?;
-    let vectors = read(&format!(
-        "vectors-gguf-q8-{}.json",
-        &space::MODEL.sha256[..16]
-    ))?;
-    parse(&manifest, &vectors, pick)
+    let vectors = refs.map(|r| read(&r.file_name())).transpose()?;
+    parse(
+        &manifest,
+        vectors.as_deref(),
+        refs.unwrap_or(Refs::Gguf),
+        pick,
+    )
 }
 
 /// 第一条文本样本：唤醒后验证推理引擎用，不解码图像。
-pub(super) fn first_text(dir: &Path) -> Result<Sample, Error> {
-    read(dir, &Pick::new(&params::defaults(), None))?
+pub(super) fn first_text(dir: &Path, refs: Refs) -> Result<Sample, Error> {
+    read(dir, &Pick::new(&params::defaults(), None), Some(refs))?
         .items
         .into_iter()
         .find_map(|item| match item.source {
@@ -341,16 +387,38 @@ pub(super) fn wav(dir: &Path, file: &str) -> Result<Vec<f32>, Error> {
         })
 }
 
-/// 读取清单与当前模型的参考向量中与当前参数对应的组合（见模块说明），并预先缩放全部图像、读出全部音频（不计入耗时）。
+/// 读取清单与 `refs` 的参考向量中与当前参数对应的组合（见模块说明），并预先缩放全部图像、读出全部音频（不计入耗时）。
 /// `video` 为当前的视频设置
 pub(crate) fn load(
     dir: &Path,
     values: &BTreeMap<String, ParamValue>,
     video: VideoSpeed,
     max_pixels: u64,
+    refs: Refs,
+) -> Result<Golden, Error> {
+    load_with(dir, values, video, max_pixels, Some(refs))
+}
+
+/// 只读样本、不读参考向量（各项的 `want` 为空），生成参考向量用
+#[cfg(test)]
+pub(crate) fn inputs(
+    dir: &Path,
+    values: &BTreeMap<String, ParamValue>,
+    video: VideoSpeed,
+    max_pixels: u64,
+) -> Result<Golden, Error> {
+    load_with(dir, values, video, max_pixels, None)
+}
+
+fn load_with(
+    dir: &Path,
+    values: &BTreeMap<String, ParamValue>,
+    video: VideoSpeed,
+    max_pixels: u64,
+    refs: Option<Refs>,
 ) -> Result<Golden, Error> {
     let pick = Pick::new(values, Some(video));
-    let parsed = read(dir, &pick)?;
+    let parsed = read(dir, &pick, refs)?;
     let mut samples = Vec::new();
     for item in parsed.items {
         let (modality, input) = match item.source {
@@ -419,11 +487,7 @@ mod tests {
     fn golden_files() -> (String, String) {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/golden");
         let manifest = fs::read_to_string(dir.join("manifest.json")).unwrap();
-        let vectors = fs::read_to_string(dir.join(format!(
-            "vectors-gguf-q8-{}.json",
-            &space::MODEL.sha256[..16]
-        )))
-        .unwrap();
+        let vectors = fs::read_to_string(dir.join(Refs::Gguf.file_name())).unwrap();
         (manifest, vectors)
     }
 
@@ -471,7 +535,13 @@ mod tests {
         assert_eq!(tiers("image_tiers"), [70, 140, 280, 560, 1120]);
         assert_eq!(tiers("video_frame_tiers"), [70, 140]);
 
-        let p = parse(&manifest, &vectors, &pick(280, 140, Some(vs(2, 2, false)))).unwrap();
+        let p = parse(
+            &manifest,
+            Some(&vectors),
+            Refs::Gguf,
+            &pick(280, 140, Some(vs(2, 2, false))),
+        )
+        .unwrap();
         let count = |f: fn(&Source) -> bool| p.items.iter().filter(|i| f(&i.source)).count();
         assert_eq!(
             (
@@ -494,7 +564,13 @@ mod tests {
                 .exists()
         );
         // 不同档位取不同的参考向量
-        let other = parse(&manifest, &vectors, &pick(1120, 70, Some(vs(2, 2, false)))).unwrap();
+        let other = parse(
+            &manifest,
+            Some(&vectors),
+            Refs::Gguf,
+            &pick(1120, 70, Some(vs(2, 2, false))),
+        )
+        .unwrap();
         assert_ne!(p.items[15].want, other.items[15].want);
         assert_ne!(p.items[23].want, other.items[23].want);
         assert_eq!(p.items[0].want, other.items[0].want);
@@ -514,7 +590,13 @@ mod tests {
         assert_eq!(inputs.len(), 2);
         assert!(inputs.iter().all(|x| matches!(x, VideoInput::Image { .. })));
         // “找说话内容”：6 帧带音频，时间戳、音频段、时间戳、画面帧
-        let p = parse(&manifest, &vectors, &pick(280, 70, Some(vs(6, 6, true)))).unwrap();
+        let p = parse(
+            &manifest,
+            Some(&vectors),
+            Refs::Gguf,
+            &pick(280, 70, Some(vs(6, 6, true))),
+        )
+        .unwrap();
         assert_eq!(
             video_of(&p),
             (
@@ -531,11 +613,49 @@ mod tests {
         assert!(matches!(&inputs[3], VideoInput::Image { .. }));
     }
 
+    /// LiteRT 的参考向量只有 70、140 两档，每种档位与视频变体都能取到
+    #[test]
+    fn parses_litert_golden() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/golden");
+        let manifest = fs::read_to_string(dir.join("manifest.json")).unwrap();
+        let vectors = fs::read_to_string(dir.join(Refs::Litert.file_name())).unwrap();
+        for tier in [70, 140] {
+            for video in [vs(2, 2, false), vs(4, 4, false), vs(6, 6, true)] {
+                let p = parse(
+                    &manifest,
+                    Some(&vectors),
+                    Refs::Litert,
+                    &pick(tier, tier, Some(video)),
+                )
+                .unwrap();
+                assert_eq!(p.items.len(), 24);
+                assert!(p.items.iter().all(|i| i.want.len() == 768));
+            }
+        }
+        assert!(
+            parse(
+                &manifest,
+                Some(&vectors),
+                Refs::Litert,
+                &pick(280, 140, None)
+            )
+            .is_err()
+        );
+        // 参考向量对应的模型须与所用的那份一致
+        assert!(parse(&manifest, Some(&vectors), Refs::Gguf, &pick(140, 140, None)).is_err());
+    }
+
     #[test]
     fn picks_video_variant() {
         let (manifest, vectors) = golden_files();
         let picked = |video| {
-            let p = parse(&manifest, &vectors, &pick(280, 140, video)).unwrap();
+            let p = parse(
+                &manifest,
+                Some(&vectors),
+                Refs::Gguf,
+                &pick(280, 140, video),
+            )
+            .unwrap();
             (video_of(&p).0.to_string(), p.video.unwrap())
         };
         // 预设：帧数与音频相同的变体
@@ -554,11 +674,11 @@ mod tests {
     #[test]
     fn first_text_sample() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/golden");
-        let s = first_text(&dir).unwrap();
+        let s = first_text(&dir, Refs::Gguf).unwrap();
         assert_eq!(s.modality, Modality::Text);
         assert!(matches!(s.input, Input::Query(_)));
         assert_eq!(s.want.len(), 768);
-        assert!(first_text(&dir.join("不存在")).is_err());
+        assert!(first_text(&dir.join("不存在"), Refs::Gguf).is_err());
     }
 
     #[test]
@@ -581,7 +701,7 @@ mod tests {
     #[test]
     fn rejects_bad_golden() {
         let (manifest, vectors) = golden_files();
-        let err = |m: &str, v: &str| match parse(m, v, &pick(280, 140, None)) {
+        let err = |m: &str, v: &str| match parse(m, Some(v), Refs::Gguf, &pick(280, 140, None)) {
             Err(Error::Golden(msg)) => msg,
             Err(other) => panic!("错误类型不对：{other}"),
             Ok(_) => panic!("应当失败"),
@@ -598,7 +718,7 @@ mod tests {
         assert!(err(&manifest, &vectors.replace(space::MODEL.sha256, "00")).contains("模型文件"));
         assert!(err("{", &vectors).contains("清单"));
         // 参考向量中没有当前档位
-        let missing = |p: Pick| match parse(&manifest, &vectors, &p) {
+        let missing = |p: Pick| match parse(&manifest, Some(&vectors), Refs::Gguf, &p) {
             Err(Error::Golden(msg)) => msg,
             _ => panic!("应当失败"),
         };

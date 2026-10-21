@@ -2,7 +2,10 @@
 //! - 引导是否完成记在 `meta` 表的 `onboarded`（`1` / `0`）。全新的数据目录没有这一项，由 `configure` 记为未完成。
 //!   未完成时流水线保持 `Hold::Setup`，只扫描、建文件名索引，`FinishSetup` 后才开始建内容索引。
 //!   引导进行到的步骤记在 `meta` 表的 `onboarding_step`，随数据目录迁移，重启后界面从这一步继续；`FinishSetup` 时删除。
-//! - 模型下载、导入、校验与删除（`models`，主模型与 mmproj 都能删除）在专用线程中进行，同一时间只有一个任务。核心常驻，界面重启后用 `SetupStatus`
+//! - 模型按界面上的一行（`Slot`）处理：电脑为文字模型与图片与音视频模型；Android 为 LiteRT 通用版（含全部模态，`mmproj`
+//!   与它相同）与本机芯片的 NPU 模型（芯片有 NPU 版时）。一行可以有多个文件（分词器、QNN 运行库），一起下载、校验；
+//!   删除 NPU 模型时连同 QNN 运行库，分词器留给通用版。
+//! - 模型下载、导入、校验与删除（`models`，每一行都能删除）在专用线程中进行，同一时间只有一个任务。核心常驻，界面重启后用 `SetupStatus`
 //!   取回进度；进度以 `ModelTask` 事件广播，完成后唤醒索引流水线。除校验外，任务开始前流水线 `hold` 并等推理进程退出，
 //!   被它打开的模型文件才能替换或删除。设备检测的子进程也打开着模型文件，所以检测与下载、导入、删除互斥：两边都在
 //!   `selftest` 锁内检查对方并登记自己（锁的顺序固定为先 `selftest` 后 `task`），不留空隙。校验只读，不受限制。
@@ -26,8 +29,7 @@
 //!   只测它的检测（`selftest::Mode::Retest`：其余设备照缓存原样显示、不测试，保存时只替换缓存中这一项；其余按手动检测对待，
 //!   暂停建立索引、不受暂停条件限制、出错时说明原因）。不在系统中、缓存结果没测过本次需要的图片与音视频（请用户整体重新检测），或检测没能开始（缺模型、模型任务进行中）时不当场重测，
 //!   回复说明原因，它保持未检测，下次手动检测或下次启动后的自动检测时重测；出错时同样保持未检测。手动检测中通过的显卡
-//!   同样删除屏蔽记录。检测进行中不能解除。被屏蔽的显卡由
-//!   `SelftestStatus::blocked` 列出。
+//!   同样删除屏蔽记录。检测进行中不能解除。未通过的设备可以同样重测（`UnblockGpu` 的 `failed`）：删除它的未通过记录，其余流程相同。
 //! - 缓存的自检结果过期时标记 `stale`：显卡有增减或更换、运行库或模型变化、所需模态（`index_images`、`index_audio`
 //!   或 `index_video` 开启且 mmproj 可用）上次没测，或有暂时性失败、被跳过的显卡（本次运行中检测过时不算，下次启动重测）；
 //!   只更新驱动不算（见 `selftest` 的 `cache` 模块）。
@@ -49,6 +51,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rummage_embed::npu::{self, QnnEntry};
 use rummage_embed::space::{self, ModelFile};
 use rummage_index::Db;
 use rummage_proto::{
@@ -58,17 +61,105 @@ use rummage_proto::{
 };
 
 use super::{State, api_error, db, lock, unavailable};
-use crate::models::{self, Progress};
+use crate::models::{self, Pinned, Progress};
 use crate::pipeline::{
     self, Config, Hold, ONBOARDED_KEY, ONBOARDING_STEP_KEY, PREFERRED_DEVICE_KEY,
 };
 use crate::proxy::{self, Route, SaveError};
 
-const MODELS: [&ModelFile; 2] = [&space::MODEL, &space::MMPROJ];
-/// 给用户看的模型名称
-const MODEL_LABEL: &str = "文字模型";
-const MMPROJ_LABEL: &str = "图片与音视频模型";
 const VERIFIED_KEY: &str = "model_verified:";
+
+/// 界面上的一行模型（见模块说明）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    Main,
+    Mmproj,
+    Npu,
+}
+
+impl Slot {
+    fn of(mmproj: bool, npu: bool) -> Slot {
+        match (npu, mmproj) {
+            (true, _) => Slot::Npu,
+            (false, true) => Slot::Mmproj,
+            (false, false) => Slot::Main,
+        }
+    }
+}
+
+/// 一行模型的文件：从 Hugging Face 下载的（第一个是这一行的主文件）与 QNN 运行库，各带本地路径
+struct Files {
+    /// 给用户看的名称
+    label: &'static str,
+    hf: Vec<(Pinned, PathBuf)>,
+    qnn: Vec<(&'static QnnEntry, PathBuf)>,
+}
+
+impl Files {
+    fn main(&self) -> &(Pinned, PathBuf) {
+        &self.hf[0]
+    }
+
+    /// 全部文件（含 QNN 运行库）与路径
+    fn all(&self) -> Vec<(&'static ModelFile, PathBuf)> {
+        let hf = self.hf.iter().map(|(p, path)| (p.file, path.clone()));
+        let qnn = self.qnn.iter().map(|(e, path)| (&e.file, path.clone()));
+        hf.chain(qnn).collect()
+    }
+
+    fn ready(&self) -> bool {
+        self.all().iter().all(|(f, path)| f.check(path).is_ok())
+    }
+}
+
+/// 一行模型的文件；这个平台没有这一行时为空（电脑没有 NPU；Android 的 mmproj 就是通用版，按 `Main` 处理）
+fn files(cfg: &Config, slot: Slot) -> Option<Files> {
+    let Some(lite) = &cfg.litert else {
+        let (file, path, label) = match slot {
+            Slot::Main => (&space::MODEL, &cfg.model, "文字模型"),
+            Slot::Mmproj => (&space::MMPROJ, &cfg.mmproj, "图片与音视频模型"),
+            Slot::Npu => return None,
+        };
+        return Some(Files {
+            label,
+            hf: vec![(Pinned::gguf(file), path.clone())],
+            qnn: Vec::new(),
+        });
+    };
+    let tokenizer = (Pinned::TOKENIZER, lite.tokenizer.clone());
+    if slot != Slot::Npu {
+        return Some(Files {
+            label: "通用模型",
+            hf: vec![
+                (Pinned::litert(&space::LITERT_MODEL), cfg.model.clone()),
+                tokenizer,
+            ],
+            qnn: Vec::new(),
+        });
+    }
+    let (m, (path, dir)) = (npu::local()?, lite.npu.as_ref()?);
+    Some(Files {
+        label: "NPU 模型",
+        hf: vec![(Pinned::litert(&m.file), path.clone()), tokenizer],
+        qnn: npu::qnn_entries(m.vendor)
+            .into_iter()
+            .map(|e| (e, dir.join(e.file.name)))
+            .collect(),
+    })
+}
+
+/// 全部行的 Hugging Face 文件（导入时按它识别），同一个文件只列一次
+fn known_files(cfg: &Config) -> Vec<&'static ModelFile> {
+    let mut v: Vec<&'static ModelFile> = Vec::new();
+    for slot in [Slot::Main, Slot::Mmproj, Slot::Npu] {
+        for (p, _) in files(cfg, slot).map(|f| f.hf).unwrap_or_default() {
+            if !v.iter().any(|f| f.name == p.file.name) {
+                v.push(p.file);
+            }
+        }
+    }
+    v
+}
 
 /// 引导相关的运行状态
 #[derive(Default)]
@@ -233,21 +324,41 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
             }
             Ok(Reply::Done)
         }
-        Request::DownloadModels { source, mmproj } => {
+        Request::DownloadModels {
+            source,
+            mmproj,
+            npu,
+        } => {
             let base = models::base_url(&source).map_err(bad_request)?;
-            let dir = models_dir(config(state)?);
-            let files = if mmproj {
-                MODELS.to_vec()
+            let cfg = config(state)?;
+            let mut rows = Vec::new();
+            if npu {
+                rows.push(files(cfg, Slot::Npu).ok_or_else(no_npu)?);
             } else {
-                vec![&space::MODEL]
-            };
+                rows.push(files(cfg, Slot::Main).expect("每个平台都有主模型"));
+                if mmproj && cfg.litert.is_none() {
+                    rows.extend(files(cfg, Slot::Mmproj));
+                }
+            }
+            let dir = models_dir(cfg);
+            let hf: Vec<Pinned> = rows.iter().flat_map(|r| r.hf.iter().map(|x| x.0)).collect();
+            let qnn: Vec<&'static QnnEntry> = rows
+                .iter()
+                .flat_map(|r| r.qnn.iter().map(|x| x.0))
+                .collect();
+            let qnn_dir = rows
+                .iter()
+                .find_map(|r| r.qnn.first().and_then(|(_, p)| p.parent()))
+                .map_or_else(|| dir.clone(), Path::to_path_buf);
+            let all: Vec<(&'static ModelFile, PathBuf)> =
+                rows.iter().flat_map(Files::all).collect();
             let setting = proxy::load(&*db(state)?).map_err(unavailable)?;
             let route = Route::from_setting(&setting);
             let s = state.clone();
             start_task(state, ModelTaskKind::Download, move |cancel, progress| {
-                models::download(&base, &files, &dir, &route, cancel, progress)?;
-                for f in &files {
-                    set_verified(&s, f.name, Some((&dir.join(f.name), true)));
+                models::download(&base, &hf, &dir, &qnn, &qnn_dir, &route, cancel, progress)?;
+                for (f, path) in &all {
+                    set_verified(&s, f.name, Some((path, true)));
                 }
                 Ok("模型已就绪。".to_string())
             })
@@ -256,22 +367,31 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
             if paths.is_empty() {
                 return Err(bad_request("请选择要导入的模型文件。"));
             }
-            let dir = models_dir(config(state)?);
+            let cfg = config(state)?;
+            let dir = models_dir(cfg);
+            let known = known_files(cfg);
+            let labels: Vec<(&'static str, &'static str)> = [Slot::Main, Slot::Mmproj, Slot::Npu]
+                .into_iter()
+                .filter_map(|slot| files(cfg, slot))
+                .map(|f| (f.main().0.file.name, f.label))
+                .collect();
             let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
             let s = state.clone();
             start_task(state, ModelTaskKind::Import, move |cancel, progress| {
-                models::import(&paths, &MODELS, &dir, cancel, progress).map(|files| {
-                    for f in &files {
+                models::import(&paths, &known, &dir, cancel, progress).map(|got| {
+                    for f in &got {
                         set_verified(&s, f.name, Some((&dir.join(f.name), true)));
                     }
-                    let main = files.iter().any(|f| f.name == space::MODEL.name);
-                    let mmproj = files.iter().any(|f| f.name == space::MMPROJ.name);
-                    match (main, mmproj) {
-                        (true, true) => "已导入文字模型和图片与音视频模型。",
-                        (true, false) => "已导入文字模型。",
-                        _ => "已导入图片与音视频模型。",
+                    let mut names: Vec<&str> = Vec::new();
+                    for (name, label) in &labels {
+                        if got.iter().any(|f| f.name == *name) && !names.contains(label) {
+                            names.push(label);
+                        }
                     }
-                    .to_string()
+                    if names.is_empty() {
+                        return "已导入。".to_string();
+                    }
+                    format!("已导入{}。", names.join("和"))
                 })
             })
         }
@@ -279,64 +399,84 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
             lock(&state.setup.cancel).store(true, Ordering::Relaxed);
             Ok(Reply::Done)
         }
-        Request::VerifyModel { mmproj } => {
+        Request::VerifyModel { mmproj, npu } => {
             let cfg = config(state)?;
-            let (file, path, label) = if mmproj {
-                (&space::MMPROJ, cfg.mmproj.clone(), MMPROJ_LABEL)
-            } else {
-                (&space::MODEL, cfg.model.clone(), MODEL_LABEL)
-            };
-            if file.check(&path).is_err() {
-                return Err(bad_request(format!("{label}尚未安装，请先下载或导入。")));
+            let row = files(cfg, Slot::of(mmproj, npu)).ok_or_else(no_npu)?;
+            if !row.ready() {
+                return Err(bad_request(format!(
+                    "{}尚未安装，请先下载或导入。",
+                    row.label
+                )));
             }
-            verify_models(
-                state,
-                vec![(file, path, label)],
-                format!("{label}校验通过。"),
-            )
+            let label = row.label;
+            let list = row.all().into_iter().map(|(f, p)| (f, p, label)).collect();
+            verify_models(state, list, format!("{label}校验通过。"))
         }
-        Request::VerifyModels { mmproj } => {
+        Request::VerifyModels { mmproj, npu } => {
             let cfg = config(state)?;
-            let mut all = vec![(&space::MODEL, cfg.model.clone(), MODEL_LABEL)];
-            if mmproj {
-                all.push((&space::MMPROJ, cfg.mmproj.clone(), MMPROJ_LABEL));
+            let mut rows = vec![Slot::Main];
+            if mmproj && cfg.litert.is_none() {
+                rows.push(Slot::Mmproj);
             }
-            let mut files = Vec::new();
+            if npu {
+                rows.push(Slot::Npu);
+            }
+            let mut list = Vec::new();
             {
                 let db = db(state)?;
                 // 记为未通过的不重校，由用户重新下载或导入；换了文件时记录失效，会重新校验
-                for f in all {
-                    if f.0.check(&f.1).is_ok() && recorded(&db, f.0.name, &f.1)?.is_none() {
-                        files.push(f);
+                for row in rows.into_iter().filter_map(|slot| files(cfg, slot)) {
+                    for (f, path) in row.all() {
+                        let seen = list
+                            .iter()
+                            .any(|(x, _, _): &(&ModelFile, PathBuf, &str)| x.name == f.name);
+                        if !seen
+                            && f.check(&path).is_ok()
+                            && recorded(&db, f.name, &path)?.is_none()
+                        {
+                            list.push((f, path, row.label));
+                        }
                     }
                 }
             }
-            if files.is_empty() {
+            if list.is_empty() {
                 return Ok(Reply::Done);
             }
-            verify_models(state, files, "模型校验通过。".to_string())
+            verify_models(state, list, "模型校验通过。".to_string())
         }
-        Request::DeleteModel { mmproj } => {
-            let dir = models_dir(config(state)?);
-            let (file, label): (&'static ModelFile, _) = if mmproj {
-                (&space::MMPROJ, MMPROJ_LABEL)
-            } else {
-                (&space::MODEL, MODEL_LABEL)
-            };
+        Request::DeleteModel { mmproj, npu } => {
+            let cfg = config(state)?;
+            let row = files(cfg, Slot::of(mmproj, npu)).ok_or_else(no_npu)?;
+            let label = row.label;
+            // 分词器留给通用版；NPU 模型连同 QNN 运行库
+            let main = row.main().clone();
+            let qnn: Vec<(&'static ModelFile, PathBuf)> =
+                row.qnn.iter().map(|(e, p)| (&e.file, p.clone())).collect();
             let s = state.clone();
             // 删除主模型后流水线取不到引擎，状态为 `no_model`，不再识别新内容（`pipeline::engine`）
             start_task(state, ModelTaskKind::Delete, move |_, progress| {
                 progress(&Progress {
                     phase: ModelTaskPhase::Preparing,
-                    file: file.name,
+                    file: main.0.file.name,
                     index: 1,
                     count: 1,
                     done: 0,
                     total: 0,
                     speed: None,
                 });
-                let installed = models::remove(&dir, file, label)?;
-                set_verified(&s, file.name, None);
+                let dir = main
+                    .1
+                    .parent()
+                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+                let installed = models::remove(&dir, main.0.file, label)?;
+                set_verified(&s, main.0.file.name, None);
+                for (f, path) in &qnn {
+                    let dir = path
+                        .parent()
+                        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+                    models::remove(&dir, f, label)?;
+                    set_verified(&s, f.name, None);
+                }
                 Ok(if installed {
                     format!("已删除{label}。")
                 } else {
@@ -353,7 +493,7 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
             selftest::start_selftest(state, onboarding, selftest::Mode::Manual)
         }
         Request::SetPreferredDevice { device } => selftest::set_preferred_device(state, device),
-        Request::UnblockGpu { device } => selftest::unblock_gpu(state, device),
+        Request::UnblockGpu { device, failed } => selftest::unblock_gpu(state, device, failed),
         Request::SetOnboardingStep { step } => {
             db(state)?
                 .meta_set(ONBOARDING_STEP_KEY, &step.to_string())
@@ -365,16 +505,34 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
     }
 }
 
+/// 芯片没有 NPU 版模型时请求 NPU 模型的回复
+fn no_npu() -> ApiError {
+    bad_request("这台设备的芯片没有对应的 NPU 模型。")
+}
+
 fn status(state: &State) -> Result<SetupStatus, ApiError> {
     let cfg = config(state)?;
+    let rows: Vec<Option<Files>> = [Slot::Main, Slot::Mmproj, Slot::Npu]
+        .into_iter()
+        .map(|slot| files(cfg, slot))
+        .collect();
     let (onboarded, step, proxy, verified) = {
         let db = db(state)?;
         let onboarded = db.meta_get(ONBOARDED_KEY).map_err(unavailable)?;
         // 格式不对时从头开始
         let step = db.meta_get(ONBOARDING_STEP_KEY).map_err(unavailable)?;
+        // 每一行全部文件的校验记录：都通过才算通过，有一个未通过就是未通过，否则没有记录
         let mut verified = Vec::new();
-        for (f, path) in MODELS.iter().zip([&cfg.model, &cfg.mmproj]) {
-            verified.push(recorded(&db, f.name, path)?);
+        for row in &rows {
+            let mut all = Some(true);
+            for (f, path) in row.as_ref().map(Files::all).unwrap_or_default() {
+                all = match (all, recorded(&db, f.name, &path)?) {
+                    (Some(false), _) | (_, Some(false)) => Some(false),
+                    (Some(true), Some(true)) => Some(true),
+                    _ => None,
+                };
+            }
+            verified.push(all);
         }
         (
             onboarded.as_deref() == Some("1"),
@@ -385,32 +543,39 @@ fn status(state: &State) -> Result<SetupStatus, ApiError> {
     };
     // 先取出任务再读自检状态：不同时持有 `task` 与 `selftest` 两把锁（顺序见模块说明）
     let task = lock(&state.setup.task).clone();
-    let dir = models_dir(cfg);
-    let file = |i: usize, path: &Path| {
-        let f = MODELS[i];
-        let ready = f.check(path).is_ok();
-        ModelFileStatus {
-            name: f.name.to_string(),
-            bytes: f.size,
+    let file = |i: usize| {
+        let row = rows[i].as_ref()?;
+        let (main, path) = row.main();
+        let ready = row.ready();
+        Some(ModelFileStatus {
+            name: main.file.name.to_string(),
+            bytes: row.all().iter().map(|(f, _)| f.size).sum(),
             ready,
-            partial_bytes: std::fs::metadata(dir.join(format!("{}.part", f.name)))
-                .map_or(0, |m| m.len()),
+            partial_bytes: std::fs::metadata(
+                path.with_file_name(format!("{}.part", main.file.name)),
+            )
+            .map_or(0, |m| m.len()),
             verified: verified[i].filter(|_| ready),
-        }
+            url: main.page(models::OFFICIAL),
+        })
     };
+    let model = file(0).expect("每个平台都有主模型");
     Ok(SetupStatus {
         onboarded,
         step,
-        model: file(0, &cfg.model),
-        mmproj: file(1, &cfg.mmproj),
+        mmproj: file(1).unwrap_or_else(|| model.clone()),
+        model,
+        npu: file(2),
+        tokenizer_url: cfg
+            .litert
+            .as_ref()
+            .map(|_| Pinned::TOKENIZER.page(models::OFFICIAL)),
+        npu_chip: rows[2]
+            .as_ref()
+            .map(|_| rummage_embed::cpu_name().to_string()),
         task,
         selftest: state.selftest_status(),
         proxy,
-        model_url: format!(
-            "https://huggingface.co/{}/blob/{}",
-            space::REPO,
-            space::COMMIT
-        ),
     })
 }
 

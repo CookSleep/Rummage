@@ -52,6 +52,7 @@ fn real_token_counts() {
         mmproj: None,
         threads: 6,
         gpu: None,
+        litert: None,
     };
     let backend = LocalBackend::new(spec, Limits::from_params(&BTreeMap::new())).unwrap();
 

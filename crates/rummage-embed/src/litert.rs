@@ -1,81 +1,123 @@
-//! LiteRT-LM 推理后端（`LiteRtBackend`）：手机端用的另一套向量空间（`SpaceConfig::litert`），在电脑上只用于评测。
+//! LiteRT-LM 的推理（`LiteRt`）：手机端用的向量空间（`SpaceConfig::litert`），在电脑上只用于评测。
+//! 由推理子进程（`worker --litert`）使用，监督、时限与重启与 llama.cpp 相同（`LocalBackend`）。
 //!
-//! - 引擎在本进程内运行（`rummage_litert::Engine`，只用 CPU 后端），一把锁串行处理请求；创建后端时即加载模型。
-//! - 文本：前缀仍由本 crate 拼接（`prefix`），`<bos>`、`<eos>` 由引擎插入。超过最长输入（`MAX_INPUT`）时报错，不截断。
-//!   数 token（`count_tokens`）用 `tokenizers` 加载主模型仓库的 `tokenizer.json`，与引擎内置的分词器相同，结果含 `<bos>`、`<eos>`。
-//! - 图像：只支持 70、140 两档（模型只有这两种视觉签名），按输入的档位逐次指定。调用方已按 GGUF 的规则缩放
+//! - 后端（`Accel`）：CPU、GPU 或 NPU（只在 Android 上），音频编码器总用 CPU（`rummage_litert`）。
+//!   推理子进程一次只处理一个请求；创建时即加载模型，图像、音频的编码器由引擎在第一次用到时加载，不因此重启推理进程。
+//! - 文本：前缀由调用方拼好，`<bos>`、`<eos>` 由引擎插入。超过最长输入（`max_input`）时报错，不截断。
+//!   数 token（`count`）用 `tokenizers` 加载主模型仓库的 `tokenizer.json`，与引擎内置的分词器相同，结果含 `<bos>`、`<eos>`。
+//! - 图像：只支持 70、140 两档（模型只有这两种视觉签名），按请求的档位逐次指定。调用方已按 GGUF 的规则缩放
 //!   （`rummage_media::fit`），这里再缩放到引擎预处理的不动点尺寸（`fixed_size`），无损编码成 PNG，引擎解码后不再缩放。
 //! - 音频：16 kHz 单声道采样封装成 32 位浮点 WAV 字节，梅尔谱由引擎计算。
 //! - 视频窗口：文字、音频、画面帧按原顺序交错传入；token 数按 GGUF 的计法估算（每帧 `宽/48 × 高/48 + 2`，
-//!   音频每 40 毫秒一个加 2），超过上限返回 `Error::TooLong`，与 llama.cpp 后端一样让带音频的视频改为只看画面。
-//! - 绝不使用 GPU 或任何加速器：LiteRT 的 WebGPU 后端曾让外接显卡驱动反复超时重置、只能重启。
+//!   音频每 40 毫秒一个加 2），超过上限返回 `Error::TooLong`，与 llama.cpp 一样让带音频的视频改为只看画面。
+//! - 输出未归一化，由 `LocalBackend` 统一检查与归一化。
 
-use std::path::PathBuf;
-use std::sync::{Mutex, PoisonError};
+use std::path::{Path, PathBuf};
 
 use rummage_litert::{Engine, Part, Settings};
 use rummage_media::Rgb;
 use rummage_media::video::VideoPart;
 use tokenizers::Tokenizer;
 
-use crate::local::{MAX_AUDIO_SAMPLES, prefixed};
-use crate::space::{self, SpaceConfig};
-use crate::{Embedding, EmbeddingBackend, Error, Input, Priority, prefix, vector};
+use crate::Error;
+use crate::local::MAX_AUDIO_SAMPLES;
+use crate::space::Backend;
 
 /// 最长输入（token），与 llama.cpp 后端的上下文相同；引擎默认取模型文件中的 1024
-const MAX_INPUT: usize = 2048;
+pub(crate) const MAX_INPUT: usize = 2048;
+/// 按芯片编译的 NPU 模型的最长输入：签名长度固定为 1024，不能再加大
+const NPU_MAX_INPUT: usize = 1024;
 /// LiteRT 模型支持的视觉 token 档位
-const TIERS: [u32; 2] = [70, 140];
+pub const TIERS: [u32; 2] = [70, 140];
 /// 每个视觉 token 对应的边长（patch 16 × 池化 3），与模型文件的元数据一致
 const SIDE: u32 = 48;
 /// 每 40 毫秒（640 个采样）一个音频 token
 const AUDIO_SAMPLES_PER_TOKEN: usize = 640;
-/// 线程数上限：i7-12700H 上线程越多越慢（XNNPack），2–20 线程实测文本 85–542 毫秒、140 档图像 1.85–2.29 秒，
+/// CPU 线程数上限：i7-12700H 上线程越多越慢（XNNPack），2–20 线程实测文本 85–542 毫秒、140 档图像 1.85–2.29 秒，
 /// 4 线程以内最快；音频编码器 2 线程最快（10 秒 1.19 秒，4 线程 1.87 秒，20 线程 6.97 秒）
 const MAX_THREADS: u32 = 4;
 const MAX_AUDIO_THREADS: u32 = 2;
 
-/// 创建 `LiteRtBackend` 所需的文件与线程数
+/// 文本与视觉编码器的后端；`Npu` 带厂商分发库所在的目录
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Accel {
+    Cpu,
+    Gpu,
+    Npu(PathBuf),
+}
+
+impl Accel {
+    /// 向量空间与自检中记的后端
+    pub fn backend(&self) -> Backend {
+        match self {
+            Accel::Cpu => Backend::Cpu,
+            Accel::Gpu => Backend::Gpu,
+            Accel::Npu(_) => Backend::Npu,
+        }
+    }
+
+    /// 推理子进程参数 `--litert` 的取值
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Accel::Cpu => "cpu",
+            Accel::Gpu => "gpu",
+            Accel::Npu(_) => "npu",
+        }
+    }
+}
+
+/// 创建 `LiteRt` 所需的文件与线程数
 #[derive(Debug, Clone)]
-pub struct LiteRtSpec {
+pub struct LiteRtSpec<'a> {
     /// `litert-lm.dll` / `liblitert-lm.so` 所在的目录
-    pub runtime_dir: PathBuf,
+    pub runtime_dir: &'a Path,
     /// `.litertlm` 模型文件
-    pub model: PathBuf,
+    pub model: &'a Path,
     /// `tokenizer.json`
-    pub tokenizer: PathBuf,
-    /// 建立索引线程数（参数 `index_threads`），按 `MAX_THREADS` 截断
+    pub tokenizer: &'a Path,
     pub threads: u32,
+    pub accel: &'a Accel,
+    /// 权重与程序缓存的目录；为空时不缓存
+    pub cache_dir: Option<&'a Path>,
 }
 
-pub struct LiteRtBackend {
-    engine: Mutex<Engine>,
+pub(crate) struct LiteRt {
+    engine: Engine,
     tokenizer: Tokenizer,
-    cfg: SpaceConfig,
+    max_input: usize,
 }
 
-impl LiteRtBackend {
-    /// 加载分词器与模型；模型大小不对时报错
-    pub fn new(spec: &LiteRtSpec) -> Result<Self, Error> {
-        space::LITERT_MODEL.check(&spec.model)?;
-        space::TOKENIZER.check(&spec.tokenizer)?;
-        let tokenizer = Tokenizer::from_file(&spec.tokenizer)
+impl LiteRt {
+    /// 加载分词器与模型；模型文件的大小由调用方核对
+    pub(crate) fn new(spec: &LiteRtSpec) -> Result<Self, Error> {
+        let tokenizer = Tokenizer::from_file(spec.tokenizer)
             .map_err(|err| Error::InitFailed(format!("无法加载分词器：{err}")))?;
+        let max_input = match spec.accel {
+            Accel::Npu(_) => NPU_MAX_INPUT,
+            _ => MAX_INPUT,
+        };
+        let accel = match spec.accel {
+            Accel::Cpu => rummage_litert::Accel::Cpu,
+            Accel::Gpu => rummage_litert::Accel::Gpu,
+            Accel::Npu(dir) => rummage_litert::Accel::Npu(dir),
+        };
         let engine = Engine::new(
-            &spec.runtime_dir,
+            spec.runtime_dir,
             &Settings {
-                model: &spec.model,
+                model: spec.model,
+                accel,
+                cache_dir: spec.cache_dir,
                 threads: spec.threads.clamp(1, MAX_THREADS),
                 audio_threads: spec.threads.clamp(1, MAX_AUDIO_THREADS),
-                max_input: MAX_INPUT as u32,
+                max_input: max_input as u32,
                 vision_tokens: TIERS[1],
             },
         )
         .map_err(|err| Error::InitFailed(err.to_string()))?;
-        Ok(LiteRtBackend {
-            engine: Mutex::new(engine),
+        Ok(LiteRt {
+            engine,
             tokenizer,
-            cfg: SpaceConfig::litert(),
+            max_input,
         })
     }
 
@@ -87,32 +129,59 @@ impl LiteRtBackend {
             .map_err(|err| Error::InvalidInput(format!("无法分词：{err}")))
     }
 
-    fn run(&self, parts: &[Part], tier: u32) -> Result<Vec<f32>, Error> {
-        let raw = self
-            .engine
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .embed(parts, tier)
-            .map_err(|err| match err {
-                rummage_litert::Error::InvalidInput(msg) => Error::InvalidInput(msg),
-                err => Error::Inference(err.to_string()),
-            })?;
-        vector::normalize(raw)
+    /// 已拼好前缀的文本的 token 数，含 `<bos>`、`<eos>`
+    pub(crate) fn count(&self, text: &str) -> Result<usize, Error> {
+        self.tokens(text, true)
+    }
+
+    fn run(&mut self, parts: &[Part], tier: u32) -> Result<Vec<f32>, Error> {
+        self.engine.embed(parts, tier).map_err(|err| match err {
+            rummage_litert::Error::InvalidInput(msg) => Error::InvalidInput(msg),
+            err => Error::Inference(err.to_string()),
+        })
+    }
+
+    /// 已拼好前缀的文本；超过最长输入时返回 `Error::InvalidInput`
+    pub(crate) fn text(&mut self, text: &str) -> Result<Vec<f32>, Error> {
+        let n = self.tokens(text, true)?;
+        if n > self.max_input {
+            return Err(Error::InvalidInput(format!(
+                "文本有 {n} 个 token，超过上限 {}",
+                self.max_input
+            )));
+        }
+        self.run(&[Part::Text(text)], TIERS[1])
+    }
+
+    /// `tokens` 档的图像
+    pub(crate) fn image(&mut self, rgb: &Rgb, tokens: u32) -> Result<Vec<f32>, Error> {
+        let t = check_tier(rgb, tokens)?;
+        self.run(&[Part::Image(&png(rgb, t)?)], t)
+    }
+
+    pub(crate) fn audio(&mut self, samples: &[f32]) -> Result<Vec<f32>, Error> {
+        check_audio(samples)?;
+        self.run(&[Part::Audio(&wav(samples))], TIERS[1])
     }
 
     /// 文本、画面帧与音频交错的输入：估算 token 数（见模块说明），超过 `max_tokens` 时返回 `Error::TooLong`。
     /// 一次请求只有一个档位：不低于 `min_tier`、能放下所有帧的档位，各帧都按它缩放到不动点
-    fn interleaved(
-        &self,
+    pub(crate) fn interleaved(
+        &mut self,
         parts: &[VideoPart],
         max_tokens: usize,
         min_tier: u32,
     ) -> Result<Vec<f32>, Error> {
-        let mut tier = min_tier;
+        let mut tier = min_tier.max(TIERS[0]);
         for p in parts {
             if let VideoPart::Frame(rgb) = p {
                 tier = tier.max(tier_of(rgb)?);
             }
+        }
+        if !TIERS.contains(&tier) {
+            return Err(Error::InvalidInput(format!(
+                "LiteRT 只支持 70 与 140 档，不支持 {tier} 档。"
+            )));
         }
         let mut total = 2;
         let mut owned = Vec::with_capacity(parts.len());
@@ -133,10 +202,10 @@ impl LiteRtBackend {
                 }
             }
         }
-        if total > max_tokens.min(MAX_INPUT) {
+        if total > max_tokens.min(self.max_input) {
             return Err(Error::TooLong(format!(
                 "输入约有 {total} 个 token，超过上限 {}",
-                max_tokens.min(MAX_INPUT)
+                max_tokens.min(self.max_input)
             )));
         }
         let parts: Vec<Part> = owned
@@ -148,81 +217,6 @@ impl LiteRtBackend {
             })
             .collect();
         self.run(&parts, tier)
-    }
-
-    fn handle(&self, input: Input) -> Result<Embedding, Error> {
-        let (vector, space) = match input {
-            Input::Image { rgb, tokens } => {
-                let t = check_tier(&rgb, tokens)?;
-                let v = self.run(&[Part::Image(&png(&rgb, t)?)], t)?;
-                (v, self.cfg.image(tokens))
-            }
-            Input::ImageQuery { rgb, tokens, text } => {
-                let t = check_tier(&rgb, tokens)?;
-                let v = if text.trim().is_empty() {
-                    self.run(&[Part::Image(&png(&rgb, t)?)], t)?
-                } else {
-                    let parts = [
-                        VideoPart::Text(prefix::query(&text)),
-                        VideoPart::Frame(std::sync::Arc::new(rgb)),
-                    ];
-                    self.interleaved(&parts, MAX_INPUT, t)
-                        .map_err(|err| match err {
-                            Error::InvalidInput(msg) | Error::TooLong(msg) => {
-                                Error::QueryTooLong(msg)
-                            }
-                            err => err,
-                        })?
-                };
-                (v, self.cfg.image(tokens))
-            }
-            Input::Audio {
-                samples,
-                preprocess,
-            } => {
-                check_audio(&samples)?;
-                let v = self.run(&[Part::Audio(&wav(&samples))], TIERS[1])?;
-                (v, self.cfg.media(&preprocess))
-            }
-            Input::Video {
-                parts,
-                preprocess,
-                max_tokens,
-            } => (
-                self.interleaved(&parts, max_tokens, TIERS[0])?,
-                self.cfg.media(&preprocess),
-            ),
-            text => {
-                let query = matches!(text, Input::Query(_));
-                let text = prefixed(&text).expect("图像、音频与视频以外的输入都是文本");
-                let n = self.tokens(&text, true)?;
-                if n > MAX_INPUT {
-                    let msg = format!("文本有 {n} 个 token，超过上限 {MAX_INPUT}");
-                    return Err(if query {
-                        Error::QueryTooLong(msg)
-                    } else {
-                        Error::InvalidInput(msg)
-                    });
-                }
-                (self.run(&[Part::Text(&text)], TIERS[1])?, self.cfg.text())
-            }
-        };
-        Ok(Embedding { vector, space })
-    }
-}
-
-impl EmbeddingBackend for LiteRtBackend {
-    fn embed(&self, input: Input, _priority: Priority) -> Result<Embedding, Error> {
-        self.handle(input)
-    }
-
-    fn count_tokens(&self, input: &Input, _priority: Priority) -> Result<usize, Error> {
-        let Some(text) = prefixed(input) else {
-            return Err(Error::InvalidInput(
-                "只能计算文本输入的 token 数。".to_string(),
-            ));
-        };
-        self.tokens(&text, true)
     }
 }
 

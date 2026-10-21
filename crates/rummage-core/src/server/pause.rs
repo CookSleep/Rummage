@@ -178,7 +178,7 @@ mod tests {
             driver_events: Box::new(|_| unreachable!("没有推理后端，不会失效")),
             file_timeout: None,
             gpus: Vec::new,
-            litert: false,
+            litert: None,
         }
     }
 

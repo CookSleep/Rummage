@@ -64,47 +64,27 @@ impl Shared {
             self.set_error(Some(msg), out);
             return None;
         }
-        let (model_file, mmproj_file) = opts.model_files();
-        if !(opts.available)(&opts.model, model_file) {
-            *slot = None;
-            self.set_flag(&self.no_model, true, out);
-            return None;
-        }
-        self.set_flag(&self.no_model, false, out);
-        let has_mmproj = (opts.available)(&opts.mmproj, mmproj_file);
-        self.set_flag(&self.no_mmproj, !has_mmproj, out);
         let values = lock(&self.params).clone();
-        let images = has_mmproj && params::flag(&values, "index_images");
-        let audio = has_mmproj && params::flag(&values, "index_audio");
-        let video = has_mmproj && params::flag(&values, "index_video");
+        // 已有引擎时按它的后端核对（换设备时引擎已被丢弃），不必每次都读自检记录、列出显卡
         if let Some(e) = &*slot
-            && e.images == images
-            && e.audio == audio
-            && e.video == video
+            && self.media_flags(&values, e.cfg.backend, out) == Some((e.images, e.audio, e.video))
         {
             return Some(e.clone());
         }
+        // 先选设备再核对模型：LiteRT 的 NPU 与其他后端用不同的模型文件
+        let gpu = self.chosen_gpu(&values, self.cpu_only.load(Ordering::Relaxed));
+        let backend = gpu.as_ref().map_or(Backend::Cpu, |r| r.backend);
+        let Some((images, audio, video)) = self.media_flags(&values, backend, out) else {
+            *slot = None;
+            return None;
+        };
+        let has_mmproj = !self.no_mmproj.load(Ordering::Relaxed);
         if !has_mmproj {
             log::warn!("多模态模型文件不可用，只为文本类文件建索引。");
         }
         let mmproj = images || audio || video;
-        let (all, disabled) = {
-            let d = lock(&self.disabled);
-            (d.all, d.keys.clone())
-        };
-        let gpu = if all || self.cpu_only.load(Ordering::Relaxed) {
-            None
-        } else {
-            let preferred = lock(&self.preferred).clone();
-            selftest::preferred_gpu(
-                &opts.selftest_cache,
-                &(opts.gpus)(),
-                mmproj,
-                &preferred,
-                &disabled,
-            )
-        };
         let spec = EngineSpec {
+            backend,
             gpu: gpu.as_ref().and_then(|r| r.gpu()),
             mmproj,
             threads: int(&values, "index_threads").max(1) as u32,
@@ -125,11 +105,7 @@ impl Shared {
                 return None;
             }
         };
-        let cfg = opts.space(if spec.gpu.is_some() {
-            Backend::Vulkan
-        } else {
-            Backend::Cpu
-        });
+        let cfg = opts.space(spec.backend);
         let engine = Arc::new(Engine {
             backend,
             device: gpu.as_ref().map_or_else(
@@ -150,6 +126,59 @@ impl Shared {
         *slot = Some(engine.clone());
         self.set_error(None, out);
         Some(engine)
+    }
+
+    /// 后端 `backend` 用的模型可用时，按参数与多模态模型是否可用返回要处理的图片、音频、视频；主模型（LiteRT 另要分词器）
+    /// 不可用时为空。同时更新缺少模型的状态
+    fn media_flags(
+        &self,
+        values: &std::collections::BTreeMap<String, rummage_proto::ParamValue>,
+        backend: Backend,
+        out: &Sender<Msg>,
+    ) -> Option<(bool, bool, bool)> {
+        let opts = &self.opts;
+        let (model_file, mmproj_file) = opts.model_files(backend);
+        let (model_path, mmproj_path) = opts.model_paths(backend);
+        let tokenizer_ok = opts
+            .litert
+            .as_ref()
+            .is_none_or(|f| (opts.available)(&f.tokenizer, &rummage_embed::space::TOKENIZER));
+        if !tokenizer_ok || !(opts.available)(model_path, model_file) {
+            self.set_flag(&self.no_model, true, out);
+            return None;
+        }
+        self.set_flag(&self.no_model, false, out);
+        let has_mmproj = (opts.available)(mmproj_path, mmproj_file);
+        self.set_flag(&self.no_mmproj, !has_mmproj, out);
+        let on = |k: &str| has_mmproj && params::flag(values, k);
+        Some((on("index_images"), on("index_audio"), on("index_video")))
+    }
+
+    /// 按用户的选择与自检记录选用的显卡（LiteRT 的 GPU、NPU 也算）；用 CPU 时为空。本次运行所有显卡都停用、
+    /// `cpu_only`（后台自动检测设备期间）时只用 CPU（见模块说明）
+    pub(super) fn chosen_gpu(
+        &self,
+        values: &std::collections::BTreeMap<String, rummage_proto::ParamValue>,
+        cpu_only: bool,
+    ) -> Option<selftest::CandidateReport> {
+        let (all, disabled) = {
+            let d = lock(&self.disabled);
+            (d.all, d.keys.clone())
+        };
+        if all || cpu_only {
+            return None;
+        }
+        let any_media = ["index_images", "index_audio", "index_video"]
+            .iter()
+            .any(|k| params::flag(values, k));
+        let preferred = lock(&self.preferred).clone();
+        selftest::preferred_gpu(
+            &self.opts.selftest_cache,
+            &(self.opts.gpus)(),
+            any_media && self.mmproj_available(Backend::Cpu),
+            &preferred,
+            &disabled,
+        )
     }
 
     /// 当前时刻与挂起代数

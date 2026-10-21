@@ -84,8 +84,14 @@ export function CpuIcon(props: SVGProps<SVGSVGElement>) {
   return <Icon {...props} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
 }
 
+/** 显卡：挡板、卡身、两个风扇与金手指 */
 export function GpuIcon(props: SVGProps<SVGSVGElement>) {
-  return <Icon {...props} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+  return <Icon {...props} d="M2 21V3m0 2h18a2 2 0 012 2v8a2 2 0 01-2 2H2m5 0v3a1 1 0 001 1h5a1 1 0 001-1v-3M8 13a2 2 0 100-4 2 2 0 000 4zm8 0a2 2 0 100-4 2 2 0 000 4z" />
+}
+
+/** NPU：芯片中一颗四角星（AI 加速） */
+export function NpuIcon(props: SVGProps<SVGSVGElement>) {
+  return <Icon {...props} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zm5-10l.9 2.1L15 12l-2.1.9L12 15l-.9-2.1L9 12l2.1-.9L12 9z" />
 }
 
 export function AudioIcon(props: SVGProps<SVGSVGElement>) {

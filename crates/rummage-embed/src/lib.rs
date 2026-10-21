@@ -2,9 +2,9 @@
 //!
 //! - 输入：`Input` 区分查询、文档、图像、音频与视频窗口；任务前缀在本 crate 内拼接（`prefix`），调用方不拼。
 //! - 输出：`Embedding` 带向量空间 ID（`space`）；向量都经过数值检查和 L2 归一化（`vector`）。
-//! - 后端：`EmbeddingBackend` 有两种实现。本地 llama.cpp（`LocalBackend`，`local`）：
-//!   一个调度线程按优先级（查询先于索引，同级先来先到）把请求逐个交给推理子进程 `rummage-core worker`。
-//!   LiteRT-LM（`LiteRtBackend`，`litert`）用 LiteRT-LM 的 CPU 后端在本进程内计算，属于另一个向量空间。
+//! - 后端：`LocalBackend`（`local`）实现 `EmbeddingBackend`：一个调度线程按优先级（查询先于索引，同级先来先到）
+//!   把请求逐个交给推理子进程 `rummage-core worker`。推理子进程用 llama.cpp，或用 LiteRT-LM（`litert`，
+//!   `WorkerSpec::litert`；手机端的向量空间，电脑上只用于评测）。手机 NPU 的模型与运行库清单见 `npu`。
 //! - 推理子进程（`worker`）：只在其中加载 llama.cpp；Windows 上放进 Job Object 并设内存上限；
 //!   Android 上没有子进程，是应用进程内的线程（`android.rs`），帧协议相同。
 //!   初始化与单次推理都有时限。默认只加载主模型，遇到图像或音频时才带上 mmproj 重启；空闲超时后结束。
@@ -17,6 +17,7 @@
 mod frame;
 mod litert;
 mod local;
+pub mod npu;
 pub mod prefix;
 pub mod selftest;
 pub mod space;
@@ -38,11 +39,13 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 pub use frame::{DeviceInfo, GpuInfo};
-pub use litert::{LiteRtBackend, LiteRtSpec};
+pub use litert::{Accel, TIERS as LITERT_TIERS};
 pub use local::{Gpu, Limits, LocalBackend, WorkerSpec, list_devices};
 pub use platform::adapters;
+#[cfg(target_os = "android")]
+pub use platform::{Launcher, serve_embed_process, set_launcher};
 pub use space::{Backend, SpaceConfig, SpaceId};
-pub use worker::{WorkerArgs, run_worker, run_worker_stdio};
+pub use worker::{LiteRtArgs, WorkerArgs, run_worker, run_worker_stdio};
 
 /// 一块显卡适配器的属性（`adapters`），供诊断包使用；只查询属性，不加载推理运行库。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]

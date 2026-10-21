@@ -180,6 +180,14 @@ pub fn protocol_stdout() -> io::Result<File> {
     Ok(out)
 }
 
+/// NPU 只在 Android 上用
+pub fn preload_npu(_dir: &Path) {}
+
+/// 芯片型号（Android 的 `ro.soc.model`），选 NPU 模型用；电脑上为空
+pub fn soc_model() -> String {
+    String::new()
+}
+
 /// 与 `description` 相同的第一个 DXGI 适配器的用户模式驱动版本（如 `32.0.15.6094`）；找不到或查询失败时为空。
 pub fn driver_version(description: &str) -> Option<String> {
     adapters()

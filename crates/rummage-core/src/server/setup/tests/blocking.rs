@@ -45,6 +45,7 @@ fn unblock(state: &Arc<State>, device: &str) -> Result<Reply, ApiError> {
         state,
         Request::UnblockGpu {
             device: device.into(),
+            failed: false,
         },
     )
 }
@@ -282,7 +283,7 @@ fn unblock_needs_full_retest_without_media() {
     let Ok(Reply::DoneWithWarning { message }) = unblock(&state, "gpu:GTX|") else {
         panic!("缓存不够用时应请用户整体重新检测");
     };
-    assert!(message.contains("“重新检测”"), "{message}");
+    assert!(message.contains("重新检测全部设备"), "{message}");
     assert!(!state.setup.started.load(Ordering::Relaxed));
     let st = setup(&state).selftest;
     assert!(!st.running && st.blocked.is_empty() && st.stale);

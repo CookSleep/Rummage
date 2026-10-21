@@ -22,7 +22,7 @@ pub use setup::{
     ProxyMode, ProxySetting, RootEstimate, SelftestStatus, SetupStatus,
 };
 
-/// 每次修改消息类型都要加 1。
+/// 首次发布前保持 1；发布后每次修改消息类型都要加 1。
 pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, thiserror::Error)]
@@ -198,10 +198,13 @@ pub enum Request {
         step: u32,
     },
     /// 在后台下载模型文件：主模型，`mmproj` 为真时再加 mmproj；已正确的文件跳过。
-    /// 进度以 `ModelTask` 事件推送；已有任务在进行时回 `bad_request`
+    /// Android 上主模型是 LiteRT 通用版（含全部模态，`mmproj` 不用），`npu` 为真时改为本机芯片的 NPU 模型（`SetupStatus::npu`）。
+    /// 一个模型的全部文件（分词器、QNN 运行库）一起下载。进度以 `ModelTask` 事件推送；已有任务在进行时回 `bad_request`
     DownloadModels {
         source: ModelSource,
         mmproj: bool,
+        #[serde(default)]
+        npu: bool,
     },
     /// 在后台导入用户选择的模型文件：按大小与 SHA-256 识别主模型和 mmproj，复制到模型目录。
     /// 路径由界面进程的系统文件对话框给出，前端不能提交路径。进度同 `DownloadModels`
@@ -214,16 +217,25 @@ pub enum Request {
     /// 结果记下来，之后在 `ModelFileStatus::verified` 中返回
     VerifyModel {
         mmproj: bool,
+        /// Android：校验 NPU 模型（含 QNN 运行库）
+        #[serde(default)]
+        npu: bool,
     },
     /// 引导进入下载模型一步时，在后台依次完整校验已安装、没有校验记录的模型文件：主模型，`mmproj` 为真时再加 mmproj；
     /// 记为未通过的不重校，没有要校验的文件时不开始任务。进度与结果同 `VerifyModel`
     VerifyModels {
         mmproj: bool,
+        /// Android：校验 NPU 模型（含 QNN 运行库）
+        #[serde(default)]
+        npu: bool,
     },
     /// 在后台删除一个模型文件（或它下载了一部分的文件）：`mmproj` 为真时删除 mmproj，否则删除主模型。先让推理进程释放文件；
     /// 已建立的索引保留。删除主模型后不能语义检索、也不再识别新内容，索引状态为 `no_model`，重新下载或导入后恢复。进度同 `DownloadModels`
     DeleteModel {
         mmproj: bool,
+        /// Android：删除 NPU 模型与 QNN 运行库（分词器留给通用版）
+        #[serde(default)]
+        npu: bool,
     },
     /// 保存代理设置，回复 `Reply::Proxy`（地址已规范化）；地址不合法时回 `bad_request`
     SetProxy {
@@ -242,9 +254,12 @@ pub enum Request {
     },
     /// 解除屏蔽：删除这块显卡（`BlockedGpu::id`）的全部屏蔽记录并清掉它本次运行的停用，随即开始只测它的检测
     /// （其余设备照缓存显示；按手动检测对待，进度以 `Selftest` 事件推送）。不当场重测时（不在系统中、缓存结果没测过本次需要的
-    /// 图片与音视频、检测没能开始）回复 `DoneWithWarning` 说明原因。检测进行中或没有屏蔽记录时回 `bad_request`
+    /// 图片与音视频、检测没能开始）回复 `DoneWithWarning` 说明原因。检测进行中或没有屏蔽记录时回 `bad_request`。
+    /// `failed` 时改为删除它的未通过记录（重测未通过的设备），其余相同
     UnblockGpu {
         device: String,
+        #[serde(default)]
+        failed: bool,
     },
     /// 预估索引规模，回复 `Reply::Estimate`
     Estimate,

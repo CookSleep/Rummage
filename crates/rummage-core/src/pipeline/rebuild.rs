@@ -6,6 +6,8 @@
 //!   可能内嵌媒体的文档只重算内嵌媒体。
 //! - 重建与建索引同一套调度：排在新增与内容变化的文件之后（`rummage_index::jobs`），受同样的暂停条件约束。
 //! - 进度：`total` 为这一批的文件数，新的修改加入的文件计入同一批，剩余为 0 时清零（`Shared::rebuild_status`）。
+//! - 换了主模型文件（手机上在 NPU 模型与 LiteRT 通用版之间切换）的文件整个重建：要用的模型按
+//!   要选用的设备（与建引擎时的选择相同）；`reload`（设备检测完成、用户换了设备）后也检查一次。
 use std::collections::BTreeMap;
 
 use rummage_embed::space;
@@ -59,23 +61,43 @@ pub(super) fn wanted(values: &BTreeMap<String, ParamValue>, cfg: &SpaceConfig) -
         }),
         // 由调用方按开启的模态填写（`docmedia::tokens`）
         doc_media: "[]".to_string(),
+        model: Some(cfg.model_sha256.clone()),
     }
 }
 
 impl Shared {
+    /// 后端 `backend` 用的多模态模型可用；LiteRT 时本机芯片的 NPU 模型可用也算（只下了 NPU 版的手机）
+    pub(super) fn mmproj_available(&self, backend: Backend) -> bool {
+        let opts = &self.opts;
+        let ok = |b: Backend| (opts.available)(opts.model_paths(b).1, opts.model_files(b).1);
+        ok(backend) || (opts.litert.is_some() && ok(Backend::Npu))
+    }
+
     /// 处理哪些媒体种类（图片、音频、视频）：mmproj 可用且对应的参数开启，与 `engine` 的判定相同
     fn media_on(&self, values: &BTreeMap<String, ParamValue>) -> (bool, bool, bool) {
-        let mmproj = (self.opts.available)(&self.opts.mmproj, self.opts.model_files().1);
+        let mmproj = self.mmproj_available(Backend::Cpu);
         let on = |k: &str| mmproj && params::flag(values, k);
         (on("index_images"), on("index_audio"), on("index_video"))
     }
 
+    /// 要用的主模型所属的后端（LiteRT 的 NPU 用另一个模型文件）：按要选用的设备，与建引擎时的选择相同，但不算后台自动检测期间
+    /// 暂时只用 CPU（检测完就切回）。会读自检记录，在取数据库锁之前调用，结果交给 `requeue_stale`
+    pub(super) fn model_backend(&self) -> Backend {
+        let values = lock(&self.params).clone();
+        self.chosen_gpu(&values, false)
+            .map_or(Backend::Cpu, |r| r.backend)
+    }
+
     /// 把需要重建的已完成作业放回（只看会建内容索引的种类：关闭的类型、缺 mmproj 时的媒体放回后不会被领取），
-    /// 计入这一批的总数。调用方持有数据库锁
-    pub(super) fn requeue_stale(&self, db: &Db) -> Result<BTreeMap<String, usize>, DbError> {
+    /// 计入这一批的总数；向量所用的模型与后端 `backend`（`model_backend`）的不同时整个文件重建。调用方持有数据库锁
+    pub(super) fn requeue_stale(
+        &self,
+        db: &Db,
+        backend: Backend,
+    ) -> Result<BTreeMap<String, usize>, DbError> {
         let values = lock(&self.params).clone();
         let (images, audio, video) = self.media_on(&values);
-        let cfg = self.opts.space(Backend::Cpu);
+        let cfg = self.opts.space(backend);
         let mut w = wanted(&values, &cfg);
         if params::flag(&values, "index_documents") {
             w.kinds.push("document");
@@ -119,9 +141,10 @@ impl Pipeline {
     /// 提交互斥：提交在前的已是 `stored`，会按版本判断；在后的会在提交时被改为放回。返回各种类放回的已完成作业数。
     /// 改参数时 `active` 由 `void_kinds` 给出
     pub fn requeue(&self, active: &[&str]) -> Result<BTreeMap<String, usize>, DbError> {
+        let backend = self.shared.model_backend();
         let db = lock(&self.shared.db);
         let ids = db.active_jobs(active)?;
-        let n = self.shared.requeue_stale(&db)?;
+        let n = self.shared.requeue_stale(&db, backend)?;
         let mut stale = lock(&self.shared.stale);
         for id in ids {
             if !stale.contains(&id) {

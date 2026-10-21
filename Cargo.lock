@@ -5110,6 +5110,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "chrono",
+ "flate2",
  "flexi_logger",
  "getrandom 0.4.3",
  "jni 0.22.4",

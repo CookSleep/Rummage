@@ -23,6 +23,7 @@
 //!   这不是显卡出错，上层换下一个能用的设备、不屏蔽。
 //! - 按需加载 mmproj 与空闲卸载：`WorkerSpec::mmproj` 只是允许使用的 mmproj，推理进程默认只加载主模型；
 //!   遇到图像、音频或视频而当前进程没有加载 mmproj 时，结束它并带上 mmproj 重新拉起，之后一直保持，直到空闲卸载。
+//!   LiteRT 只有一个模型文件，各模态的编码器由引擎按需加载，不因此重启。
 //!   超过 `Limits::idle`（参数 `engine_idle_min`，可用 `set_idle_timeout` 随时修改）没有请求时结束推理进程，
 //!   下一次请求再拉起（只加载主模型）。这两种结束都是主动的，不计入连续失败次数。
 //! - 自检用：`start` 提前启动推理进程（计初始化耗时，允许时连同 mmproj 一起加载，避免测图像时再初始化一次显卡）；
@@ -48,7 +49,10 @@ use rummage_proto::params::{self, ParamValue};
 
 use crate::frame::{DeviceInfo, FromWorker, GpuInfo, MediaPart, ToWorker};
 use crate::space::{self, Backend, SpaceConfig};
-use crate::{Embedding, EmbeddingBackend, Error, Input, KILL_GRACE, Priority, platform, prefix};
+use crate::{
+    Accel, Embedding, EmbeddingBackend, Error, Input, KILL_GRACE, LiteRtArgs, Priority, npu,
+    platform, prefix,
+};
 
 mod process;
 mod supervisor;
@@ -131,8 +135,10 @@ pub struct WorkerSpec {
     /// 允许使用的 mmproj；为空时只能编码文本。是否加载由运行时决定：遇到图像或音频时才加载（见模块说明）。
     pub mmproj: Option<PathBuf>,
     pub threads: u32,
-    /// 为空时只用 CPU。
+    /// 为空时只用 CPU。LiteRT 的 GPU、NPU 也放在这里（描述为后端名），推理进程按 GPU 模式监督。
     pub gpu: Option<Gpu>,
+    /// 用 LiteRT 时的参数；`model` 为通用版或 NPU 版的 `.litertlm`，`mmproj` 与它相同或为空
+    pub litert: Option<LiteRtArgs>,
 }
 
 impl WorkerSpec {
@@ -147,6 +153,21 @@ impl WorkerSpec {
             "--threads".into(),
             self.threads.to_string().into(),
         ];
+        if let Some(l) = &self.litert {
+            args.extend([
+                "--litert".into(),
+                l.accel.as_str().into(),
+                "--tokenizer".into(),
+                l.tokenizer.clone().into(),
+            ]);
+            if let Some(d) = &l.cache_dir {
+                args.extend(["--cache-dir".into(), d.clone().into()]);
+            }
+            if let Accel::Npu(d) = &l.accel {
+                args.extend(["--dispatch-dir".into(), d.clone().into()]);
+            }
+            return args;
+        }
         if let Some(p) = self.mmproj.as_ref().filter(|_| mmproj) {
             args.extend(["--mmproj".into(), p.clone().into()]);
         }
@@ -204,7 +225,11 @@ pub(crate) fn prefixed(input: &Input) -> Option<String> {
 }
 
 /// 视频窗口（与图文交错的以图搜图查询）的请求与负载（`frame::MediaPart`）。音频段与图像同单独输入一样检查（30 秒、48 的倍数由推理进程核对）
-fn video_request(parts: &[VideoPart], max_tokens: usize) -> Result<(ToWorker, Vec<u8>), Error> {
+fn video_request(
+    parts: &[VideoPart],
+    max_tokens: usize,
+    min_tier: u32,
+) -> Result<(ToWorker, Vec<u8>), Error> {
     let mut payload = Vec::new();
     let mut heads = Vec::with_capacity(parts.len());
     for p in parts {
@@ -238,6 +263,7 @@ fn video_request(parts: &[VideoPart], max_tokens: usize) -> Result<(ToWorker, Ve
         ToWorker::Video {
             parts: heads,
             max_tokens,
+            min_tier,
         },
         payload,
     ))
@@ -344,16 +370,32 @@ pub struct LocalBackend {
 impl LocalBackend {
     /// 核对模型文件大小并启动调度线程；推理进程在第一次请求时启动。
     pub fn new(spec: WorkerSpec, limits: Limits) -> Result<Self, Error> {
-        space::MODEL.check(&spec.model)?;
-        if let Some(p) = &spec.mmproj {
-            space::MMPROJ.check(p)?;
-        }
-        let backend = if spec.gpu.is_some() {
-            Backend::Vulkan
-        } else {
-            Backend::Cpu
+        let cfg = match &spec.litert {
+            Some(l) => {
+                let name = spec.model.file_name().and_then(|n| n.to_str());
+                let file = name.and_then(npu::litert_model).ok_or_else(|| {
+                    Error::InvalidInput(format!(
+                        "\"{}\" 不是已知的 LiteRT 模型文件",
+                        spec.model.display()
+                    ))
+                })?;
+                file.check(&spec.model)?;
+                space::TOKENIZER.check(&l.tokenizer)?;
+                SpaceConfig::litert(file, l.accel.backend())
+            }
+            None => {
+                space::MODEL.check(&spec.model)?;
+                if let Some(p) = &spec.mmproj {
+                    space::MMPROJ.check(p)?;
+                }
+                let backend = if spec.gpu.is_some() {
+                    Backend::Vulkan
+                } else {
+                    Backend::Cpu
+                };
+                SpaceConfig::current(backend)
+            }
         };
-        let cfg = SpaceConfig::current(backend);
         let text_space = cfg.text();
         let queue = Arc::new(Queue {
             pending: Mutex::new(Pending::new(limits.idle)),

@@ -11,7 +11,8 @@
 //! - 建索引只用 `cached_gpu` / `preferred_gpu` 读记录，不测试也不初始化任何 GPU；按性能顺序选第一个能用的设备，
 //!   本次运行停用的显卡由调用方传入（`disabled`），按同一设备（描述与 PCI 号）比较，不看驱动版本：外接显卡拔出时
 //!   查不到驱动，插回后本次运行中也不选回。
-//! - 用户在设备页解除屏蔽（`unblock_gpu`）时删除这块显卡的全部屏蔽记录（不论驱动与运行库版本），缓存的结果中它改为“已跳过”，
+//! - 用户在设备页解除屏蔽时删除这块显卡的全部屏蔽记录、重测未通过的设备时删除它的全部未通过记录（`clear_gpu_records`，
+//!   不论驱动与运行库版本），缓存的结果中它改为“已跳过”，
 //!   之后的检测（核心解除后随即发起的重测，或下次手动、自动检测）只重测它；手动检测中通过时同样删除。“重新检测”不清除其他记录。
 //! - 文件的读改写（自检保存结果、建索引时屏蔽、解除屏蔽）都在 `CACHE_LOCK` 内进行；先写临时文件再改名。
 use std::fs;
@@ -23,9 +24,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CandidateReport, DeviceKey, SelftestReport, Status, UNKNOWN_DRIVER, by_speed, gpu_id, models,
-    select,
+    runtime, select,
 };
-use crate::space::{self, Backend};
+use crate::space::Backend;
 use crate::{Adapter, platform};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,7 +182,7 @@ impl CacheFile {
         let usable = |i: usize| {
             let (r, key) = (cands.get(i)?, cached.keys.get(i)?);
             let now = report_key(r);
-            if r.backend != Backend::Vulkan
+            if !r.backend.accel()
                 || self.blacklisted(key).is_some()
                 || self.blacklisted(&now).is_some()
                 || disabled.iter().any(|d| d.same_device(&now))
@@ -189,7 +190,8 @@ impl CacheFile {
                 return None;
             }
             let present = cached.present(adapters, &r.description);
-            (key.runtime == space::RUNTIME && key.model == models() && present).then(|| r.clone())
+            (key.runtime == runtime() && key.model == models(r.backend) && present)
+                .then(|| r.clone())
         };
         if let Some(id) = device {
             let i = cands
@@ -201,7 +203,7 @@ impl CacheFile {
             .into_iter()
             .find_map(|i| match cands[i].backend {
                 Backend::Cpu => Some(None),
-                Backend::Vulkan => usable(i).map(Some),
+                _ => usable(i).map(Some),
             })
             .flatten()
     }
@@ -220,7 +222,7 @@ pub(super) fn cache_lock() -> MutexGuard<'static, ()> {
 pub fn report_key(r: &CandidateReport) -> DeviceKey {
     let now = match r.backend {
         Backend::Cpu => None,
-        Backend::Vulkan => platform::driver_version(&r.description),
+        _ => platform::driver_version(&r.description),
     };
     key_at(r, now.or_else(|| r.driver.clone()))
 }
@@ -230,15 +232,15 @@ pub(super) fn key_at(r: &CandidateReport, driver: Option<String>) -> DeviceKey {
     DeviceKey {
         description: match r.backend {
             Backend::Cpu => String::new(),
-            Backend::Vulkan => r.description.clone(),
+            _ => r.description.clone(),
         },
         pci_id: r.pci_id.clone(),
         driver: match r.backend {
             Backend::Cpu => String::new(),
-            Backend::Vulkan => driver.unwrap_or_else(|| UNKNOWN_DRIVER.to_string()),
+            _ => driver.unwrap_or_else(|| UNKNOWN_DRIVER.to_string()),
         },
-        runtime: space::RUNTIME.to_string(),
-        model: models(),
+        runtime: runtime().to_string(),
+        model: models(r.backend),
     }
 }
 
@@ -266,9 +268,9 @@ impl CacheFile {
         if retry && !cpu_only && pending {
             return false;
         }
-        let keys_ok = c.keys.iter().all(|k| {
+        let keys_ok = c.keys.iter().zip(&c.report.candidates).all(|(k, r)| {
             let cpu = k.description.is_empty() && k.driver.is_empty();
-            (cpu_only && !cpu) || (k.runtime == space::RUNTIME && k.model == models())
+            (cpu_only && !cpu) || (k.runtime == runtime() && k.model == models(r.backend))
         });
         // 检测时的键与现在的键都查（运行中屏蔽的两种键，见 `block`）
         let selected_ok = cpu_only
@@ -353,7 +355,7 @@ pub fn last_report(cache_file: &Path) -> Option<SelftestReport> {
 
 /// 建索引时 `cached_gpu` 选中的 GPU 出现设备丢失、推理进程结束不了，或后端失效且这段时间系统日志中有驱动事件：
 /// 立即按与自检相同的键写入屏蔽记录（检测时与现在的键见 `CacheFile::block`），`cached_gpu` 不再选它，
-/// 用户手动检测且驱动或运行库已更新时，或解除屏蔽（`unblock_gpu`）后才重测。
+/// 用户手动检测且驱动或运行库已更新时，或解除屏蔽（`clear_gpu_records`）后才重测。
 pub fn blacklist_gpu(cache_file: &Path, gpu: &CandidateReport, reason: &str) -> io::Result<()> {
     let _guard = cache_lock();
     let mut cache = CacheFile::load(cache_file);
@@ -402,9 +404,9 @@ impl CacheFile {
         for r in report
             .candidates
             .iter()
-            .filter(|r| r.backend == Backend::Vulkan && r.status == Status::Passed)
+            .filter(|r| r.backend.accel() && r.status == Status::Passed)
         {
-            self.unblock(&r.device_id());
+            self.clear(&r.device_id(), Record::Blacklisted);
         }
     }
 
@@ -469,7 +471,7 @@ impl CacheFile {
                 .report
                 .candidates
                 .iter()
-                .filter(|r| r.backend == Backend::Vulkan)
+                .filter(|r| r.backend.accel())
                 .map(|r| (r.device_id(), r.description.as_str()));
             let blocked = blocked
                 .iter()
@@ -485,14 +487,14 @@ impl CacheFile {
         GpuRecords { blocked, absent }
     }
 
-    /// 解除屏蔽：删除这块显卡（`device` 为 `CandidateReport::device_id`，同一设备不论驱动与运行库版本）的全部屏蔽记录，
-    /// 含运行中双键写入的两条与驱动版本未知的；未通过记录不动。缓存的结果中这块卡改为“已跳过”，
-    /// 之后的检测会重测它（核心解除后随即只测它，`Options::only`），测之前不会被选用。没有屏蔽记录时返回否
-    pub(super) fn unblock(&mut self, device: &str) -> bool {
+    /// 解除屏蔽（`kind` 为屏蔽）或清除未通过记录（`kind` 为未通过）：删除这块显卡（`device` 为 `CandidateReport::device_id`，
+    /// 同一设备不论驱动与运行库版本）这一种的全部记录，含运行中双键写入的两条与驱动版本未知的；另一种不动。
+    /// 缓存的结果中这块卡改为“已跳过”，之后的检测会重测它（核心随即只测它，`Options::only`），测之前不会被选用。
+    /// 没有这种记录时返回否
+    pub(super) fn clear(&mut self, device: &str, kind: Record) -> bool {
         let before = self.blacklist.len();
         self.blacklist.retain(|b| {
-            b.kind != Record::Blacklisted
-                || gpu_id(&b.key.description, b.key.pci_id.as_deref()) != device
+            b.kind != kind || gpu_id(&b.key.description, b.key.pci_id.as_deref()) != device
         });
         if self.blacklist.len() == before {
             return false;
@@ -502,7 +504,7 @@ impl CacheFile {
                 .report
                 .candidates
                 .iter_mut()
-                .filter(|r| r.backend == Backend::Vulkan && r.device_id() == device)
+                .filter(|r| r.backend.accel() && r.device_id() == device)
             {
                 unblocked(r);
             }
@@ -538,11 +540,16 @@ pub fn cache_covers(cache_file: &Path, images: bool) -> bool {
         .is_none_or(|c| c.covers(images))
 }
 
-/// 用户在设备页解除屏蔽（见 `CacheFile::unblock`）；没有这块显卡的屏蔽记录时返回否、不写文件
-pub fn unblock_gpu(cache_file: &Path, device: &str) -> io::Result<bool> {
+/// 用户在设备页解除屏蔽或重测未通过的设备（`failed`，见 `CacheFile::clear`）；没有这种记录时返回否、不写文件
+pub fn clear_gpu_records(cache_file: &Path, device: &str, failed: bool) -> io::Result<bool> {
     let _guard = cache_lock();
     let mut cache = CacheFile::load(cache_file);
-    if !cache.unblock(device) {
+    let kind = if failed {
+        Record::Failed
+    } else {
+        Record::Blacklisted
+    };
+    if !cache.clear(device, kind) {
         return Ok(false);
     }
     cache.save(cache_file)?;

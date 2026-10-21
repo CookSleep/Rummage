@@ -91,7 +91,11 @@ pub fn start(token: String, data_dir: &Path, cfg: Config) -> Arc<State> {
     let state = State::new(token, Db::open(data_dir));
     apply_log_setting(&state.params());
     state.configure(cfg.clone());
-    state.start_pipeline(pipeline::Options::local(cfg));
+    state.start_pipeline(if cfg.litert.is_some() {
+        pipeline::Options::litert(cfg)
+    } else {
+        pipeline::Options::local(cfg)
+    });
     state.start_scanner();
     state.start_monitor();
     state

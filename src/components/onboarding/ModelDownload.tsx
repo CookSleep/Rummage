@@ -1,39 +1,112 @@
 import { useState, type ReactNode } from 'react'
-import type { ModelFileStatus, ModelSource, ModelTask, ProxySetting, SetupStatus } from '../../types'
+import type { ModelFileStatus, ModelSource, ModelTask, ProxySetting, SelftestStatus, SetupStatus } from '../../types'
 import { formatSize } from '../../lib/format'
-import { openExternal } from '../../lib/platform'
-import { DocumentIcon, FileIcon, ImageIcon } from '../icons'
+import { isAndroid, openExternal } from '../../lib/platform'
+import { ChevronRightIcon, CpuIcon, DocumentIcon, FileIcon, ImageIcon, NpuIcon } from '../icons'
 import { HoverTip } from '../Tip'
 import ProxyForm, { PROXY_LABEL } from './ProxyForm'
-import { CARD_ROW, ICON_TILE, INPUT, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SEGMENTS, SMALL_BUTTON, segmentClass } from './styles'
+import { CARD_ROW, CARD_ROW_HOVER, ICON_TILE, INPUT, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SEGMENTS, SMALL_BUTTON, segmentClass } from './styles'
 
 // 引导的“下载模型”与设置的“模型”页共用的部分：模型行、导入行、下载源选择、代理状态、任务进度
 
 export const MODEL_LABEL = '文字模型'
 export const MMPROJ_LABEL = '图片与音视频模型'
+export const GENERIC_LABEL = '通用模型'
+export const NPU_LABEL = 'NPU 模型'
 
-/** 两个模型的用途、名称与说明；`mmproj` 与核心命令的参数一致 */
-export const MODELS = [
-  { mmproj: false, label: MODEL_LABEL, model: 'EmbeddingGemma 2', desc: '识别所有文件都要用到。', icon: <DocumentIcon className="h-4 w-4" /> },
-  { mmproj: true, label: MMPROJ_LABEL, model: 'EmbeddingGemma 2 视觉与音频组件', desc: '识别图片、音频和视频时使用。', icon: <ImageIcon className="h-4 w-4" /> },
+/** 一行模型的用途、名称与说明；`mmproj`、`npu` 与核心命令的参数一致 */
+export interface ModelInfo {
+  mmproj: boolean
+  npu: boolean
+  label: string
+  model: string
+  desc: string
+  icon: ReactNode
+}
+
+/** 电脑上的两个模型 */
+export const MODELS: ModelInfo[] = [
+  { mmproj: false, npu: false, label: MODEL_LABEL, model: 'EmbeddingGemma 2', desc: '识别所有文件都要用到。', icon: <DocumentIcon className="h-4 w-4" /> },
+  { mmproj: true, npu: false, label: MMPROJ_LABEL, model: 'EmbeddingGemma 2 视觉与音频组件', desc: '识别图片、音频和视频时使用。', icon: <ImageIcon className="h-4 w-4" /> },
 ]
+
+/** Android 上 NPU 的设备标识（与核心的 `CandidateReport::device_id` 相同） */
+export const NPU_DEVICE = 'gpu:NPU|'
+
+/** Android：NPU 最近一次检测未通过或已屏蔽 */
+export function npuFailed(st: SelftestStatus) {
+  return st.devices.some((d) => d.id === NPU_DEVICE && (d.status === 'failed' || d.status === 'blacklisted')) || st.blocked.some((b) => b.id === NPU_DEVICE)
+}
+
+/**
+ * 这一平台的模型行。Android 上为本机芯片的 NPU 模型（芯片有 NPU 版时）与通用模型（GPU 与 CPU 用，NPU 用不了时的退路）；
+ * 一个 LiteRT 模型包含全部模态，没有单独的图片与音视频模型
+ */
+export function modelInfos(status: SetupStatus): ModelInfo[] {
+  if (!isAndroid) return MODELS
+  const generic: ModelInfo = {
+    mmproj: false,
+    npu: false,
+    label: GENERIC_LABEL,
+    model: 'EmbeddingGemma 2',
+    desc: status.npu ? '本机 NPU 用不了时，用 GPU 或 CPU 识别。' : '用 GPU 或 CPU 识别所有文件。',
+    icon: <CpuIcon className="h-4 w-4" />,
+  }
+  if (!status.npu) return [generic]
+  const npu: ModelInfo = {
+    mmproj: false,
+    npu: true,
+    label: NPU_LABEL,
+    model: 'EmbeddingGemma 2 NPU 版',
+    desc: `为本机芯片${status.npuChip ? `（${status.npuChip}）` : ''}编译，用 NPU 识别，速度最快。`,
+    icon: <NpuIcon className="h-4 w-4" />,
+  }
+  return [npu, generic]
+}
+
+/** 模型行对应的文件状态 */
+export function rowFile(status: SetupStatus, info: ModelInfo): ModelFileStatus {
+  if (info.npu && status.npu) return status.npu
+  return info.mmproj ? status.mmproj : status.model
+}
+
+/**
+ * Android 引导要求的模型：已装好通用模型时用它；否则芯片有 NPU 版、NPU 也没有检测未通过时用 NPU 模型，再否则用通用模型。
+ * NPU 检测未通过时，引导回到下载模型一步改为下载通用模型
+ */
+export function requiredModel(status: SetupStatus): ModelInfo {
+  const [first, ...rest] = modelInfos(status)
+  const generic = rest.length ? rest[rest.length - 1] : first
+  if (!first.npu || status.model.ready || npuFailed(status.selftest)) return generic
+  return first
+}
+
+/** Android：至少有一个模型可用（能检测设备、建立索引） */
+export function anyModelReady(status: SetupStatus) {
+  return status.model.ready || Boolean(status.npu?.ready)
+}
 
 /** 任务进度中把文件名换成模型的用途名称（`TaskProgress` 的 `label`） */
 export function modelLabel(status: SetupStatus) {
-  return (file: string) => (file === status.mmproj.name ? MMPROJ_LABEL : MODEL_LABEL)
+  return (file: string) => {
+    if (!isAndroid) return file === status.mmproj.name ? MMPROJ_LABEL : MODEL_LABEL
+    if (file === status.npu?.name) return ` ${NPU_LABEL}`
+    if (file === status.model.name) return GENERIC_LABEL
+    if (file.startsWith('libQnn')) return ' NPU 运行库'
+    return file === 'tokenizer.json' ? '分词器' : ` ${file}`
+  }
 }
 
 /**
  * 一个模型的行：用途、说明、模型名称（链接到该文件的下载页）与文件名、大小与状态，右侧是操作。
- * `url` 是模型文件页面的前缀；`running` 时 `partialBytes` 是开始前的值，不显示
+ * `running` 时 `partialBytes` 是开始前的值，不显示
  */
-export function ModelRow({ info, url, file, running, actions }: { info: (typeof MODELS)[number]; url: string; file: ModelFileStatus; running: boolean; actions?: ReactNode }) {
+export function ModelRow({ info, file, running, actions }: { info: ModelInfo; file: ModelFileStatus; running: boolean; actions?: ReactNode }) {
   const state = file.ready
     ? `${formatSize(file.bytes)} · 已下载`
     : !running && file.partialBytes > 0
       ? `已下载 ${formatSize(file.partialBytes)} / ${formatSize(file.bytes)}`
       : `${formatSize(file.bytes)} · 未下载`
-  const href = `${url}/${file.name}`
   return (
     <div className={CARD_ROW}>
       <span className={`${ROW_ICON_TILE} ${ICON_TILE}`}>{info.icon}</span>
@@ -41,18 +114,9 @@ export function ModelRow({ info, url, file, running, actions }: { info: (typeof 
         <span className="block text-sm text-gray-800 dark:text-gray-100">{info.label}</span>
         <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{info.desc}</span>
         <span className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs max-sm:flex-wrap">
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => {
-              e.preventDefault()
-              openExternal(href)
-            }}
-            className="flex-shrink-0 text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
-          >
+          <ExternalLink href={file.url} className="flex-shrink-0">
             {info.model}
-          </a>
+          </ExternalLink>
           <span data-selectable-text className={`min-w-0 text-gray-400 dark:text-gray-500 ${ROW_LONG_TEXT}`}>
             {file.name}
             <HoverTip label={file.name} />
@@ -74,7 +138,20 @@ export function ModelRow({ info, url, file, running, actions }: { info: (typeof 
  * “导入已下载的文件”的行。`picking`：`import_models` 还没返回（选择文件中，Android 上还可能在复制所选文件），
  * 显示状态并禁用导入
  */
-export function ImportRow({ disabled, picking, onImport }: { disabled: boolean; picking: boolean; onImport: () => void }) {
+export function ImportRow({ disabled, picking, onImport, tokenizerUrl, npu }: { disabled: boolean; picking: boolean; onImport: () => void; tokenizerUrl: string | null; npu: boolean }) {
+  // 手机上默认折叠成一行，少占屏幕
+  const [open, setOpen] = useState(!isAndroid)
+  if (!open) {
+    return (
+      <button type="button" className={`${CARD_ROW} ${CARD_ROW_HOVER}`} aria-expanded={false} onClick={() => setOpen(true)}>
+        <span className={ICON_TILE}>
+          <FileIcon className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-100">导入已下载的文件</span>
+        <ChevronRightIcon className="h-4 w-4 flex-shrink-0 text-gray-400 dark:text-gray-500" />
+      </button>
+    )
+  }
   return (
     <div className={CARD_ROW}>
       <span className={`${ROW_ICON_TILE} ${ICON_TILE}`}>
@@ -83,7 +160,20 @@ export function ImportRow({ disabled, picking, onImport }: { disabled: boolean; 
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-gray-800 dark:text-gray-100">导入已下载的文件</span>
         <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-          {picking ? '正在读取所选文件' : '点击上面的模型名称打开下载页，下载列出的 .gguf 文件后导入。自动识别是哪个模型，校验通过后使用。'}
+          {picking
+            ? '正在读取所选文件'
+            : tokenizerUrl
+              ? (
+                  <>
+                    直接下载不顺利时的备选方式：点击上面的模型名称打开下载页，下载列出的 .litertlm 文件，再下载分词器
+                    <ExternalLink href={tokenizerUrl} className="ml-1">
+                      tokenizer.json
+                    </ExternalLink>
+                    ，一起导入。自动识别是哪个文件，校验通过后使用。
+                    {npu && 'NPU 模型还要的运行库不能导入，导入后点下载取得，不经过 Hugging Face。'}
+                  </>
+                )
+              : '直接下载不顺利时的备选方式：点击上面的模型名称打开下载页，下载列出的 .gguf 文件后导入。自动识别是哪个模型，校验通过后使用。'}
         </span>
       </span>
       <span className={ROW_ACTIONS}>
@@ -92,6 +182,24 @@ export function ImportRow({ disabled, picking, onImport }: { disabled: boolean; 
         </button>
       </span>
     </div>
+  )
+}
+
+/** 在系统浏览器中打开的链接 */
+function ExternalLink({ href, className = '', children }: { href: string; className?: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => {
+        e.preventDefault()
+        openExternal(href)
+      }}
+      className={`text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 ${className}`}
+    >
+      {children}
+    </a>
   )
 }
 

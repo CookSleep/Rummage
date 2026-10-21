@@ -8,6 +8,7 @@
 //! - 修改预处理逻辑时提升对应模态的预处理参数版本，使旧向量被识别为需要重建。
 //! - 两套运行库各有自己的空间（`SpaceConfig::current` 为 llama.cpp 与 GGUF，`SpaceConfig::litert` 为 LiteRT-LM 与
 //!   `.litertlm`）：权重不同（LiteRT 为 QAT 量化的另一套），向量互不兼容。LiteRT 只有一个模型文件，文本与媒体都取它的哈希；
+//!   通用版与按芯片编译的 NPU 版（`npu`）是不同的文件，也就是不同的空间；
 //!   它的图像在我们这边缩放后由引擎再解码、预处理，图像预处理版本另带运行库标记（`LITERT_IMAGE_PREPROCESS`）。
 
 use std::fmt;
@@ -151,7 +152,7 @@ impl ModelFile {
     }
 }
 
-/// LiteRT-LM 运行库：PyPI `litert-lm-api==0.18.0` 轮子中的 C 接口库，只用 CPU 后端
+/// LiteRT-LM 运行库：PyPI `litert-lm-api==0.18.0` 轮子中的 C 接口库
 pub const LITERT_RUNTIME: &str = "litert-lm 0.18.0";
 /// 权重为模型文件自带的 QAT 量化，激活显式设为 FLOAT32
 pub const LITERT_PRECISION: &str = "qat, activation=f32";
@@ -159,7 +160,7 @@ pub const LITERT_PRECISION: &str = "qat, activation=f32";
 /// （`litert::fixed_size`）。修改这一步时必须提升它
 pub const LITERT_IMAGE_PREPROCESS: &str = "image-v1-litert-v1";
 
-/// LiteRT 模型的仓库与钉定的提交（只用通用版，不用芯片专用版）
+/// LiteRT 模型的仓库与钉定的提交（通用版与 `npu` 中的芯片版都在这里）
 pub const LITERT_REPO: &str = "litert-community/embeddinggemma-2-740m-litert-lm";
 pub const LITERT_COMMIT: &str = "24d962e906c7d332c6428e71c9676855024569e2";
 /// 分词器（数切片长度用）取自主模型仓库
@@ -185,6 +186,10 @@ pub const TOKENIZER: ModelFile = ModelFile {
 pub enum Backend {
     Cpu,
     Vulkan,
+    /// LiteRT 的 GPU 后端（Android）
+    Gpu,
+    /// LiteRT 的 NPU 后端（Android）
+    Npu,
 }
 
 impl Backend {
@@ -193,7 +198,14 @@ impl Backend {
         match self {
             Backend::Cpu => "cpu",
             Backend::Vulkan => "vulkan",
+            Backend::Gpu => "gpu",
+            Backend::Npu => "npu",
         }
+    }
+
+    /// CPU 以外的后端：都在可强行结束的推理进程中初始化，出错按显卡的规则处理（`selftest`、`LocalBackend`）
+    pub fn accel(self) -> bool {
+        self != Backend::Cpu
     }
 }
 
@@ -235,14 +247,14 @@ impl SpaceConfig {
         }
     }
 
-    /// LiteRT-LM 的配置（只有 CPU 后端）
-    pub fn litert() -> Self {
+    /// LiteRT-LM 用模型文件 `model`（通用版或 NPU 版）的配置
+    pub fn litert(model: &ModelFile, backend: Backend) -> Self {
         SpaceConfig {
             family: FAMILY.to_string(),
-            model_sha256: LITERT_MODEL.sha256.to_string(),
-            mmproj_sha256: LITERT_MODEL.sha256.to_string(),
+            model_sha256: model.sha256.to_string(),
+            mmproj_sha256: model.sha256.to_string(),
             runtime: LITERT_RUNTIME.to_string(),
-            backend: Backend::Cpu,
+            backend,
             precision: LITERT_PRECISION.to_string(),
             prefix_scheme: PREFIX_SCHEME.to_string(),
             image_preprocess: LITERT_IMAGE_PREPROCESS.to_string(),
@@ -352,7 +364,13 @@ mod tests {
 
     #[test]
     fn litert_spaces_differ() {
-        let (gguf, litert) = (SpaceConfig::current(Backend::Cpu), SpaceConfig::litert());
+        let (gguf, litert) = (
+            SpaceConfig::current(Backend::Cpu),
+            SpaceConfig::litert(&LITERT_MODEL, Backend::Cpu),
+        );
+        let npu = SpaceConfig::litert(&crate::npu::MODELS[0].file, Backend::Npu);
+        assert_ne!(litert.text(), npu.text());
+        assert_ne!(litert.image(140), npu.image(140));
         assert_ne!(gguf.text(), litert.text());
         assert_ne!(gguf.image(140), litert.image(140));
         assert_ne!(gguf.media("a"), litert.media("a"));

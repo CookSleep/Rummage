@@ -19,6 +19,10 @@
 //!      推理进程重试一次。
 //! - 不写 core.log、不碰核心进程的管道；出错时先发一帧 `Error` 再以非零状态退出，详细日志在 stderr。
 //!
+//! LiteRT（`--litert <cpu|gpu|npu>`，另给 `--tokenizer`，可选 `--cache-dir`，NPU 还要 `--dispatch-dir`）：不碰 Vulkan，
+//! 用 `litert::LiteRt` 加载模型后发 `Ready`（设备名称为后端名，描述为处理器型号），收发与 llama.cpp 相同的帧；
+//! 模型只有一个文件，`--mmproj` 不用。GPU、NPU 只在 Android 上可用（`rummage_litert`）。
+//!
 //! 列出设备模式（`--list-devices`）：不加载模型，输出每块 GPU 的名称、描述、PCI 号与显存。
 //! 加载 ggml-vulkan 只创建 Vulkan 实例、查询物理设备属性，不创建逻辑设备，不在 GPU 上计算；默认只列出独显和核显，
 //! 并按 UUID / LUID 去重（b11461 `ggml_vk_instance_init`）。
@@ -32,10 +36,24 @@ use std::sync::atomic::AtomicBool;
 use rummage_llama::vulkan::{self, PhysicalDevice};
 use rummage_llama::{Device, DeviceKind, Embedder, Part};
 
-use crate::frame::{self, DeviceInfo, FromWorker, GpuInfo, MediaPart, ToWorker};
-use crate::local::VK_VISIBLE_ENV;
-use crate::platform;
+use rummage_media::Rgb;
+use rummage_media::video::VideoPart;
 
+use crate::frame::{self, DeviceInfo, FromWorker, GpuInfo, MediaPart, ToWorker};
+use crate::litert::{Accel, LiteRt, LiteRtSpec};
+use crate::local::VK_VISIBLE_ENV;
+use crate::{Error, platform};
+
+/// 推理子进程用 LiteRT 时的参数（`--litert` 等）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiteRtArgs {
+    pub accel: Accel,
+    pub tokenizer: PathBuf,
+    pub cache_dir: Option<PathBuf>,
+}
+
+// 每个推理进程只解析一次，不必为变体大小装箱
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkerArgs {
     Embed {
@@ -47,6 +65,8 @@ pub enum WorkerArgs {
         gpu: Option<String>,
         /// 该 GPU 的 PCI 总线号；后端不提供时为空。
         gpu_pci: Option<String>,
+        /// 为空时用 llama.cpp
+        litert: Option<LiteRtArgs>,
     },
     ListDevices {
         runtime_dir: PathBuf,
@@ -63,6 +83,10 @@ impl WorkerArgs {
         let mut threads = None;
         let mut gpu = None;
         let mut gpu_pci = None;
+        let mut litert = None;
+        let mut tokenizer = None;
+        let mut cache_dir = None;
+        let mut dispatch_dir = None;
         let mut list_devices = false;
         while let Some(arg) = args.next() {
             let flag = arg.to_string_lossy().into_owned();
@@ -85,6 +109,10 @@ impl WorkerArgs {
                 }
                 "--gpu" => gpu = Some(value()?.to_string_lossy().into_owned()),
                 "--gpu-pci" => gpu_pci = Some(value()?.to_string_lossy().into_owned()),
+                "--litert" => litert = Some(value()?.to_string_lossy().into_owned()),
+                "--tokenizer" => tokenizer = Some(PathBuf::from(value()?)),
+                "--cache-dir" => cache_dir = Some(PathBuf::from(value()?)),
+                "--dispatch-dir" => dispatch_dir = Some(PathBuf::from(value()?)),
                 _ => return Err(format!("无法识别的参数：{flag}。")),
             }
         }
@@ -92,6 +120,24 @@ impl WorkerArgs {
         if list_devices {
             return Ok(WorkerArgs::ListDevices { runtime_dir });
         }
+        let litert = match litert.as_deref() {
+            None => None,
+            Some(kind) => {
+                let accel = match kind {
+                    "cpu" => Accel::Cpu,
+                    "gpu" => Accel::Gpu,
+                    "npu" => Accel::Npu(dispatch_dir.ok_or("--litert npu 需要 --dispatch-dir。")?),
+                    other => {
+                        return Err(format!("--litert 只能是 cpu、gpu 或 npu，不是 {other}。"));
+                    }
+                };
+                Some(LiteRtArgs {
+                    accel,
+                    tokenizer: tokenizer.ok_or("--litert 需要 --tokenizer。")?,
+                    cache_dir,
+                })
+            }
+        };
         Ok(WorkerArgs::Embed {
             runtime_dir,
             model: model.ok_or("缺少 --model。")?,
@@ -99,6 +145,7 @@ impl WorkerArgs {
             threads: threads.ok_or("缺少 --threads。")?,
             gpu,
             gpu_pci,
+            litert,
         })
     }
 }
@@ -129,10 +176,18 @@ pub fn run_worker(
             WorkerArgs::Embed {
                 runtime_dir,
                 model,
+                threads,
+                litert: Some(litert),
+                ..
+            } => serve_litert(inp, out, runtime_dir, model, *threads, litert),
+            WorkerArgs::Embed {
+                runtime_dir,
+                model,
                 mmproj,
                 threads,
                 gpu,
                 gpu_pci,
+                litert: None,
             } => serve(
                 inp,
                 out,
@@ -268,7 +323,7 @@ fn serve(
             ToWorker::Count { text } => emb
                 .count_tokens(text)
                 .map(|tokens| (FromWorker::Counted { tokens }, Vec::new())),
-            ToWorker::Image { width, height } => emb
+            ToWorker::Image { width, height, .. } => emb
                 .embed(&[Part::Image {
                     width: *width,
                     height: *height,
@@ -281,7 +336,9 @@ fn serve(
                     "音频数据的字节数不是 4 的倍数".to_string(),
                 )),
             },
-            ToWorker::Video { parts, max_tokens } => match split_media(parts, &payload) {
+            ToWorker::Video {
+                parts, max_tokens, ..
+            } => match split_media(parts, &payload) {
                 Ok(owned) => {
                     let parts: Vec<Part> = owned.iter().map(Owned::part).collect();
                     emb.embed_limited(&parts, *max_tokens).map(vector)
@@ -313,6 +370,107 @@ fn serve(
     Ok(())
 }
 
+/// 用 LiteRT 处理请求，帧与 `serve` 相同（见模块说明）
+fn serve_litert(
+    inp: &mut impl Read,
+    out: &mut impl Write,
+    runtime_dir: &Path,
+    model: &Path,
+    threads: i32,
+    args: &LiteRtArgs,
+) -> Result<(), Failure> {
+    if let Accel::Npu(dir) = &args.accel {
+        platform::preload_npu(dir);
+    }
+    // 引擎不会自己创建缓存目录
+    if let Some(dir) = &args.cache_dir {
+        std::fs::create_dir_all(dir)
+            .map_err(|err| format!("无法创建缓存目录 \"{}\"：{err}", dir.display()))?;
+    }
+    let mut rt = LiteRt::new(&LiteRtSpec {
+        runtime_dir,
+        model,
+        tokenizer: &args.tokenizer,
+        threads: threads as u32,
+        accel: &args.accel,
+        cache_dir: args.cache_dir.as_deref(),
+    })
+    .map_err(|err| err.to_string())?;
+    let ready = FromWorker::Ready {
+        device: DeviceInfo {
+            name: args.accel.as_str().to_uppercase(),
+            description: crate::cpu_name().to_string(),
+        },
+    };
+    eprintln!("LiteRT 使用 {} 后端", args.accel.as_str());
+    frame::write(out, &ready, &[]).map_err(io_err)?;
+    while let Some((req, payload)) = frame::read::<ToWorker>(inp).map_err(io_err)? {
+        let vector = |v: Vec<f32>| (FromWorker::Vector, frame::f32_bytes(&v));
+        let res = match &req {
+            ToWorker::Start => return Err("重复收到 Start。".into()),
+            ToWorker::Text { text } => rt.text(text).map(vector),
+            ToWorker::Count { text } => rt
+                .count(text)
+                .map(|tokens| (FromWorker::Counted { tokens }, Vec::new())),
+            ToWorker::Image {
+                width,
+                height,
+                tokens,
+            } => rgb(*width, *height, payload)
+                .and_then(|img| rt.image(&img, *tokens))
+                .map(vector),
+            ToWorker::Audio => match frame::f32_from_bytes(&payload) {
+                Some(samples) => rt.audio(&samples).map(vector),
+                None => Err(Error::InvalidInput(
+                    "音频数据的字节数不是 4 的倍数".to_string(),
+                )),
+            },
+            ToWorker::Video {
+                parts,
+                max_tokens,
+                min_tier,
+            } => split_media(parts, &payload)
+                .map_err(Error::InvalidInput)
+                .and_then(|owned| owned.into_iter().map(Owned::video_part).collect())
+                .and_then(|parts: Vec<VideoPart>| rt.interleaved(&parts, *max_tokens, *min_tier))
+                .map(vector),
+        };
+        match res {
+            Ok((msg, bytes)) => frame::write(out, &msg, &bytes),
+            Err(err) => {
+                let too_long = matches!(err, Error::TooLong(_));
+                let input = too_long || matches!(err, Error::InvalidInput(_));
+                let message = match err {
+                    Error::InvalidInput(m) | Error::TooLong(m) | Error::Inference(m) => m,
+                    err => err.to_string(),
+                };
+                let msg = FromWorker::Error {
+                    message,
+                    input,
+                    not_found: false,
+                    mismatch: false,
+                    too_long,
+                };
+                frame::write(out, &msg, &[])
+            }
+        }
+        .map_err(io_err)?;
+    }
+    Ok(())
+}
+
+/// 负载按行存放的 RGB 像素；字节数须与尺寸相符
+fn rgb(width: u32, height: u32, data: Vec<u8>) -> Result<Rgb, Error> {
+    if data.len() as u64 != u64::from(width) * u64::from(height) * 3 {
+        return Err(Error::InvalidInput("图像数据的长度与尺寸不符".to_string()));
+    }
+    Ok(Rgb {
+        width,
+        height,
+        data,
+    })
+}
+
 /// 视频窗口中按负载切出的一段
 enum Owned<'a> {
     Text(&'a str),
@@ -325,6 +483,16 @@ enum Owned<'a> {
 }
 
 impl Owned<'_> {
+    fn video_part(self) -> Result<VideoPart, Error> {
+        Ok(match self {
+            Owned::Text(t) => VideoPart::Text(t.to_string()),
+            Owned::Image { width, height, rgb } => {
+                VideoPart::Frame(Arc::new(self::rgb(width, height, rgb.to_vec())?))
+            }
+            Owned::Audio(a) => VideoPart::Audio(a),
+        })
+    }
+
     fn part(&self) -> Part<'_> {
         match self {
             Owned::Text(t) => Part::Text(t),
@@ -505,6 +673,7 @@ mod tests {
                 threads: 6,
                 gpu: None,
                 gpu_pci: None,
+                litert: None,
             })
         );
         assert_eq!(
@@ -529,6 +698,7 @@ mod tests {
                 threads: 2,
                 gpu: Some(NV.to_string()),
                 gpu_pci: Some("0000:06:00.0".to_string()),
+                litert: None,
             })
         );
         assert_eq!(

@@ -28,18 +28,20 @@ pub enum ToWorker {
     Count {
         text: String,
     },
-    /// 负载为按行存放的 RGB 像素。
+    /// 负载为按行存放的 RGB 像素；`tokens` 为视觉 token 档位（llama.cpp 由尺寸决定，不用它；LiteRT 按它预处理）。
     Image {
         width: u32,
         height: u32,
+        tokens: u32,
     },
     /// 负载为 16 kHz 单声道采样（f32 小端）。
     Audio,
     /// 视频窗口：`parts` 依次拼成一个输入，负载为其中各图像与音频的数据；`mtmd_tokenize` 后超过 `max_tokens`
-    /// 时回复 `too_long` 的错误。
+    /// 时回复 `too_long` 的错误。`min_tier` 为画面帧的最低档位（以图搜图为图像的档位，视频窗口为 0），只有 LiteRT 用它。
     Video {
         parts: Vec<MediaPart>,
         max_tokens: usize,
+        min_tier: u32,
     },
 }
 
@@ -181,6 +183,7 @@ mod tests {
         let req = ToWorker::Image {
             width: 2,
             height: 1,
+            tokens: 140,
         };
         write(&mut buf, &req, &[1, 2, 3, 4, 5, 6]).unwrap();
         write(&mut buf, &ToWorker::Audio, &f32_bytes(&[0.25, -1.0])).unwrap();
@@ -196,6 +199,7 @@ mod tests {
                 },
             ],
             max_tokens: 1024,
+            min_tier: 0,
         };
         write(&mut buf, &video, &[0, 0, 128, 62, 1, 2, 3]).unwrap();
         write(&mut buf, &FromWorker::Vector, &f32_bytes(&[1.5, -2.0])).unwrap();

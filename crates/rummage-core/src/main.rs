@@ -243,6 +243,7 @@ async fn run(data_dir: &Path) -> ExitCode {
         golden: golden.clone(),
         embed_tmp: Config::embed_tmp_dir(data_dir),
         gpus: rummage_embed::selftest::gpu_adapters,
+        litert: None,
     };
     // 打开数据库在占住管道之后，第二个实例不会同时迁移同一个数据库
     let dir = data_dir.to_path_buf();

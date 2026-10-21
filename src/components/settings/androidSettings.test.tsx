@@ -69,13 +69,14 @@ describe('Android 上的设置', () => {
     expect([...document.querySelectorAll('button')].some((b) => b.textContent === '打开')).toBe(false)
   })
 
-  it('设备页只有检测结果与“重新检测”，不显示设备选择与已屏蔽的显卡', async () => {
+  it('设备页可以选择设备，说明按 GPU 与 NPU 写', async () => {
     await open()
     await tab('设备')
+    expect(text()).toContain('使用的设备')
     expect(text()).toContain('检测结果')
     expect(text()).toContain('重新检测')
-    expect(text()).not.toContain('使用的设备')
-    expect(text()).not.toContain('已屏蔽的显卡')
+    expect(text()).toContain('只能选择通过检测的 GPU 或 NPU')
+    expect(text()).toContain('它比 GPU 与 NPU 快')
     expect(text()).not.toContain('显卡驱动')
   })
 

@@ -139,9 +139,12 @@ fn model(name: &'static str, data: &[u8]) -> &'static ModelFile {
 fn run(base: &str, files: &[&'static ModelFile], dir: &Path) -> Result<Vec<Progress>, Error> {
     install_crypto();
     let mut seen = Vec::new();
+    let files: Vec<Pinned> = files.iter().map(|f| Pinned::gguf(f)).collect();
     download(
         base,
-        files,
+        &files,
+        dir,
+        &[],
         dir,
         &Route::Direct,
         &AtomicBool::new(false),
@@ -323,7 +326,9 @@ fn http_errors_are_sentences() {
     let proxy = Route::Via(Url::parse(&format!("http://127.0.0.1:{port}")).unwrap());
     let err = download(
         "http://example.invalid",
-        &[file],
+        &[Pinned::gguf(file)],
+        dir.path(),
+        &[],
         dir.path(),
         &proxy,
         &AtomicBool::new(false),
@@ -345,7 +350,9 @@ fn cancel_keeps_part() {
     let server = serve(content(10), Opts::default());
     let err = download(
         &server.base,
-        &[file],
+        &[Pinned::gguf(file)],
+        dir.path(),
+        &[],
         dir.path(),
         &Route::Direct,
         &AtomicBool::new(true),

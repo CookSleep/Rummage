@@ -1,6 +1,7 @@
 //! 索引流水线的配置：运行库与模型的位置（`Config`）、创建推理后端的方式（`Factory`）与其他选项（`Options`）。
-//! 推理后端默认为 llama.cpp 推理子进程（`Options::local`）；评测可改用 LiteRT-LM（`Options::litert`，只用 CPU），
-//! 向量空间与所需的模型文件随之改变（`Options::space`、`Options::model_files`）。
+//! 推理后端默认为 llama.cpp 推理子进程（`Options::local`）；Android 与评测用 LiteRT-LM（`Options::litert`，电脑上只用 CPU），
+//! 向量空间与所需的模型文件随之改变，并随所选的后端而定（`Options::space`、`Options::model_files`）：
+//! LiteRT 的 NPU 用本机芯片的 NPU 模型，CPU 与 GPU 用通用版（`model`、`mmproj` 都是它）。
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -10,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use rummage_embed::space::{self, ModelFile};
 use rummage_embed::{
-    Backend, EmbeddingBackend, Error as EmbedError, Gpu, Limits, LiteRtBackend, LiteRtSpec,
-    LocalBackend, SpaceConfig, WorkerSpec, selftest,
+    Backend, EmbeddingBackend, Error as EmbedError, Gpu, Limits, LocalBackend, SpaceConfig,
+    WorkerSpec, npu, selftest,
 };
 use rummage_proto::ParamValue;
 
@@ -56,9 +57,39 @@ pub struct Config {
     pub embed_tmp: PathBuf,
     /// 列出系统中的显卡（`selftest::gpu_adapters`），判断检测结果是否过期、选中的显卡是否还在；测试中换成假的
     pub gpus: fn() -> Vec<String>,
+    /// Android 与 LiteRT 评测：推理用 LiteRT，`model` 与 `mmproj` 都是通用版的 `.litertlm`（见 `Options::litert`）
+    pub litert: Option<selftest::LiteRtFiles>,
 }
 
 impl Config {
+    /// 能编码文字（主模型可用）：电脑为 GGUF 主模型；LiteRT 为通用版或本机芯片的 NPU 模型，另要分词器
+    pub fn text_model_ok(&self) -> bool {
+        match &self.litert {
+            None => space::MODEL.check(&self.model).is_ok(),
+            Some(f) => {
+                space::TOKENIZER.check(&f.tokenizer).is_ok()
+                    && (space::LITERT_MODEL.check(&self.model).is_ok() || self.npu_model_ok())
+            }
+        }
+    }
+
+    /// 能处理图片、音频与视频：电脑为 mmproj；LiteRT 与 `text_model_ok` 相同（一个模型文件包含全部编码器）
+    pub fn media_model_ok(&self) -> bool {
+        match &self.litert {
+            None => space::MMPROJ.check(&self.mmproj).is_ok(),
+            Some(_) => self.text_model_ok(),
+        }
+    }
+
+    /// 本机芯片的 NPU 模型可用（只看模型文件；QNN 运行库由 NPU 的检测兜底）
+    pub fn npu_model_ok(&self) -> bool {
+        let npu = self.litert.as_ref().and_then(|f| f.npu.as_ref());
+        match (npu, npu::local()) {
+            (Some((path, _)), Some(m)) => m.file.check(path).is_ok(),
+            _ => false,
+        }
+    }
+
     /// 数据目录中内嵌音视频的临时目录（`embed_tmp`），各处都从 `Config::embed_tmp` 取，只在这里拼接
     pub fn embed_tmp_dir(data_dir: &Path) -> PathBuf {
         data_dir.join("tmp").join("embed")
@@ -67,6 +98,8 @@ impl Config {
 
 /// 创建推理后端所需的选择
 pub struct EngineSpec {
+    /// 所选设备的后端（CPU、Vulkan，或 LiteRT 的 GPU、NPU）
+    pub backend: Backend,
     pub gpu: Option<Gpu>,
     /// 是否加载 mmproj
     pub mmproj: bool,
@@ -97,8 +130,8 @@ pub struct Options {
     pub file_timeout: Option<Duration>,
     /// 见 `Config::gpus`
     pub gpus: fn() -> Vec<String>,
-    /// 推理后端为 LiteRT-LM（`Options::litert`）：`model` 与 `mmproj` 都是 `.litertlm` 文件
-    pub litert: bool,
+    /// 推理后端为 LiteRT-LM（`Options::litert`）：`model` 与 `mmproj` 都是通用版的 `.litertlm` 文件
+    pub litert: Option<selftest::LiteRtFiles>,
 }
 
 impl Options {
@@ -121,6 +154,7 @@ impl Options {
                 mmproj: spec.mmproj.then(|| cfg.mmproj.clone()),
                 threads: spec.threads,
                 gpu: spec.gpu.clone(),
+                litert: None,
             };
             let backend = LocalBackend::new(worker, Limits::from_params(&spec.params))?;
             Ok(Arc::new(backend) as Arc<dyn EmbeddingBackend>)
@@ -140,41 +174,56 @@ impl Options {
             }),
             file_timeout: None,
             gpus,
-            litert: false,
+            litert: None,
         }
     }
 
-    /// LiteRT-LM 的 CPU 后端（评测用）：`cfg.model` 与 `cfg.mmproj` 都应是 `.litertlm` 文件，运行库在 `runtime_dir`，
-    /// 分词器为 `tokenizer`。不使用显卡，调用方应指定只用 CPU
-    pub fn litert(cfg: Config, runtime_dir: PathBuf, tokenizer: PathBuf) -> Options {
-        let model = cfg.model.clone();
+    /// LiteRT-LM（Android；电脑上只用于评测，只用 CPU）：`cfg.model` 与 `cfg.mmproj` 都应是通用版的 `.litertlm` 文件，
+    /// 其余文件见 `cfg.litert`
+    pub fn litert(cfg: Config) -> Options {
+        let files = cfg
+            .litert
+            .clone()
+            .expect("Options::litert 只用于带 LiteRT 文件的配置");
+        let (exe, model) = (cfg.exe.clone(), cfg.model.clone());
         let mut opts = Options::local(cfg);
+        let f = files.clone();
         opts.factory = Box::new(move |spec: &EngineSpec| {
-            let backend = LiteRtBackend::new(&LiteRtSpec {
-                runtime_dir: runtime_dir.clone(),
-                model: model.clone(),
-                tokenizer: tokenizer.clone(),
-                threads: spec.threads,
-            })?;
+            let worker = f.spec(&exe, &model, spec.backend, spec.mmproj, spec.threads)?;
+            let backend = LocalBackend::new(worker, Limits::from_params(&spec.params))?;
             Ok(Arc::new(backend) as Arc<dyn EmbeddingBackend>)
         });
-        opts.litert = true;
+        opts.litert = Some(files);
         opts
     }
 
     /// 后端 `backend` 的向量空间配置
     pub fn space(&self, backend: Backend) -> SpaceConfig {
-        if self.litert {
-            return SpaceConfig::litert();
+        if self.litert.is_some() {
+            return SpaceConfig::litert(self.model_files(backend).0, backend);
         }
         SpaceConfig::current(backend)
     }
 
-    /// 主模型与多模态模型（`model`、`mmproj`）应有的文件
-    pub fn model_files(&self) -> (&'static ModelFile, &'static ModelFile) {
-        if self.litert {
-            return (&space::LITERT_MODEL, &space::LITERT_MODEL);
+    /// 后端 `backend` 用的主模型与多模态模型的路径与应有的文件；LiteRT 两者相同
+    pub fn model_files(&self, backend: Backend) -> (&'static ModelFile, &'static ModelFile) {
+        if self.litert.is_none() {
+            return (&space::MODEL, &space::MMPROJ);
         }
-        (&space::MODEL, &space::MMPROJ)
+        let file = npu::local()
+            .filter(|_| backend == Backend::Npu)
+            .map_or(&space::LITERT_MODEL, |m| &m.file);
+        (file, file)
+    }
+
+    /// 后端 `backend` 用的主模型与多模态模型文件的位置；LiteRT 的 NPU 为本机芯片的 NPU 模型
+    pub fn model_paths(&self, backend: Backend) -> (&Path, &Path) {
+        match &self.litert {
+            Some(f) if backend == Backend::Npu => match &f.npu {
+                Some((npu, _)) => (npu, npu),
+                None => (&self.model, &self.mmproj),
+            },
+            _ => (&self.model, &self.mmproj),
+        }
     }
 }

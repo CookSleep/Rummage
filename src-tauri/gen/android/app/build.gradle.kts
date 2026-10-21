@@ -116,13 +116,14 @@ android {
     }
     sourceSets {
         getByName("main") {
-            // llama.cpp 运行库（scripts/fetch-llama.ps1 -Variant android 取出并去符号）；b11461 须与该脚本的 $Tag 同步
-            jniLibs.srcDir("../../../../.cache/third-party/llama.cpp/b11461/android-arm64")
+            // LiteRT-LM 运行库、GPU 加速器与 NPU 分发库（scripts/fetch-litert.ps1 -Platform android_arm64 取出并校验）；
+            // 0.18.0 须与该脚本的 $Version 同步
+            jniLibs.srcDir("../../../../.cache/third-party/litert-lm/0.18.0/android_arm64")
             assets.srcDir(goldenAssets.get().asFile)
         }
     }
     packaging {
-        // 以旧方式打包：.so 压缩存放，安装时解压到 nativeLibraryDir，ggml 按目录查找并加载 CPU 后端
+        // 以旧方式打包：.so 压缩存放，安装时解压到 nativeLibraryDir；LiteRT 按文件名从自身所在目录加载加速器与分发库
         jniLibs.useLegacyPackaging = true
     }
 }

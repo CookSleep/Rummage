@@ -27,6 +27,7 @@ fn cfg(dir: &Path) -> Config {
         ffmpeg: dir.join("ffmpeg"),
         embed_tmp: dir.join("tmp"),
         gpus: fake_gpus,
+        litert: None,
     }
 }
 
@@ -131,6 +132,7 @@ fn preferred_device_and_proxy() {
     let bad = Request::DownloadModels {
         source: rummage_proto::ModelSource::Custom { url: "x".into() },
         mmproj: false,
+        npu: false,
     };
     assert_eq!(
         respond(&state, bad).unwrap_err().code,

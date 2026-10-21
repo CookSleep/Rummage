@@ -126,8 +126,8 @@ fn records_and_unblock() {
         std::slice::from_ref(&hid)
     );
 
-    assert!(!unblock_gpu(&path, &gid).unwrap());
-    assert!(unblock_gpu(&path, &hid).unwrap());
+    assert!(!clear_gpu_records(&path, &gid, false).unwrap());
+    assert!(clear_gpu_records(&path, &hid, false).unwrap());
     let back = CacheFile::load(&path);
     // 这块显卡的屏蔽记录全部删除，另一块的未通过记录保留
     assert!(!back.ever_blacklisted(&keys[2]));
@@ -142,7 +142,7 @@ fn records_and_unblock() {
     assert!(back.previous(&keys[2], true).is_none());
     assert!(back.previous(&keys[1], true).is_some());
     assert!(!back.current(&["GPU".to_string(), "GPU2".to_string()], true, false, true));
-    assert!(!unblock_gpu(&path, &hid).unwrap());
+    assert!(!clear_gpu_records(&path, &hid, false).unwrap());
     fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -232,6 +232,7 @@ fn manual_pass_unblocks() {
             frames: 2,
             audio: false,
         },
+        litert: None,
     };
     assert!(opts(false, None).manual());
     assert!(!opts(true, None).manual() && !opts(false, Some("gpu:X|")).manual());
@@ -357,7 +358,7 @@ fn same_device_and_pci() {
     cache.record(at("0000:01:00.0", "2.0"), Record::Failed, "余弦低于门槛。");
     cache.record(other.clone(), Record::Blacklisted, "设备丢失。");
     assert_eq!(cache.records(&[]).blocked.len(), 2);
-    assert!(cache.unblock(&k.device_id()));
+    assert!(cache.clear(&k.device_id(), Record::Blacklisted));
     assert!(!cache.ever_blacklisted(&k));
     assert!(cache.ever_blacklisted(&other));
     let left: Vec<_> = cache
@@ -373,7 +374,12 @@ fn same_device_and_pci() {
         ]
     );
     // 只有未通过记录时不算屏蔽，解除返回否
-    assert!(!cache.unblock(&k.device_id()));
+    assert!(!cache.clear(&k.device_id(), Record::Blacklisted));
+    // 重测未通过的设备只删它的未通过记录，另一块的屏蔽记录不动
+    assert!(cache.clear(&k.device_id(), Record::Failed));
+    assert_eq!(cache.blacklist.len(), 1);
+    assert_eq!(cache.blacklist[0].key, other);
+    assert!(!cache.clear(&k.device_id(), Record::Failed));
 }
 
 #[test]

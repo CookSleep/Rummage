@@ -152,6 +152,7 @@ fn gpu_fallback_shown() {
             &state,
             Request::UnblockGpu {
                 device: "gpu:RTX|".into(),
+                failed: false,
             },
         )
     };
@@ -259,7 +260,7 @@ pub(super) fn start_with_pipeline(dir: &Path) -> Arc<State> {
         driver_events: Box::new(|_| unreachable!("没有推理后端，不会失效")),
         file_timeout: None,
         gpus: fake_gpus,
-        litert: false,
+        litert: None,
     });
     state.configure(c);
     state
@@ -473,6 +474,7 @@ fn unblock_retests() {
         &state,
         Request::UnblockGpu {
             device: "gpu:GTX|".into(),
+            failed: false,
         },
     )
     .unwrap();
@@ -493,12 +495,25 @@ fn unblock_retests() {
         &state,
         Request::UnblockGpu {
             device: "gpu:RTX2|".into(),
+            failed: false,
         },
     ) else {
         panic!("不在系统中时应说明原因");
     };
     assert!(message.contains("不在系统中"), "{message}");
     assert!(!lock(&state.setup.selftest).running);
+    // 重测未通过的设备只删未通过记录：只有屏蔽记录时说明没有可清除的，屏蔽照旧
+    embed_selftest::blacklist_gpu(&cache, &report.candidates[1], "设备丢失。").unwrap();
+    let err = respond(
+        &state,
+        Request::UnblockGpu {
+            device: "gpu:RTX2|".into(),
+            failed: true,
+        },
+    )
+    .unwrap_err();
+    assert!(err.message.contains("未通过"), "{}", err.message);
+    assert_eq!(setup(&state).selftest.blocked.len(), 1);
     state.close();
 }
 

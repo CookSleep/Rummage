@@ -35,7 +35,7 @@ use rummage_proto::{
 };
 
 use super::{State, api_error, lock, opened};
-use crate::pipeline::{self, Pipeline, QueryEngine};
+use crate::pipeline::{self, Config, Pipeline, QueryEngine};
 
 /// 查询向量缓存的容量
 const CACHE_SIZE: usize = 256;
@@ -458,7 +458,7 @@ fn unavailable_reason(
         return SemanticUnavailable::Paused;
     }
     let config = state.config.get();
-    if !config.is_some_and(|c| space::MODEL.check(&c.model).is_ok()) {
+    if !config.is_some_and(Config::text_model_ok) {
         return SemanticUnavailable::NoModel;
     }
     if !image {
@@ -467,7 +467,7 @@ fn unavailable_reason(
     if !params::flag(&state.params(), "index_images") {
         return SemanticUnavailable::ImagesOff;
     }
-    if !config.is_some_and(|c| space::MMPROJ.check(&c.mmproj).is_ok()) {
+    if !config.is_some_and(Config::media_model_ok) {
         return SemanticUnavailable::NoMmproj;
     }
     SemanticUnavailable::Engine

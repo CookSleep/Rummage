@@ -119,16 +119,18 @@ export function selftest(over: Partial<SelftestStatus> = {}): SelftestStatus {
 }
 
 export function setupStatus(over: Partial<SetupStatus> = {}): SetupStatus {
-  const file = (name: string) => ({ name, bytes: 2 ** 30, ready: true, partialBytes: 0, verified: true })
+  const file = (name: string) => ({ name, bytes: 2 ** 30, ready: true, partialBytes: 0, verified: true, url: `https://example.com/models/${name}` })
   return {
     onboarded: true,
     step: 0,
     model: file('model.gguf'),
     mmproj: file('mmproj.gguf'),
+    npu: null,
+    npuChip: null,
+    tokenizerUrl: null,
     task: null,
     selftest: selftest(),
     proxy: { mode: 'system', url: '' },
-    modelUrl: 'https://example.com/models/',
     ...over,
   }
 }

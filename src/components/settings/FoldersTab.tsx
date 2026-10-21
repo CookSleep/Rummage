@@ -106,7 +106,8 @@ export default function FoldersTab({ values, setParam, setup, onModels }: Props)
       <div>
         <KindsStep section kinds={kinds} mmprojBytes={setup?.mmproj.bytes ?? 0} mmprojReady={setup?.mmproj.ready ?? false} onChange={setKind} />
         {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
-        {needsMmproj(kinds) && setup && !setup.mmproj.ready && (
+        {/* Android 上一个模型包含全部模态，没有单独的图片与音视频模型 */}
+        {!isAndroid && needsMmproj(kinds) && setup && !setup.mmproj.ready && (
           <div className={`mt-4 ${NOTICE_BOX}`}>
             <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
             <span className="flex-1">尚未下载图片与音视频模型，图片、音频和视频目前只能按文件名搜索。下载或导入后会自动识别它们的内容。</span>

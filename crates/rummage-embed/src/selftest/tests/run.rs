@@ -97,6 +97,7 @@ fn options(cache_file: PathBuf, auto: bool, only: Option<String>) -> Options {
             frames: 2,
             audio: false,
         },
+        litert: None,
     }
 }
 

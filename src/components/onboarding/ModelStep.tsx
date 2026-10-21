@@ -4,14 +4,17 @@ import type { ProxySetting, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { DownloadIcon } from '../icons'
 import { showToast } from '../Toast'
-import { ImportRow, MODELS, ModelRow, modelLabel, ProxyStatus, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from './ModelDownload'
+import { isAndroid } from '../../lib/platform'
+import { ImportRow, MODELS, ModelRow, modelInfos, modelLabel, ProxyStatus, requiredModel, rowFile, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from './ModelDownload'
 import { BUTTON, CARD, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
 
 /**
  * 第 3 步：下载模型。下载与导入在核心进程中进行，关闭窗口也会继续，进度经事件推来；
  * 显示当前代理状态，并提供换用镜像或设置代理的入口。
  * 进入时依次完整校验本步需要的、已安装但还没有通过校验的模型（下载、导入成功时已记为通过）；校验不通过的按未安装处理，
- * 需要重新下载或导入。所需模型都通过校验后才能进入下一步（Onboarding 的 `blockerAt`）
+ * 需要重新下载或导入。所需模型都通过校验后才能进入下一步（Onboarding 的 `blockerAt`）。
+ * Android 上只要一个模型（`requiredModel`）：芯片有 NPU 版时先下 NPU 模型，NPU 检测未通过后回到这一步下载通用模型；
+ * 已装好的其他模型照常列出
  */
 export default function ModelStep({ status, mmproj, onProxy }: { status: SetupStatus; mmproj: boolean; onProxy: (p: ProxySetting) => void }) {
   const [source, setSource] = useState<SourceChoice>({ type: 'official', url: '' })
@@ -22,7 +25,9 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
   const autoVerified = useRef(false)
   const task = status.task
   const running = task?.state === 'running'
-  const files = mmproj ? [status.model, status.mmproj] : [status.model]
+  const required = requiredModel(status)
+  const rows = isAndroid ? modelInfos(status).filter((m) => m.label === required.label || rowFile(status, m).ready) : MODELS.filter((m) => !m.mmproj || mmproj)
+  const files = isAndroid ? [rowFile(status, required)] : mmproj ? [status.model, status.mmproj] : [status.model]
   // 都已安装且没有校验出问题，不需要下载或导入
   const ready = files.every((f) => f.ready && f.verified !== false)
   // 已安装但还没有通过校验（校验被取消时由“重新校验”再发起）
@@ -32,7 +37,7 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
   // 校验刚结束、重新读取的状态还没到时文件仍是未校验，不显示“重新校验”
   const verifyDone = task?.kind === 'verify' && task.state === 'done'
   // 有下载了一部分的 .part 时续传
-  const resumable = status.model.partialBytes > 0 || (mmproj && status.mmproj.partialBytes > 0)
+  const resumable = files.some((f) => f.partialBytes > 0)
 
   const call = (cmd: string, args?: Record<string, unknown>) => {
     setError('')
@@ -46,7 +51,7 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
     )
   }
 
-  const download = () => call('download_models', { source: toSource(source), mmproj })
+  const download = () => call('download_models', { source: toSource(source), mmproj, npu: isAndroid && required.npu })
   const importModels = () => {
     setPicking(true)
     call('import_models').then(() => setPicking(false))
@@ -54,7 +59,7 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
   // 返回时校验任务已开始（之后由 `running` 控制显示），或没有要校验的文件
   const verify = () => {
     setStarting(true)
-    call('verify_models', { mmproj }).then(() => setStarting(false))
+    call('verify_models', { mmproj, npu: isAndroid && Boolean(status.npu) }).then(() => setStarting(false))
   }
 
   // 取消校验、导入只用胶囊通知说明，不留在页面上；只对在这一步看到过进行中的任务提示
@@ -81,10 +86,10 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
       <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">识别文件内容需要本地模型，下载一次即可，之后完全离线使用。</p>
 
       <div className={`mt-4 ${CARD}`}>
-        {MODELS.filter((m) => !m.mmproj || mmproj).map((m) => (
-          <ModelRow key={m.label} info={m} url={status.modelUrl} file={m.mmproj ? status.mmproj : status.model} running={running} />
+        {rows.map((m) => (
+          <ModelRow key={m.label} info={m} file={rowFile(status, m)} running={running} />
         ))}
-        {!ready && <ImportRow disabled={running} picking={picking} onImport={importModels} />}
+        {!ready && <ImportRow disabled={running} picking={picking} onImport={importModels} tokenizerUrl={status.tokenizerUrl} npu={required.npu} />}
       </div>
 
       {running && task && (

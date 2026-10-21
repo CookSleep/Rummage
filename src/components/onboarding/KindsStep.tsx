@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { formatSize } from '../../lib/format'
 import { type Kinds, VIDEO_PRESETS } from '../../lib/kinds'
+import { isAndroid } from '../../lib/platform'
 import { renderMessage } from '../ConfirmDialog'
 import { AudioIcon, CheckIcon, DocumentIcon, ImageIcon, VideoIcon } from '../icons'
 
@@ -73,7 +74,8 @@ interface Props {
 export default function KindsStep({ kinds, mmprojBytes, mmprojReady, section, onChange, preset, onPreset }: Props) {
   const icon = 'h-4 w-4'
   const desc = '选中的类型会识别内容，其余文件仍可按文件名搜索。'
-  const extra = mmprojReady ? '' : `；需另外下载约 ${formatSize(mmprojBytes)} 的图片与音视频模型`
+  // Android 上一个模型包含全部模态，不另外下载
+  const extra = mmprojReady || isAndroid ? '' : `；需另外下载约 ${formatSize(mmprojBytes)} 的图片与音视频模型`
   const cards: { key: keyof Kinds; icon: ReactNode; title: string; desc: string }[] = [
     { key: 'documents', icon: <DocumentIcon className={icon} />, title: '文档', desc: 'PDF、Office 与文本文件' },
     { key: 'images', icon: <ImageIcon className={icon} />, title: '图片', desc: `照片、截图、图表等${extra}` },

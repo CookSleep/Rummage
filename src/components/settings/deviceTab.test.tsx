@@ -14,21 +14,18 @@ const GPU = device({ id: 'gpu-3070', gpu: true, pciId: '0000:01:00.0', name: 'RT
 const withGpu = (over = {}) => setupStatus({ selftest: selftest({ devices: [CPU, GPU], selected: 1, blocked: [BLOCKED], ...over }) })
 
 describe('DeviceTab', () => {
-  it('已屏蔽的显卡列在“已屏蔽的显卡”中，附屏蔽原因，不在检测结果中', () => {
+  it('已屏蔽的显卡也列在检测结果中，附屏蔽原因', () => {
     mockCore({})
     render(<DeviceTab setup={withGpu()} values={null} />)
-    const blocked = text(section('已屏蔽的显卡'))
-    expect(blocked).toContain('RTX 4080 SUPER')
-    expect(blocked).toContain('显卡驱动多次超时，已屏蔽这块显卡。')
     const results = text(section('检测结果'))
     expect(results).toContain('RTX 3070 Laptop')
-    expect(results).not.toContain('RTX 4080 SUPER')
+    expect(results).toContain('RTX 4080 SUPER')
+    expect(results).toContain('显卡驱动多次超时，已屏蔽这块显卡。')
   })
 
-  it('没有已屏蔽的显卡时不显示这一分区', () => {
+  it('没有已屏蔽的显卡时没有“解除屏蔽”', () => {
     mockCore({})
     render(<DeviceTab setup={withGpu({ blocked: [] })} values={null} />)
-    expect(() => section('已屏蔽的显卡')).toThrow()
     expect(findButton('解除屏蔽')).toBeNull()
   })
 
@@ -36,19 +33,19 @@ describe('DeviceTab', () => {
     const calls = mockCore({ unblock_gpu: () => null })
     render(<DeviceTab setup={withGpu()} values={null} />)
 
-    await click(button('解除屏蔽', section('已屏蔽的显卡')))
+    await click(button('解除屏蔽', section('检测结果')))
     expect(calls.some((c) => c.cmd === 'unblock_gpu')).toBe(false)
     expect(text(dialog())).toContain('解除后会立即重新检测「RTX 4080 SUPER」')
 
     await click(button('解除屏蔽', dialog()))
-    expect(calls.filter((c) => c.cmd === 'unblock_gpu').map((c) => c.args)).toEqual([{ device: 'gpu-4080' }])
+    expect(calls.filter((c) => c.cmd === 'unblock_gpu').map((c) => c.args)).toEqual([{ device: 'gpu-4080', failed: false }])
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
 
   it('取消确认时不解除屏蔽', async () => {
     const calls = mockCore({ unblock_gpu: () => null })
     render(<DeviceTab setup={withGpu()} values={null} />)
-    await click(button('解除屏蔽', section('已屏蔽的显卡')))
+    await click(button('解除屏蔽', section('检测结果')))
     await click(button('取消', dialog()))
     expect(calls.some((c) => c.cmd === 'unblock_gpu')).toBe(false)
     expect(document.querySelector('[role="dialog"]')).toBeNull()
@@ -61,23 +58,34 @@ describe('DeviceTab', () => {
       },
     })
     render(<DeviceTab setup={withGpu()} values={null} />)
-    await click(button('解除屏蔽', section('已屏蔽的显卡')))
+    await click(button('解除屏蔽', section('检测结果')))
     await click(button('解除屏蔽', dialog()))
-    expect(text(section('已屏蔽的显卡'))).toContain('无法解除屏蔽：索引数据库不可用。')
+    expect(text(section('检测结果'))).toContain('无法解除屏蔽：索引数据库不可用。')
   })
 
   it('解除后没能当场重新检测时，在检测结果下方说明', async () => {
     mockCore({ unblock_gpu: () => '已解除屏蔽。正在建立索引，完成当前文件后开始检测。' })
     render(<DeviceTab setup={withGpu()} values={null} />)
-    await click(button('解除屏蔽', section('已屏蔽的显卡')))
+    await click(button('解除屏蔽', section('检测结果')))
     await click(button('解除屏蔽', dialog()))
     expect(text(section('检测结果'))).toContain('已解除屏蔽。正在建立索引，完成当前文件后开始检测。')
   })
 
-  it('检测进行中不能解除屏蔽', () => {
+  it('未通过的显卡可以单独重新检测，删除它的未通过记录', async () => {
+    const calls = mockCore({})
+    const failed = { ...GPU, status: 'failed' as const, reason: '结果与 CPU 不一致。' }
+    render(<DeviceTab setup={setupStatus({ selftest: selftest({ devices: [CPU, failed], selected: 0 }) })} values={null} />)
+    // 标题行与显卡那一行各有一个“重新检测”，后者在结果列表中
+    const rows = [...section('检测结果').querySelectorAll('button')].filter((el) => el.textContent === '重新检测')
+    expect(rows).toHaveLength(2)
+    await click(rows[1])
+    expect(calls.filter((c) => c.cmd === 'unblock_gpu').map((c) => c.args)).toEqual([{ device: GPU.id, failed: true }])
+  })
+
+  it('检测进行中不显示解除屏蔽', () => {
     mockCore({})
     render(<DeviceTab setup={withGpu({ running: true })} values={null} />)
-    expect((button('解除屏蔽', section('已屏蔽的显卡')) as HTMLButtonElement).disabled).toBe(true)
+    expect(findButton('解除屏蔽')).toBeNull()
   })
 
   it('只剩已屏蔽的显卡时黄条写“显卡已屏蔽”，当前设备为 CPU', () => {
@@ -85,7 +93,7 @@ describe('DeviceTab', () => {
     render(<DeviceTab setup={setupStatus({ selftest: selftest({ devices: [CPU], selected: 0, blocked: [BLOCKED] }) })} values={null} />)
     const used = text(section('使用的设备'))
     expect(used).toContain('显卡已屏蔽，已改用 CPU 建立索引，速度较慢。')
-    expect(used).toContain('显卡已屏蔽，可以在下方解除屏蔽')
+    expect(used).toContain('显卡已屏蔽，可以在检测结果中解除屏蔽')
     expect(used).not.toContain('显卡检测未通过')
   })
 

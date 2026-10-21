@@ -270,6 +270,8 @@ fn print_report(report: &SelftestReport) {
         let backend = match c.backend {
             Backend::Cpu => "CPU",
             Backend::Vulkan => "Vulkan",
+            Backend::Gpu => "LiteRT GPU",
+            Backend::Npu => "LiteRT NPU",
         };
         let mut extra = Vec::new();
         if let Some(d) = &c.driver {
@@ -353,6 +355,7 @@ fn run_selftest(args: SelftestArgs) -> ExitCode {
         images: true,
         only: None,
         video: rummage_core::pipeline::speed_video(&values),
+        litert: None,
     };
     match selftest::run(&opts, &candidates, &values, &[], &mut |_, _| {}) {
         Ok(report) => {

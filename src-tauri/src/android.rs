@@ -1,7 +1,10 @@
 //! Android 上的启动准备与进程内后台服务：
-//! - 数据目录为应用私有目录 `Context.getFilesDir()`，不支持更改、不迁移；llama.cpp 运行库目录为
-//!   `ApplicationInfo.nativeLibraryDir`（以旧方式打包：.so 压缩存放，安装时解压到 nativeLibraryDir，ggml 才能按目录加载 CPU 后端）。
-//!   两者在 `prepare` 中经 JNI 取得：`run` 由 tao 在 `Rust.onCreate` 初始化 ndk-context 之后才调用。
+//! - 数据目录为应用私有目录 `Context.getFilesDir()`，不支持更改、不迁移；LiteRT 运行库目录为
+//!   `ApplicationInfo.nativeLibraryDir`（以旧方式打包：.so 压缩存放，安装时解压到 nativeLibraryDir，LiteRT 按文件名从同一目录加载
+//!   GPU 加速器与 NPU 分发库）。两者在 `prepare` 中经 JNI 取得：`run` 由 tao 在 `Rust.onCreate` 初始化 ndk-context 之后才调用。
+//! - 推理用 LiteRT（`Config::litert`）：模型与分词器在 `<数据目录>/models/embeddinggemma-2-litert/`，本机芯片有 NPU 版时
+//!   NPU 模型也在那里；高通的 QNN 运行库在 `<数据目录>/models/qnn-<版本>/`，作为 NPU 的分发库目录（联发科与 Tensor 的分发库
+//!   随应用分发，目录为 nativeLibraryDir）。权重与程序缓存在 `<数据目录>/cache/litert/`。GPU、NPU 在 `:embed` 进程中（`embed`）。
 //! - TLS：`prepare` 中初始化 rustls-platform-verifier（用系统的证书校验，需要应用的 Context；其 Kotlin 部分由 Gradle 引入），
 //!   模型下载与检查更新都靠它。
 //! - 黄金样本打包在 APK 的 `assets/golden` 中：`<数据目录>/golden` 不存在或与当前安装不一致（`PackageInfo.lastUpdateTime`，
@@ -11,6 +14,7 @@
 //! - 存储权限与选择文件夹、文件的命令在 `storage` 中，前台服务与电池优化白名单在 `background` 中，
 //!   用其他应用打开文件、返回键与安全区在 `ui` 中，应用内更新在 `update` 中。
 pub mod background;
+pub mod embed;
 pub mod storage;
 pub mod ui;
 pub mod update;
@@ -28,7 +32,9 @@ use ndk::asset::AssetManager;
 use rummage_core::State;
 use rummage_core::pipeline::Config;
 use rummage_datadir::Startup;
-use rummage_embed::space::{MMPROJ, MODEL, MODEL_DIR};
+use rummage_embed::npu::{self, Vendor};
+use rummage_embed::selftest::LiteRtFiles;
+use rummage_embed::space::{LITERT_MODEL, LITERT_MODEL_DIR, TOKENIZER};
 use tokio::sync::OnceCell;
 
 #[link(name = "android")]
@@ -257,20 +263,35 @@ fn start(dir: &Path) -> Result<Arc<State>, String> {
     if let Err(err) = extract_golden(&golden) {
         log::error!("无法拷出黄金样本，设备检测将无法进行：{err}");
     }
-    let models = dir.join("models").join(MODEL_DIR);
+    let models = dir.join("models").join(LITERT_MODEL_DIR);
+    let npu = npu::local().map(|m| {
+        let dispatch = match m.vendor {
+            Vendor::Qualcomm(_) => dir.join("models").join(npu::QNN_DIR),
+            Vendor::MediaTek | Vendor::GoogleTensor => libs.clone(),
+        };
+        (models.join(m.file.name), dispatch)
+    });
+    let model = models.join(LITERT_MODEL.name);
     let cfg = Config {
         exe: std::env::current_exe().unwrap_or_default(),
-        // 没有 Vulkan 运行库，只用 CPU；ffmpeg 不随附，音视频按其他平台的方式处理
+        // 只用 LiteRT；ffmpeg 不随附，音视频按其他平台的方式处理
         vulkan_runtime: libs.join("vulkan"),
         ffmpeg: libs.join("ffmpeg"),
-        cpu_runtime: libs,
-        model: models.join(MODEL.name),
-        mmproj: models.join(MMPROJ.name),
+        cpu_runtime: libs.clone(),
+        mmproj: model.clone(),
+        model,
         selftest_cache: dir.join("cache").join("selftest.json"),
         golden,
         embed_tmp: Config::embed_tmp_dir(dir),
         gpus: rummage_embed::selftest::gpu_adapters,
+        litert: Some(LiteRtFiles {
+            runtime_dir: libs,
+            tokenizer: models.join(TOKENIZER.name),
+            cache_dir: dir.join("cache").join("litert"),
+            npu,
+        }),
     };
+    embed::register();
     let token = rummage_core::new_token().map_err(|err| format!("无法生成连接令牌：{err}"))?;
     Ok(rummage_core::start(token, dir, cfg))
 }

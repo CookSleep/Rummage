@@ -134,6 +134,10 @@ impl Pipeline {
     /// 不清除本次运行停用的显卡：本次运行中出过错的 GPU 不再使用
     pub fn reload(&self) {
         self.shared.retire(&mut lock(&self.shared.engine));
+        // 换了设备可能换了模型文件（LiteRT 的 NPU），要重建的文件按新的选择判断
+        if let Err(err) = self.requeue(&[]) {
+            log::error!("无法检查哪些文件要按新的设备重建：{err}");
+        }
         self.shared.wake();
     }
 

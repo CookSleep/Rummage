@@ -39,21 +39,31 @@ export const SPEED_STALE_TEXT = '参数已修改，以下耗时为修改前的�
 
 /** 引导与设备页共用的检测设备说明 */
 export const SELFTEST_TEXT = isAndroid
-  ? '用 CPU 计算几条样本，确认结果正确并测速。检测约需几分钟。'
+  ? '用 CPU、GPU 和 NPU 计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。'
   : '用 CPU 和每块显卡计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。'
+
 
 /** 用户没有选择只用 CPU，却用 CPU 建立索引的原因，见 `cpuFallbackReason` */
 export type CpuFallback = 'detecting' | 'gpusOff' | 'notDetected' | 'stale' | 'failed' | 'blocked'
 
 /** 原因的文字，放在“正在用 CPU 建立索引”后的括号中 */
-export const CPU_FALLBACK_TEXT: Record<CpuFallback, string> = {
-  detecting: '正在检测显卡',
-  gpusOff: '显卡出现问题',
-  notDetected: '尚未检测显卡',
-  stale: '尚未重新检测显卡',
-  failed: '显卡检测未通过',
-  blocked: '显卡已屏蔽',
-}
+export const CPU_FALLBACK_TEXT: Record<CpuFallback, string> = isAndroid
+  ? {
+      detecting: '正在检测 GPU 与 NPU',
+      gpusOff: 'GPU 或 NPU 出现问题',
+      notDetected: '尚未检测 GPU 与 NPU',
+      stale: '尚未重新检测 GPU 与 NPU',
+      failed: 'GPU 与 NPU 检测未通过',
+      blocked: 'GPU 与 NPU 已屏蔽',
+    }
+  : {
+      detecting: '正在检测显卡',
+      gpusOff: '显卡出现问题',
+      notDetected: '尚未检测显卡',
+      stale: '尚未重新检测显卡',
+      failed: '显卡检测未通过',
+      blocked: '显卡已屏蔽',
+    }
 
 /**
  * 原本要用的设备本次运行中出了问题、已改用另一个设备（核心给出 `failed`，`selected` 为改用的设备）时的两个设备名；

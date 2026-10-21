@@ -1,12 +1,16 @@
 //! 推理后端自检：用黄金样本检查每个候选后端，选出最快的通过者。
 //!
-//! - 候选：CPU，加上 `list_devices` 列出的每块 GPU（由调用方给出）。
+//! - 候选：CPU，加上 `list_devices` 列出的每块 GPU（由调用方给出）。Android 上推理用 LiteRT（`Options::litert`）：
+//!   候选为 CPU、GPU 与 NPU（`Candidate::Litert`），由调用方按已有的模型文件给出（只下了 NPU 版时只有 NPU）；
+//!   GPU、NPU 与显卡一样在可强行结束的推理进程中测试、按同样的规则记录，NPU 用本机芯片的 NPU 模型。
+//!   参考向量用 LiteRT 那份（`golden::Refs`），键中的运行库与模型按本平台（`runtime`、`models`）。
 //! - 样本：黄金样本中的文本、纯图像、音频与视频窗口项（`Options::images` 为否时只测文本、不加载 mmproj：用户只选了文档时
 //!   不下载 mmproj）；文本按清单的 kind 拼前缀（并与清单中的 `input` 核对），
 //!   图像用 `rummage_media::prepare` 按当前的 `image_tokens` 档位缩放，音频读成 16 kHz 采样，视频窗口取与当前视频设置
 //!   对应的变体、按当前的 `video_frame_tokens` 档位组装（`golden`）。参考向量覆盖全部档位组合，自检只取当前参数对应的那些。
 //! - 每个候选：启动 `LocalBackend` 并计初始化耗时 → 全部样本算一遍，向量经数值检查（`vector::normalize`），
-//!   逐条与参考向量比较，余弦须 ≥ `selftest_min_cosine`，同时计时；GPU 再算一遍计时（第一遍兼作预热），
+//!   逐条与参考向量比较，余弦须 ≥ `selftest_min_cosine`，同时计时；NPU 版模型与通用版不是同一个向量空间，
+//!   不比较，只做数值检查。GPU 再算一遍计时（第一遍兼作预热），
 //!   CPU 没有预热成本、只算一遍。各模态耗时取中位数。通过后测速：按当前参数处理一个文件（一段）的耗时（`speed`），
 //!   参数与黄金样本一致的类型直接用计时那一遍的耗时。
 //! - GPU 候选：整个过程限时 `gpu_selftest_timeout_s`，超时就结束推理进程并判失败；
@@ -32,7 +36,8 @@
 //!
 //!   驱动或运行库更新后重测屏蔽过的显卡前须先征得用户同意：核心在结果过期时自动发起的检测（`Options::auto`）不测
 //!   有过屏蔽记录的显卡，用户在设置中手动检测时才测。设置页的“重新检测”不清除屏蔽与未通过记录；用户在设备页
-//!   “解除屏蔽”（`unblock_gpu`）才删除这块显卡的全部屏蔽记录，核心随即只测它（`Options::only`）。全部重测的手动检测中通过的显卡视为用户同意，同样删除它的屏蔽记录（未通过记录不动）；
+//!   “解除屏蔽”才删除这块显卡的全部屏蔽记录，对未通过的设备“重新检测”才删除它的未通过记录（`clear_gpu_records`），
+//!   核心随即只测它（`Options::only`）。全部重测的手动检测中通过的显卡视为用户同意，同样删除它的屏蔽记录（未通过记录不动）；
 //!   自动检测与只测一块时不这样做（`Options::manual`）。
 //!   第 2 级（本次运行停用）的显卡由调用方记住（核心的 `State` 汇总自检、建索引与唤醒验证中出错的显卡），
 //!   自动检测时传入 `run`，直接记为“已跳过”，同一次运行中不再自动初始化它们（用户手动检测时调用方传空，当场重测）。
@@ -55,6 +60,7 @@
 mod cache;
 mod candidate;
 pub(crate) mod golden;
+mod litert;
 mod speed;
 
 use std::collections::BTreeMap;
@@ -70,15 +76,17 @@ use serde::{Deserialize, Serialize};
 use crate::frame::GpuInfo;
 use crate::local::{Gpu, Limits, WorkerSpec};
 use crate::space::{self, Backend};
-use crate::{Error, KILL_GRACE, platform};
+use crate::{Error, KILL_GRACE, npu, platform};
 
 pub use cache::{
     BlockedGpu, GpuRecords, UNBLOCKED_REASON, blacklist_gpu, cache_covers, cache_current,
-    cached_gpu, gpu_adapters, gpu_records, last_report, preferred_gpu, report_key, unblock_gpu,
+    cached_gpu, clear_gpu_records, gpu_adapters, gpu_records, last_report, preferred_gpu,
+    report_key,
 };
 use cache::{CacheFile, Cached, Record, cache_lock};
 use candidate::{check_driver_events, test, test_in_order};
 pub use golden::Sample;
+pub use litert::LiteRtFiles;
 
 /// GPU 测完（或运行中失效）后等系统日志写入可能的 TDR 事件再查询：TDR 默认 2 秒检测，留余量等 5 秒。
 pub const TDR_LOG_WAIT: Duration = Duration::from_secs(5);
@@ -96,6 +104,8 @@ const UNKNOWN_DRIVER: &str = "unknown";
 pub enum Candidate {
     Cpu,
     Gpu(GpuInfo),
+    /// LiteRT 的 GPU 或 NPU 后端（Android）
+    Litert(Backend),
 }
 
 impl Candidate {
@@ -104,8 +114,14 @@ impl Candidate {
         match self {
             Candidate::Cpu => rummage_proto::CPU_DEVICE.to_string(),
             Candidate::Gpu(g) => gpu_id(&g.description, g.pci_id.as_deref()),
+            Candidate::Litert(b) => gpu_id(&accel_name(*b), None),
         }
     }
+}
+
+/// LiteRT 加速后端的设备名称与描述，如 `GPU`、`NPU`
+fn accel_name(b: Backend) -> String {
+    b.as_str().to_uppercase()
 }
 
 fn gpu_id(description: &str, pci_id: Option<&str>) -> String {
@@ -143,29 +159,47 @@ impl DeviceKey {
     }
 }
 
-/// 键中的模型哈希：主模型与 mmproj 的 SHA-256。
-fn models() -> String {
+/// 键中的运行库：本平台推理用的运行库（Android 为 LiteRT）
+fn runtime() -> &'static str {
+    if cfg!(target_os = "android") {
+        space::LITERT_RUNTIME
+    } else {
+        space::RUNTIME
+    }
+}
+
+/// 键中的模型哈希：电脑为主模型与 mmproj 的 SHA-256；Android 为 LiteRT 通用版，NPU 为本机芯片的 NPU 模型
+fn models(backend: Backend) -> String {
+    if cfg!(target_os = "android") {
+        let npu = npu::local().filter(|_| backend == Backend::Npu);
+        return npu
+            .map_or(space::LITERT_MODEL.sha256, |m| m.file.sha256)
+            .to_string();
+    }
     format!("{}+{}", space::MODEL.sha256, space::MMPROJ.sha256)
 }
 
 fn key_with(c: &Candidate, driver: Option<String>) -> DeviceKey {
-    let model = models();
-    let runtime = space::RUNTIME.to_string();
-    match c {
-        Candidate::Cpu => DeviceKey {
-            description: String::new(),
-            pci_id: None,
-            driver: String::new(),
-            runtime,
-            model,
-        },
-        Candidate::Gpu(g) => DeviceKey {
-            description: g.description.clone(),
-            pci_id: g.pci_id.clone(),
-            driver: driver.unwrap_or_else(|| UNKNOWN_DRIVER.to_string()),
-            runtime,
-            model,
-        },
+    let runtime = runtime().to_string();
+    let (description, pci_id, backend) = match c {
+        Candidate::Cpu => {
+            return DeviceKey {
+                description: String::new(),
+                pci_id: None,
+                driver: String::new(),
+                runtime,
+                model: models(Backend::Cpu),
+            };
+        }
+        Candidate::Gpu(g) => (g.description.clone(), g.pci_id.clone(), Backend::Vulkan),
+        Candidate::Litert(b) => (accel_name(*b), None, *b),
+    };
+    DeviceKey {
+        description,
+        pci_id,
+        driver: driver.unwrap_or_else(|| UNKNOWN_DRIVER.to_string()),
+        runtime,
+        model: models(backend),
     }
 }
 
@@ -174,6 +208,7 @@ pub fn device_key(c: &Candidate) -> DeviceKey {
     let driver = match c {
         Candidate::Cpu => None,
         Candidate::Gpu(g) => platform::driver_version(&g.description),
+        Candidate::Litert(b) => platform::driver_version(&accel_name(*b)),
     };
     key_with(c, driver)
 }
@@ -253,6 +288,7 @@ impl CandidateReport {
         let (backend, name, driver) = match c {
             Candidate::Cpu => (Backend::Cpu, crate::cpu_name().to_string(), None),
             Candidate::Gpu(g) => (Backend::Vulkan, g.name.clone(), Some(key.driver.clone())),
+            Candidate::Litert(b) => (*b, accel_name(*b), Some(key.driver.clone())),
         };
         CandidateReport {
             backend,
@@ -279,7 +315,7 @@ impl CandidateReport {
     /// 后端返回的错误。设备丢失记为驱动错误；GPU 的崩溃、超时与后端失效也记为驱动错误，从严处理
     /// （停止测试其余 GPU），但是否持久屏蔽另看证据（`verdict`）。
     fn backend_error(&mut self, context: String, err: &Error) {
-        let gpu = self.backend == Backend::Vulkan;
+        let gpu = self.backend.accel();
         self.device_lost |= matches!(err, Error::DeviceLost(_));
         self.stuck |= matches!(err, Error::Stuck(_));
         let oom = matches!(err, Error::OutOfMemory(_))
@@ -316,13 +352,13 @@ impl CandidateReport {
     pub fn device_id(&self) -> String {
         match self.backend {
             Backend::Cpu => rummage_proto::CPU_DEVICE.to_string(),
-            Backend::Vulkan => gpu_id(&self.description, self.pci_id.as_deref()),
+            _ => gpu_id(&self.description, self.pci_id.as_deref()),
         }
     }
 
     /// 选中这个候选时传给 `WorkerSpec::gpu` 的值；CPU 为空。
     pub fn gpu(&self) -> Option<Gpu> {
-        (self.backend == Backend::Vulkan).then(|| Gpu {
+        self.backend.accel().then(|| Gpu {
             description: self.description.clone(),
             pci_id: self.pci_id.clone(),
         })
@@ -381,9 +417,9 @@ fn verdict(r: &CandidateReport, events: Events) -> Verdict {
     Verdict::Failed
 }
 
-/// 唤醒后验证推理引擎用的样本：黄金样本目录中的第一条文本样本，读取与核对方式与自检相同；不读图像。
+/// 唤醒后验证推理引擎用的样本：黄金样本目录中的第一条文本样本（本平台的参考向量），读取与核对方式与自检相同；不读图像。
 pub fn wake_sample(golden_dir: &Path) -> Result<Sample, Error> {
-    golden::first_text(golden_dir)
+    golden::first_text(golden_dir, golden::Refs::platform())
 }
 
 /// 当前的视频设置（参数 `video_preset`，“自定义”时为高级项），由调用方解析（rummage-core 的 `pipeline::video_opts`）；
@@ -425,6 +461,9 @@ pub struct Options {
     /// 系统中没有这个设备时返回 `Error::GpuNotFound`。不保存时（`save` 为否，列显卡的进程卡住）与手动检测一样整份缓存丢弃
     pub only: Option<String>,
     pub video: VideoSpeed,
+    /// Android 上用 LiteRT 推理：`model` 为通用版的 `.litertlm`（CPU 与 GPU 用；只下了 NPU 版时可以不存在），
+    /// `mmproj`、`cpu_runtime`、`vulkan_runtime` 不用
+    pub litert: Option<LiteRtFiles>,
 }
 
 impl Options {
@@ -464,7 +503,11 @@ pub fn run(
     }
 
     let max_pixels = params::max_image_pixels(values);
-    let mut golden = golden::load(&opts.golden_dir, values, opts.video, max_pixels)?;
+    let refs = match opts.litert {
+        Some(_) => golden::Refs::Litert,
+        None => golden::Refs::Gguf,
+    };
+    let mut golden = golden::load(&opts.golden_dir, values, opts.video, max_pixels, refs)?;
     if !opts.images {
         golden.samples.retain(|s| s.modality == Modality::Text);
     }
@@ -495,6 +538,7 @@ pub fn run(
         mmproj: opts.images.then(|| opts.mmproj.clone()),
         threads,
         gpu,
+        litert: None,
     };
 
     let mut reports: Vec<CandidateReport> = candidates
@@ -526,7 +570,7 @@ pub fn run(
     let needs_log = candidates
         .iter()
         .zip(&reused)
-        .any(|(c, reused)| matches!(c, Candidate::Gpu(_)) && !reused);
+        .any(|(c, reused)| !matches!(c, Candidate::Cpu) && !reused);
     let event_log = if needs_log {
         platform::driver_events(Duration::from_secs(1))
             .map(|_| ())
@@ -547,7 +591,13 @@ pub fn run(
             }
             return;
         }
-        let gpu = matches!(candidates[i], Candidate::Gpu(_));
+        let gpu = !matches!(candidates[i], Candidate::Cpu);
+        // NaN 仍不通过（见 `candidate::measure`）
+        let min_cos = if matches!(candidates[i], Candidate::Litert(Backend::Npu)) {
+            f64::NEG_INFINITY
+        } else {
+            min_cos
+        };
         if gpu && skip_gpu(r, &keys[i], &cache, disabled, opts.auto) {
             return;
         }
@@ -560,27 +610,48 @@ pub fn run(
             }
             return;
         }
-        let Candidate::Gpu(g) = &candidates[i] else {
-            let spec = spec(&opts.cpu_runtime, None);
+        let litert_spec = |b: Backend| {
+            let files = opts
+                .litert
+                .as_ref()
+                .expect("LiteRT 候选只在 Options::litert 时给出");
+            files.spec(&opts.exe, &opts.model, b, opts.images, threads)
+        };
+        let spec = match (&candidates[i], &opts.litert) {
+            (Candidate::Cpu, None) => spec(&opts.cpu_runtime, None),
+            (Candidate::Cpu, Some(_)) => match litert_spec(Backend::Cpu) {
+                Ok(s) => s,
+                Err(err) => return r.backend_error(String::new(), &err),
+            },
+            _ if event_log.is_err() => {
+                r.status = Status::Skipped;
+                r.reason = Some(NO_EVENT_LOG_REASON.to_string());
+                return;
+            }
+            (Candidate::Litert(b), _) => match litert_spec(*b) {
+                Ok(s) => s,
+                Err(err) => return r.backend_error(String::new(), &err),
+            },
+            (Candidate::Gpu(g), _) => {
+                let Some(runtime) = &opts.vulkan_runtime else {
+                    return r.fail(
+                        "缺少显卡计算所需的组件，未检测这块显卡。请重新安装 Rummage。".to_string(),
+                    );
+                };
+                let gpu = Gpu {
+                    description: g.description.clone(),
+                    pci_id: g.pci_id.clone(),
+                };
+                spec(runtime, Some(gpu))
+            }
+        };
+        if !gpu {
             return test(r, spec, &limits, &golden, min_cos, None, &opts.cancel);
-        };
-        if event_log.is_err() {
-            r.status = Status::Skipped;
-            r.reason = Some(NO_EVENT_LOG_REASON.to_string());
-            return;
         }
-        let Some(runtime) = &opts.vulkan_runtime else {
-            return r
-                .fail("缺少显卡计算所需的组件，未检测这块显卡。请重新安装 Rummage。".to_string());
-        };
-        let gpu = Gpu {
-            description: g.description.clone(),
-            pci_id: g.pci_id.clone(),
-        };
         let start = Instant::now();
         test(
             r,
-            spec(runtime, Some(gpu)),
+            spec,
             &limits,
             &golden,
             min_cos,
@@ -691,7 +762,12 @@ fn skip_gpu(
         Record::Failed => (
             Status::Failed,
             Some(
-                "这块显卡此前检测时结果不达标，更新显卡驱动或 Rummage 前不再自动检测。".to_string(),
+                if cfg!(target_os = "android") {
+                    "这个设备此前检测时结果不达标，更新 Rummage 前不再自动检测，可以单独重新检测。"
+                } else {
+                    "这块显卡此前检测时结果不达标，更新显卡驱动或 Rummage 前不再自动检测，可以单独重新检测。"
+                }
+                .to_string(),
             ),
         ),
     };

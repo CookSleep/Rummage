@@ -34,6 +34,9 @@ fn big_cores() -> Option<Vec<usize>> {
     Some((0..n).filter(|&i| freqs[i] * 4 >= max * 3).collect())
 }
 
+/// Android 上的视觉 token 档位：LiteRT 的模型只有 70、140 两种视觉签名
+const LITERT_TIERS: &[(i64, &str)] = &[(70, "低"), (140, "标准")];
+
 pub static PARAMS: &[ParamDef] = &[
     // 开启内容索引的类型。关闭后重新扫描，不再给这类新文件（及还没建好索引的文件）建内容索引；已建好的向量保留，
     // 仍可按内容搜到，所以不需要重建索引（affects_index 为否）
@@ -174,21 +177,31 @@ pub static PARAMS: &[ParamDef] = &[
         section: "图片",
         // 值为每张图的视觉 token 档位
         kind: ParamKind::Named {
-            options: &[
-                (70, "最低"),
-                (140, "较低"),
-                (280, "标准"),
-                (560, "较高"),
-                (1120, "最高"),
-            ],
+            options: if cfg!(target_os = "android") {
+                LITERT_TIERS
+            } else {
+                &[
+                    (70, "最低"),
+                    (140, "较低"),
+                    (280, "标准"),
+                    (560, "较高"),
+                    (1120, "最高"),
+                ]
+            },
             unit: "Token",
         },
-        default: || ParamValue::Int(280),
+        default: || {
+            ParamValue::Int(if cfg!(target_os = "android") {
+                140
+            } else {
+                280
+            })
+        },
         affects_index: true,
         index_kinds: &["image"],
         label: "图片识别精度",
         help: "越高识别越细，建立索引也越慢。长图的整图和文档中的图片也按此精度识别。改后匹配度会有变化，“匹配度门槛”按默认精度设定。",
-        basis: "官方默认。4080 SUPER 上评测 140 → 280 档：表格截图 R@10 0.237 → 0.537，扫描页 R@1 0.579 → 0.632，照片 R@1 0.890 → 0.850，文档内嵌图片 R@1 0.662 → 0.593（损失全部在纯扫描的 PDF 上，有正文的文档不变）；建索引约慢 1.2–1.5 倍，CPU 上约 2.6 倍",
+        basis: "电脑为官方默认；手机的 LiteRT 只有 70、140 两档，取 140 档（电脑上用 LiteRT CPU 评测，140 档总体介于 GGUF 的 140 与 280 档之间）。4080 SUPER 上评测 140 → 280 档：表格截图 R@10 0.237 → 0.537，扫描页 R@1 0.579 → 0.632，照片 R@1 0.890 → 0.850，文档内嵌图片 R@1 0.662 → 0.593（损失全部在纯扫描的 PDF 上，有正文的文档不变）；建索引约慢 1.2–1.5 倍，CPU 上约 2.6 倍",
         platform: "",
     },
     ParamDef {
@@ -197,13 +210,17 @@ pub static PARAMS: &[ParamDef] = &[
         section: "图片",
         // 值为长图每一段的视觉 token 档位
         kind: ParamKind::Named {
-            options: &[
-                (70, "低"),
-                (140, "标准"),
-                (280, "较高"),
-                (560, "高"),
-                (1120, "最高"),
-            ],
+            options: if cfg!(target_os = "android") {
+                LITERT_TIERS
+            } else {
+                &[
+                    (70, "低"),
+                    (140, "标准"),
+                    (280, "较高"),
+                    (560, "高"),
+                    (1120, "最高"),
+                ]
+            },
             unit: "Token",
         },
         default: || ParamValue::Int(140),
@@ -700,12 +717,18 @@ pub static PARAMS: &[ParamDef] = &[
         group: Group::Advanced,
         section: "设备检测",
         kind: ParamKind::Float { min: 0.9, max: 1.0 },
-        default: || ParamValue::Float(0.99),
+        default: || {
+            ParamValue::Float(if cfg!(target_os = "android") {
+                0.98
+            } else {
+                0.99
+            })
+        },
         affects_index: false,
         index_kinds: &[],
         label: "设备检测通过标准",
         help: "检测设备时，结果与参考值的相似度不低于此值才算通过。越高越严格。",
-        basis: "经验值；正常的显卡与参考值的最小余弦约 0.9994",
+        basis: "经验值；正常的显卡与参考值的最小余弦约 0.9994；手机为 0.98：骁龙 8 Gen 2 的 GPU（LiteRT，FP32）长截图约 0.989",
         platform: "",
     },
     ParamDef {
@@ -786,7 +809,11 @@ pub static PARAMS: &[ParamDef] = &[
         affects_index: true,
         index_kinds: &["video"],
         label: "带声音片段的长度上限（Token）",
-        help: "带声音的视频片段超过此值时，整段视频改为只看画面。",
+        help: if cfg!(target_os = "android") {
+            "带声音的视频片段超过此值时，整段视频改为只看画面。用 NPU 时最多 1024。"
+        } else {
+            "带声音的视频片段超过此值时，整段视频改为只看画面。"
+        },
         basis: "容纳“找说话内容”（6 秒 6 帧，每帧 140 档）：16:9 视频实测 956 token，最不利的长宽比约 1064 token；也保证交互查询不会被一次长推理卡住",
         platform: "",
     },

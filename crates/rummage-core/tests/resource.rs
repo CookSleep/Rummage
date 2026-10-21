@@ -45,6 +45,7 @@ fn worker_inherits_below_normal() {
         mmproj: None,
         threads: 2,
         gpu: None,
+        litert: None,
     };
     let backend = LocalBackend::new(spec, Limits::from_params(&BTreeMap::new())).unwrap();
     backend.start().unwrap();

@@ -1,11 +1,12 @@
 //! 设备检测在核心状态上的部分：手动与自动检测、检测状态、用户选择的设备、解除屏蔽。
+//! Android 上的候选按已有的模型给出：通用版可用时测 CPU 与 GPU，本机芯片的 NPU 模型（含 QNN 运行库）可用时测 NPU；
+//! 引导中只下了 NPU 版时只测 NPU，未通过时界面请用户下载通用版再检测。
 //! 规则见上级模块（`setup`）说明中设备自检、用户选择的设备、本次运行中显卡出的问题、自动重新检测与解除屏蔽各条。
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use rummage_embed::selftest::{self, Candidate, CandidateReport, SelftestReport, Status};
-use rummage_embed::space;
 use rummage_embed::{Backend, Limits};
 use rummage_proto::{
     AUTO_DEVICE, ApiError, BlockedGpu, CPU_DEVICE, DeviceResult, DeviceStatus, Event, GpuState,
@@ -13,7 +14,7 @@ use rummage_proto::{
 };
 
 use super::super::{State, api_error, db, lock};
-use super::{bad_request, config, mmproj_on, release_limit, unavailable};
+use super::{Slot, bad_request, config, files, mmproj_on, release_limit, unavailable};
 use crate::pipeline::{Config, Disabled, Hold, PREFERRED_DEVICE_KEY};
 
 /// 检测的发起方式
@@ -92,7 +93,7 @@ impl State {
             return st;
         }
         // 与流水线判断是否加载 mmproj 的条件相同
-        let images = mmproj_on(&self.params()) && space::MMPROJ.check(&cfg.mmproj).is_ok();
+        let images = mmproj_on(&self.params()) && cfg.media_model_ok();
         if st.devices.is_empty()
             && st.error.is_none()
             && let Some(r) = selftest::last_report(&cfg.selftest_cache)
@@ -204,7 +205,7 @@ fn device(r: &CandidateReport) -> DeviceResult {
     DeviceResult {
         id: r.device_id(),
         pci_id: r.pci_id.clone(),
-        gpu: r.backend == Backend::Vulkan,
+        gpu: r.backend.accel(),
         // CPU 按本机当前的处理器型号显示，不用检测记录中保存的名称
         name: if r.backend == Backend::Cpu {
             rummage_embed::cpu_name().to_string()
@@ -249,7 +250,7 @@ pub(super) fn set_preferred_device(state: &Arc<State>, device: String) -> Result
     let images = state
         .config
         .get()
-        .is_some_and(|cfg| mmproj_on(&state.params()) && space::MMPROJ.check(&cfg.mmproj).is_ok());
+        .is_some_and(|cfg| mmproj_on(&state.params()) && cfg.media_model_ok());
     // 与流水线选设备的规则相同：本次运行中停用的显卡不用（所有显卡都停用时只用 CPU）
     let target = |d: &str| {
         let (all, disabled) = {
@@ -302,23 +303,34 @@ pub(super) fn set_preferred_device(state: &Arc<State>, device: String) -> Result
 /// （只测一块要靠其余设备的缓存结果，这时请用户整体重新检测）；检测没能开始（缺模型、模型任务进行中等）。这时它在检测结果中显示为未检测，
 /// 下次手动检测或下次启动后的自动检测时重测。在 `selftest` 锁内检查、修改并登记检测已开始（`started`），
 /// 检测（含自动检测）不会在这期间抢先开始
-pub(super) fn unblock_gpu(state: &Arc<State>, device: String) -> Result<Reply, ApiError> {
+/// `failed` 时改为删除它的未通过记录，重测未通过的设备
+pub(super) fn unblock_gpu(
+    state: &Arc<State>,
+    device: String,
+    failed: bool,
+) -> Result<Reply, ApiError> {
+    let done = if failed { "" } else { "已解除屏蔽。" };
     let cfg = config(state)?;
     let gpus = (cfg.gpus)();
     let (note, was_started) = {
         let mut st = lock(&state.setup.selftest);
         if st.running {
-            return Err(bad_request("设备检测正在进行，请等它完成后再解除屏蔽。"));
+            return Err(bad_request(if failed {
+                "设备检测正在进行，请等它完成后再重新检测。"
+            } else {
+                "设备检测正在进行，请等它完成后再解除屏蔽。"
+            }));
         }
         let absent = selftest::gpu_records(&cfg.selftest_cache, &gpus)
             .absent
             .contains(&device);
-        match selftest::unblock_gpu(&cfg.selftest_cache, &device) {
+        match selftest::clear_gpu_records(&cfg.selftest_cache, &device, failed) {
             Ok(true) => {}
+            Ok(false) if failed => return Err(bad_request("这个设备没有未通过的记录。")),
             Ok(false) => return Err(bad_request("这块显卡没有被屏蔽。")),
             Err(err) => {
-                log::error!("无法删除显卡 {device} 的屏蔽记录：{err}");
-                return Err(api_error(ApiError::INTERNAL, "无法解除屏蔽，请重试。"));
+                log::error!("无法删除设备 {device} 的屏蔽或未通过记录：{err}");
+                return Err(api_error(ApiError::INTERNAL, "操作失败，请重试。"));
             }
         }
         // 本次运行中检测过时显示的是内存中的结果，同样改为未检测
@@ -333,18 +345,23 @@ pub(super) fn unblock_gpu(state: &Arc<State>, device: String) -> Result<Reply, A
             .keys
             .retain(|k| k.device_id() != device);
         // 只测一块要靠其余设备的缓存结果；它们没测过本次需要的图片与音视频时，请用户整体重新检测
-        let images = mmproj_on(&state.params()) && space::MMPROJ.check(&cfg.mmproj).is_ok();
+        let images = mmproj_on(&state.params()) && cfg.media_model_ok();
         let note = if absent {
-            Some("已解除屏蔽。这块显卡目前不在系统中，重新接入后检测设备时会重新检测它。")
+            Some(format!(
+                "{done}这块显卡目前不在系统中，重新接入后检测设备时会重新检测它。"
+            ))
         } else if !selftest::cache_covers(&cfg.selftest_cache, images) {
-            Some("已解除屏蔽。检测结果需要更新，请点击上方的“重新检测”。")
+            Some(format!("{done}检测结果需要更新，请重新检测全部设备。"))
         } else {
             None
         };
         let was = note.is_none() && state.setup.started.swap(true, Ordering::Relaxed);
-        (note.map(str::to_string), was)
+        (note, was)
     };
-    log::info!("已解除显卡 {device} 的屏蔽。");
+    log::info!(
+        "已清除设备 {device} 的{}记录。",
+        if failed { "未通过" } else { "屏蔽" }
+    );
     let note = match note {
         Some(n) => Some(n),
         None => match start_selftest(state, false, Mode::Retest(device)) {
@@ -354,14 +371,14 @@ pub(super) fn unblock_gpu(state: &Arc<State>, device: String) -> Result<Reply, A
                 if !lock(&state.setup.selftest).running {
                     state.setup.started.store(was_started, Ordering::Relaxed);
                 }
-                Some(format!("已解除屏蔽。{}", err.message))
+                Some(format!("{done}{}", err.message))
             }
         },
     };
     let Some(message) = note else {
         return Ok(Reply::Done);
     };
-    log::info!("解除屏蔽后不当场重新检测：{message}");
+    log::info!("清除记录后不当场重新检测：{message}");
     state.broadcast_selftest();
     Ok(Reply::DoneWithWarning { message })
 }
@@ -373,7 +390,7 @@ pub(super) fn start_selftest(
     mode: Mode,
 ) -> Result<Reply, ApiError> {
     let cfg = config(state)?.clone();
-    if space::MODEL.check(&cfg.model).is_err() {
+    if !cfg.text_model_ok() {
         return Err(bad_request("请先下载或导入模型，再检测设备。"));
     }
     // 本次运行中显卡出过驱动错误时不自动重试（自动检测由 `auto_selftest` 拦下）；用户手动检测或解除屏蔽可以当场重测
@@ -447,7 +464,7 @@ pub(super) fn after_report(
                 .candidates
                 .iter()
                 .chain(previous.iter().flat_map(|p| p.candidates.iter()))
-                .filter(|r| r.backend == Backend::Vulkan && r.device_id() != *id);
+                .filter(|r| r.backend.accel() && r.device_id() != *id);
             for r in others {
                 let key = selftest::report_key(r);
                 if !d.keys.contains(&key) {
@@ -485,7 +502,7 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
             .unwrap_or_default()
     };
     let values = state.params();
-    let images = mmproj_on(&values) && space::MMPROJ.check(&cfg.mmproj).is_ok();
+    let images = mmproj_on(&values) && cfg.media_model_ok();
     let pipeline = state.pipeline.get();
     if let Some(p) = pipeline {
         // 自动检测期间照常用 CPU 建索引，只等用显卡的旧引擎释放；手动检测暂停建索引
@@ -528,11 +545,22 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
         state.broadcast_selftest();
         return;
     }
-    let mut candidates = vec![Candidate::Cpu];
+    let mut candidates = Vec::new();
+    if cfg.litert.is_some() {
+        // 通用版测 CPU 与 GPU；NPU 用本机芯片的 NPU 模型（见模块说明）
+        if files(cfg, Slot::Main).is_some_and(|f| f.ready()) {
+            candidates.extend([Candidate::Cpu, Candidate::Litert(Backend::Gpu)]);
+        }
+        if files(cfg, Slot::Npu).is_some_and(|f| f.ready()) {
+            candidates.push(Candidate::Litert(Backend::Npu));
+        }
+    } else {
+        candidates.push(Candidate::Cpu);
+    }
     // 列出显卡要在探测子进程中初始化 Vulkan；发布版没有 Vulkan 运行库时只测 CPU
     // 列显卡的进程结束不了：显卡驱动可能已停止响应，本次运行停用所有显卡，只测 CPU 且结果不写缓存（下次启动仍要检测）
     let mut save = true;
-    if cfg.vulkan_runtime.is_dir() {
+    if cfg.litert.is_none() && cfg.vulkan_runtime.is_dir() {
         match rummage_embed::list_devices(
             &cfg.exe,
             &cfg.vulkan_runtime,
@@ -565,13 +593,14 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
             shown(&c.device_id()).unwrap_or_else(|| DeviceResult {
                 id: c.device_id(),
                 pci_id: match c {
-                    Candidate::Cpu => None,
                     Candidate::Gpu(g) => g.pci_id.clone(),
+                    _ => None,
                 },
-                gpu: matches!(c, Candidate::Gpu(_)),
+                gpu: !matches!(c, Candidate::Cpu),
                 name: match c {
                     Candidate::Cpu => rummage_embed::cpu_name().to_string(),
                     Candidate::Gpu(g) => g.description.clone(),
+                    Candidate::Litert(b) => b.as_str().to_uppercase(),
                 },
                 status: DeviceStatus::Pending,
                 reason: None,
@@ -589,7 +618,10 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
         exe: cfg.exe.clone(),
         golden_dir: cfg.golden.clone(),
         cpu_runtime: cfg.cpu_runtime.clone(),
-        vulkan_runtime: (candidates.len() > 1).then(|| cfg.vulkan_runtime.clone()),
+        vulkan_runtime: candidates
+            .iter()
+            .any(|c| matches!(c, Candidate::Gpu(_)))
+            .then(|| cfg.vulkan_runtime.clone()),
         model: cfg.model.clone(),
         mmproj: cfg.mmproj.clone(),
         cache_file: cfg.selftest_cache.clone(),
@@ -609,6 +641,7 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
         } else {
             Arc::default()
         },
+        litert: cfg.litert.clone(),
     };
     // 手动检测全部重测，本次运行停用的显卡也测；自动检测与重测跳过它们（重测的这块已在解除时清除）
     let disabled = match mode {

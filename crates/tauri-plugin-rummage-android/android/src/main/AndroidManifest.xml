@@ -21,5 +21,44 @@
             android:name="com.cooksleep.rummage.storage.IndexService"
             android:exported="false"
             android:foregroundServiceType="mediaProcessing|dataSync" />
+        <!-- GPU、NPU 推理在单独的进程中，出错或超时时可以强行结束（EmbedService） -->
+        <service
+            android:name="com.cooksleep.rummage.storage.EmbedService"
+            android:exported="false"
+            android:process=":embed" />
+        <!--
+          LiteRT 的加速器用到的系统与厂商库（Android 12 起要声明才能加载；没有时只是不能用对应的加速器）：
+          GPU 为 OpenCL；NPU 为高通的 FastRPC、联发科的 NeuroPilot 与 Google Tensor 的 EdgeTPU，
+          后两者取自 Google Maven 的 litert-npu-runtime-mediatek / google-tensor 2.3.0 的清单
+        -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <uses-native-library android:name="libneuron_sys_util.mtk.so" android:required="false" />
+        <uses-native-library android:name="libneuronusdk_adapter.mtk.so" android:required="false" />
+        <uses-native-library android:name="libneuronusdk_adapter.9.mtk.so" android:required="false" />
+        <uses-native-library android:name="libneuron_adapter_mgvi.so" android:required="false" />
+        <uses-native-library android:name="libapuwareutils_v2.mtk.so" android:required="false" />
+        <uses-native-library android:name="libapuwareutils.mtk.so" android:required="false" />
+        <uses-native-library android:name="libapuwareapusys_v2.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop_mtk_nn.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop_mtk_cv.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_runtime_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_engine_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_pattern_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop25_mtk_nn.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop25_mtk_cv.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_runtime_25_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_engine_25_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_pattern_25_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_config.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpup30_mtk_nn.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpup30_mtk_cv.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_runtime_30.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_engine_30.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_pattern_30.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop30_mtk_nn.mtk.so" android:required="false" />
+        <uses-native-library android:name="libedgetpu_util.so" android:required="false" />
+        <uses-native-library android:name="libedgetpu_litert.so" android:required="false" />
     </application>
 </manifest>

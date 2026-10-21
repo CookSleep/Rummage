@@ -20,6 +20,7 @@
 | `audio/` | 3 段音频，16 kHz 单声道 16 位 PCM WAV，5–10 秒：中文朗读、英文朗读、环境声各 1 段 |
 | `video/vid01/` | 1 个短视频窗口的素材：画面帧（640×360 JPEG）、逐帧对应的音频段（WAV）、`window.json`（窗口参数）、`transcript.txt`（有解说时的逐字稿） |
 | `vectors-gguf-q8-<主模型 SHA-256 前 16 位>.json` | 黄金向量，见下文 |
+| `vectors-litert-<模型 SHA-256 前 16 位>.json` | 手机（LiteRT）的黄金向量，见下文“LiteRT 黄金向量” |
 | `THIRD_PARTY.md` | 第三方素材声明（本目录没有第三方素材） |
 
 样本（全部素材文件加 `manifest.json`）合计 5,907,460 字节（5.63 MiB）：图片 4.7 MB、音频 0.8 MB、视频窗口 0.4 MB、清单 0.02 MB。导入时照片转为 JPEG 质量 90，截图、图表与长截图保留 PNG 只做无损重压缩，音频与视频窗口原样复制。黄金向量按模型文件另行打包，不计入样本体积。
@@ -102,6 +103,16 @@
 | `vectors` | 49 项，每项 `{id, modality, tokens, norm, seq_len, vector}`；`tokens` 是视觉 token 档位，只有图像与视频窗口有，编号加档位确定一条向量；`modality` 为 `text`、`image`、`audio`、`video_av`、`video_v`；`vector` 是 768 个 float32，以 9 位有效数字的十进制写出（可无损还原为 float32），已 L2 归一化；`norm` 是写出前的范数；`seq_len` 是送入编码器的 token 数（含软 token） |
 
 全部向量已检查无 NaN / Inf、范数与 1 相差不超过 10⁻⁶；用同一运行库在 CPU 上重算复核（`golden_vectors.py --check`），49 条与文件中的值逐位相同（各模态最小余弦 1.000000000，逐元素最大绝对差 0）。
+
+## LiteRT 黄金向量
+
+文件 `vectors-litert-e7a8a2204b91e0f9.json`，手机的设备自检（CPU、GPU 与 NPU）都与它比较：
+
+- 运行库：LiteRT-LM 0.18.0（PyPI `litert-lm-api` 轮子中的 `litert-lm.dll`，`scripts/fetch-litert.ps1` 取得），CPU 后端，激活 FLOAT32，经 `rummage-core worker --litert cpu` 计算（与手机上的推理同一条代码路径）。
+- 模型：`litert-community/embeddinggemma-2-740m-litert-lm` 提交 `24d962e906c7d332c6428e71c9676855024569e2` 的通用版 `embeddinggemma-2-740m.litertlm`（SHA-256 `e7a8a2204b91e0f9…`）。NPU 版是另一个文件，同样与这份比较。
+- 输入与 GGUF 相同（同一份清单、同样的前缀与缩放），图像再缩放到 LiteRT 预处理的不动点尺寸。LiteRT 只有 70、140 两档：共 34 条，文本 15；图像 10（5 张 × 两档）；音频 3；视频窗口 6（3 种输入 × 两档）。
+- 格式同上表，字段只有 `format`、`runtime`、`model_sha256`、`mmproj_sha256`（与主模型相同）、`image_tiers`、`video_frame_tiers`、`manifest_sha256` 与 `vectors`（每项 `{id, modality, tokens, vector}`）。
+- 重新生成（只用 CPU）：先 `cargo build -p rummage-core`，再 `cargo test -p rummage-embed --lib litert::tests::write_litert_golden -- --ignored`；`litert::tests::litert_golden` 复核同一台电脑上与文件中的余弦为 1。
 
 ## 重算黄金向量
 

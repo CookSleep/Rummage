@@ -21,12 +21,22 @@ fn verify_and_delete_models() {
     let c = cfg(dir.path());
     let mut rx = state.events.subscribe();
     // 没有安装时不能校验
-    let err = respond(&state, Request::VerifyModel { mmproj: true }).unwrap_err();
+    let err = respond(
+        &state,
+        Request::VerifyModel {
+            mmproj: true,
+            npu: false,
+        },
+    )
+    .unwrap_err();
     assert_eq!(err.code, ApiError::BAD_REQUEST);
 
     // 校验在后台进行，可以取消；取消时不记结果
     fake_model(&c.model, &space::MODEL);
-    let body = Request::VerifyModel { mmproj: false };
+    let body = Request::VerifyModel {
+        mmproj: false,
+        npu: false,
+    };
     assert_eq!(respond(&state, body), Ok(Reply::Done));
     assert_eq!(respond(&state, Request::CancelModelTask), Ok(Reply::Done));
     let task = finished(&mut rx);
@@ -53,11 +63,19 @@ fn verify_and_delete_models() {
     let download = Request::DownloadModels {
         source: rummage_proto::ModelSource::Official,
         mmproj: true,
+        npu: false,
     };
     let import = Request::ImportModels {
         paths: vec![c.mmproj.to_string_lossy().into_owned()],
     };
-    for body in [Request::DeleteModel { mmproj: true }, download, import] {
+    for body in [
+        Request::DeleteModel {
+            mmproj: true,
+            npu: false,
+        },
+        download,
+        import,
+    ] {
         let err = respond(&state, body).unwrap_err();
         assert_eq!(err.code, ApiError::BAD_REQUEST);
         assert_eq!(err.message, "设备检测正在进行，请等它完成后再试。");
@@ -66,7 +84,13 @@ fn verify_and_delete_models() {
     lock(&state.setup.selftest).running = false;
 
     assert_eq!(
-        respond(&state, Request::DeleteModel { mmproj: true }),
+        respond(
+            &state,
+            Request::DeleteModel {
+                mmproj: true,
+                npu: false
+            }
+        ),
         Ok(Reply::Done)
     );
     let task = finished(&mut rx);
@@ -79,7 +103,13 @@ fn verify_and_delete_models() {
     // 只有下载了一部分的文件时也能删除
     std::fs::write(&part, b"x").unwrap();
     assert_eq!(
-        respond(&state, Request::DeleteModel { mmproj: true }),
+        respond(
+            &state,
+            Request::DeleteModel {
+                mmproj: true,
+                npu: false
+            }
+        ),
         Ok(Reply::Done)
     );
     let task = finished(&mut rx);
@@ -91,7 +121,13 @@ fn verify_and_delete_models() {
 
     // 文字模型也能删除，图片与音视频模型保留
     assert_eq!(
-        respond(&state, Request::DeleteModel { mmproj: false }),
+        respond(
+            &state,
+            Request::DeleteModel {
+                mmproj: false,
+                npu: false
+            }
+        ),
         Ok(Reply::Done)
     );
     let task = finished(&mut rx);
@@ -109,7 +145,10 @@ fn verify_unverified_models() {
     let state = open(dir.path());
     let c = cfg(dir.path());
     let mut rx = state.events.subscribe();
-    let body = Request::VerifyModels { mmproj: true };
+    let body = Request::VerifyModels {
+        mmproj: true,
+        npu: false,
+    };
     assert_eq!(respond(&state, body.clone()), Ok(Reply::Done));
     assert_eq!(setup(&state).task, None);
 
@@ -118,7 +157,13 @@ fn verify_unverified_models() {
     set_verified(&state, space::MODEL.name, Some((&c.model, true)));
     // 不需要 mmproj 时只看文字模型，它已通过
     assert_eq!(
-        respond(&state, Request::VerifyModels { mmproj: false }),
+        respond(
+            &state,
+            Request::VerifyModels {
+                mmproj: false,
+                npu: false
+            }
+        ),
         Ok(Reply::Done)
     );
     assert_eq!(setup(&state).task, None);
@@ -189,7 +234,14 @@ fn selftest_waits_for_model_task() {
         assert!(!lock(&state.setup.selftest).running);
     }
     // 任务进行中不能再开始另一个
-    let err = respond(&state, Request::VerifyModel { mmproj: false }).unwrap_err();
+    let err = respond(
+        &state,
+        Request::VerifyModel {
+            mmproj: false,
+            npu: false,
+        },
+    )
+    .unwrap_err();
     assert_eq!(
         err.message,
         "模型正在下载、导入、校验或删除，请等它完成后再试。"

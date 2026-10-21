@@ -50,6 +50,7 @@ fn spec(with_mmproj: bool) -> Option<WorkerSpec> {
         mmproj: with_mmproj.then_some(mmproj),
         threads: THREADS,
         gpu: None,
+        litert: None,
     })
 }
 

@@ -1,18 +1,23 @@
-//! LiteRT-LM 嵌入引擎的最小 FFI 与安全封装：只用 CPU 后端计算 EmbeddingGemma 2 的多模态向量。
+//! LiteRT-LM 嵌入引擎的最小 FFI 与安全封装：计算 EmbeddingGemma 2 的多模态向量。
 //!
 //! - 签名以 `third_party/litert-lm/v0.18.0/c/` 中的头文件快照为准（v0.18.0 的函数直接返回指针或值，
 //!   与 main 分支的“状态码 + 输出参数”不同，不能对照），只声明用到的函数，手写而不用 bindgen。
 //! - 运行库（Windows 为 `litert-lm.dll`，Android 为 `liblitert-lm.so`）用 `libloading` 在运行时加载，
 //!   缺文件或缺符号时，错误中写明是哪一个。升级运行库时必须对照新头文件逐项核对本文件。
-//! - 后端只用 CPU：设置中主后端写死为 `"cpu"`，视觉与音频后端传空指针（同主后端），不提供任何加速器选项。
-//!   LiteRT 的 WebGPU 后端曾让外接显卡驱动反复超时重置、只能重启。
-//! - 精度：激活类型显式设为 FLOAT32；最长输入显式设置（引擎默认取模型文件中的 1024）。
+//! - 后端（`Accel`）：文本与视觉同用主后端（CPU、GPU 或 NPU），音频编码器总用 CPU（官方 Android 示例的做法，
+//!   部分 NPU 不支持音频）。GPU 与 NPU 只在 Android 上可用：电脑上 LiteRT 的 WebGPU 后端会让外接显卡驱动
+//!   反复超时重置、只能重启，`Engine::new` 在 Android 以外拒绝非 CPU 后端。
+//!   GPU 由运行库按文件名从自身所在目录加载加速器库（OpenCL 等）；NPU 从 `Accel::Npu` 的目录加载厂商的分发库。
+//! - 缓存目录（`Settings::cache_dir`）：XNNPack 权重缓存与 GPU 程序缓存，加快第二次加载。
+//! - 精度：激活类型显式设为 FLOAT32：模型卡要求不用 float16，而 GPU 的默认是 FP16（骁龙 8 Gen 2 上与 CPU 的余弦中位 0.9965、
+//!   最低 0.983，FP32 时为 0.9996、0.986）；CPU 与 NPU 不受这个设置影响。最长输入显式设置（引擎默认取模型文件中的 1024）。
 //! - 输入：文本为 UTF-8，图像为编码后的文件字节（PNG 等），音频为 WAV 文件字节；`<bos>`、`<eos>` 与图像、音频的
 //!   边界 token 由引擎插入。超过最长输入时报错（溢出策略 ERROR），不截断、不分块平均。
 //! - 输出：未归一化的向量，归一化与数值检查由 `rummage-embed` 统一做。
 //! - 错误信息存在调用线程的线程局部存储中，失败后在同一线程上立即读取。
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::Arc;
@@ -83,6 +88,9 @@ struct Api {
     settings_set_max_input_length: unsafe extern "C" fn(Ptr, c_int),
     settings_set_vision_tokens_per_image: unsafe extern "C" fn(Ptr, c_int),
     settings_set_activation_data_type: unsafe extern "C" fn(Ptr, c_int),
+    settings_set_cache_dir: unsafe extern "C" fn(Ptr, *const c_char),
+    settings_set_dispatch_lib_dir: unsafe extern "C" fn(Ptr, *const c_char),
+    settings_set_vision_dispatch_lib_dir: unsafe extern "C" fn(Ptr, *const c_char),
     options_create: unsafe extern "C" fn() -> Ptr,
     options_delete: unsafe extern "C" fn(Ptr),
     options_set_normalize: unsafe extern "C" fn(Ptr, bool),
@@ -94,7 +102,8 @@ struct Api {
     response_delete: unsafe extern "C" fn(Ptr),
     response_get_size: unsafe extern "C" fn(Ptr) -> usize,
     response_get_values: unsafe extern "C" fn(Ptr) -> *const f32,
-    _lib: Library,
+    /// 不卸载：库在线程局部存储中登记了析构函数（错误信息等），卸载后线程退出时会调用已卸载的代码而崩溃
+    _lib: ManuallyDrop<Library>,
 }
 
 /// 从库中取出函数指针。调用方保证 `T` 与头文件快照中的签名一致。
@@ -145,6 +154,15 @@ impl Api {
                 &lib,
                 &format!("{p}engine_settings_set_activation_data_type"),
             )?,
+            settings_set_cache_dir: sym(&lib, &format!("{p}engine_settings_set_cache_dir"))?,
+            settings_set_dispatch_lib_dir: sym(
+                &lib,
+                &format!("{p}engine_settings_set_litert_dispatch_lib_dir"),
+            )?,
+            settings_set_vision_dispatch_lib_dir: sym(
+                &lib,
+                &format!("{p}engine_settings_set_vision_litert_dispatch_lib_dir"),
+            )?,
             options_create: sym(&lib, &format!("{p}options_create"))?,
             options_delete: sym(&lib, &format!("{p}options_delete"))?,
             options_set_normalize: sym(&lib, &format!("{p}options_set_normalize"))?,
@@ -162,7 +180,7 @@ impl Api {
             response_delete: sym(&lib, &format!("{p}response_delete"))?,
             response_get_size: sym(&lib, &format!("{p}response_get_size"))?,
             response_get_values: sym(&lib, &format!("{p}response_get_values"))?,
-            _lib: lib,
+            _lib: ManuallyDrop::new(lib),
         })
     }
 
@@ -180,10 +198,22 @@ impl Api {
     }
 }
 
+/// 文本与视觉编码器的后端
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Accel<'a> {
+    Cpu,
+    Gpu,
+    /// 厂商的分发库（`libLiteRtDispatch_*.so`）及其依赖所在的目录
+    Npu(&'a Path),
+}
+
 /// 引擎的设置
 pub struct Settings<'a> {
     /// `.litertlm` 模型文件
     pub model: &'a Path,
+    pub accel: Accel<'a>,
+    /// 权重与程序缓存的目录；为空时不缓存
+    pub cache_dir: Option<&'a Path>,
     pub threads: u32,
     /// 音频编码器的线程数
     pub audio_threads: u32,
@@ -203,22 +233,40 @@ pub struct Engine {
 unsafe impl Send for Engine {}
 
 impl Engine {
-    /// 从运行库目录 `dir` 加载 LiteRT-LM，按 `settings` 用 CPU 后端创建引擎（加载模型）
+    /// 从运行库目录 `dir` 加载 LiteRT-LM，按 `settings` 创建引擎（加载模型）
     pub fn new(dir: &Path, settings: &Settings) -> Result<Self, Error> {
+        if cfg!(not(target_os = "android")) && settings.accel != Accel::Cpu {
+            return Err(Error::CreateEngine("电脑上只能使用 CPU 后端。".to_string()));
+        }
         let api = Arc::new(Api::load(dir)?);
-        let model = settings
-            .model
-            .to_str()
-            .and_then(|s| CString::new(s).ok())
-            .ok_or_else(|| Error::InvalidPath(settings.model.to_path_buf()))?;
-        let cpu = c"cpu";
+        let c_path = |p: &Path| {
+            p.to_str()
+                .and_then(|s| CString::new(s).ok())
+                .ok_or_else(|| Error::InvalidPath(p.to_path_buf()))
+        };
+        let model = c_path(settings.model)?;
+        let cache = settings.cache_dir.map(c_path).transpose()?;
+        let dispatch = match settings.accel {
+            Accel::Npu(d) => Some(c_path(d)?),
+            _ => None,
+        };
+        let backend = match settings.accel {
+            Accel::Cpu => c"cpu",
+            Accel::Gpu => c"gpu",
+            Accel::Npu(_) => c"npu",
+        };
         let int = |v: u32| c_int::try_from(v).unwrap_or(c_int::MAX);
-        // SAFETY: 参数都是有效的 NUL 结尾字符串或空指针（视觉、音频后端同主后端）；返回的设置在本函数内释放。
+        // SAFETY: 参数都是有效的 NUL 结尾字符串或空指针（视觉后端同主后端）；返回的设置在本函数内释放。
         // 设置函数只读写设置对象，引擎创建时复制所需内容。
         unsafe {
             (api.set_min_log_level)(LOG_WARNING);
             (api.clear_last_error)();
-            let s = (api.settings_create)(model.as_ptr(), cpu.as_ptr(), ptr::null(), ptr::null());
+            let s = (api.settings_create)(
+                model.as_ptr(),
+                backend.as_ptr(),
+                ptr::null(),
+                c"cpu".as_ptr(),
+            );
             if s.is_null() {
                 return Err(Error::CreateEngine(api.last_error()));
             }
@@ -227,6 +275,13 @@ impl Engine {
             (api.settings_set_max_input_length)(s, int(settings.max_input));
             (api.settings_set_vision_tokens_per_image)(s, int(settings.vision_tokens));
             (api.settings_set_activation_data_type)(s, ACTIVATION_FLOAT32);
+            if let Some(c) = &cache {
+                (api.settings_set_cache_dir)(s, c.as_ptr());
+            }
+            if let Some(d) = &dispatch {
+                (api.settings_set_dispatch_lib_dir)(s, d.as_ptr());
+                (api.settings_set_vision_dispatch_lib_dir)(s, d.as_ptr());
+            }
             let ptr = (api.engine_create)(s);
             (api.settings_delete)(s);
             if ptr.is_null() {

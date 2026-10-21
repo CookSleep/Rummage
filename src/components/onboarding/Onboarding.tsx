@@ -14,6 +14,7 @@ import BackgroundRunRow from '../settings/BackgroundRunRow'
 import EstimateStep from './EstimateStep'
 import FoldersStep from './FoldersStep'
 import KindsStep from './KindsStep'
+import { anyModelReady, requiredModel, rowFile } from './ModelDownload'
 import ModelStep from './ModelStep'
 import SelftestStep from './SelftestStep'
 import { BUTTON, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
@@ -32,6 +33,7 @@ interface Props {
  * 首次使用引导：选文件夹 → 选类型 → 下载模型 → 检测设备 → 预估后开始建索引。
  * 每一步的必需项完成后才能进入下一步：至少一个文件夹、至少一种类型、所需的模型都可用且通过完整校验（开着“图片”“音频”或“视频”时还要 mmproj）、
  * 检测完成，或选择只用 CPU（结果过期时可以直接继续，建立索引时后台服务会自动重新检测）。
+ * Android 上所需的模型只有一个（`requiredModel`）；只下了 NPU 模型而 NPU 检测未通过时，检测一步请用户回到上一步下载通用模型。
  * 进行到的步骤记在后台服务中（随数据目录迁移），重启后（包括更改数据目录后的重启）从这一步继续；
  * 之前某一步的必需项已不满足（如模型被删除）时退回到那一步。
  * 各步都要用后台服务：不可用时内容区只显示它的状态（步骤条保留），不能前进；重新连上后重新读取。
@@ -120,11 +122,26 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
 
   const st = status.selftest
   const mmprojOn = Boolean(kinds && needsMmproj(kinds))
+  const required = requiredModel(status)
+  const reqFile = rowFile(status, required)
+  const verifyPending = status.task?.kind === 'verify' && (status.task.state === 'running' || status.task.state === 'done')
+  // Android：只要一个模型
+  const androidModel = !reqFile.ready
+    ? '请先下载或导入模型'
+    : reqFile.verified === false
+      ? `${required.label}校验未通过，请重新下载或导入`
+      : reqFile.verified !== true
+        ? verifyPending
+          ? '请等待校验完成'
+          : '模型尚未通过校验，请重新校验'
+        : ''
   /** 第 `i` 步还缺的必需项；没有时为空串 */
   const blockerAt = (i: number) => [
     rootCount === 0 ? '请先添加至少一个文件夹' : '',
     kinds && !kinds.documents && !mmprojOn ? '请至少选择一种文件类型' : '',
-    !status.model.ready
+    isAndroid
+      ? androidModel
+      : !status.model.ready
       ? '请先下载或导入模型'
       : status.model.verified === false
         ? '文字模型校验未通过，请重新下载或导入'
@@ -133,17 +150,23 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
           : mmprojOn && status.mmproj.verified === false
             ? '图片与音视频模型校验未通过，请重新下载或导入'
             : status.model.verified !== true || (mmprojOn && status.mmproj.verified !== true)
-              ? status.task?.kind === 'verify' && (status.task.state === 'running' || status.task.state === 'done')
+              ? verifyPending
                 ? '请等待校验完成'
                 : '模型尚未通过校验，请重新校验'
               : '',
     st.running
       ? '请等待检测完成'
       : st.preferred === 'cpu'
-        ? ''
+        ? isAndroid && !status.model.ready
+          ? 'CPU 要用通用模型，请返回上一步下载'
+          : ''
         : !st.devices.length
           ? '请开始检测，或选择只用 CPU'
-          : '',
+          : isAndroid && !st.devices.some((d) => d.status === 'passed')
+            ? status.model.ready
+              ? '没有通过检测的设备，请重新检测'
+              : 'NPU 检测未通过，请返回上一步下载通用模型'
+            : '',
     '',
   ][i]
 
@@ -200,7 +223,7 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
             <KindsStep kinds={kinds} mmprojBytes={status.mmproj.bytes} mmprojReady={status.mmproj.ready} onChange={setKind} preset={preset} onPreset={choosePreset} />
           )}
           {running && step === 2 && kinds && <ModelStep status={status} mmproj={mmprojOn} onProxy={(proxy) => onStatus((s) => ({ ...s, proxy }))} />}
-          {running && step === 3 && <SelftestStep selftest={st} model={status.model.ready} />}
+          {running && step === 3 && <SelftestStep selftest={st} model={isAndroid ? anyModelReady(status) : status.model.ready} />}
           {running && step === 4 && kinds && <EstimateStep kinds={kinds} preset={preset} selftest={st} minFreeGb={minFreeGb} />}
           {running && step === 4 && isAndroid && (
             <div className="mt-5">

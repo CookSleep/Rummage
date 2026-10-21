@@ -20,6 +20,8 @@ blake3 = { version = "=1.8.7", default-features = false, features = ["std"] }
 # 命令行的 --since / --until 按本地时区换算、结果中的修改日期（src/cli.rs），MIT OR Apache-2.0；版本同锁文件中已有的
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 flexi_logger = { version = "=0.31.10", default-features = false }
+# 从 QNN 包中解压按需下载的 NPU 运行库（src/models.rs），MIT OR Apache-2.0；版本同锁文件中已有的，纯 Rust 实现
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 getrandom = "=0.4.3"
 log = "=0.4.34"
 # 实时监听文件夹的变化，去抖自己做（server/watch.rs），不用 notify-debouncer-full；CC0-1.0。

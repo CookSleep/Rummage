@@ -210,13 +210,18 @@ pub struct SelftestStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelFileStatus {
+    /// 主文件名；与它一起下载的文件（分词器、QNN 运行库）不单独列出
     pub name: String,
+    /// 全部文件的大小
     pub bytes: u64,
+    /// 全部文件都可用
     pub ready: bool,
     /// 已下载了一部分的 `.part` 文件的大小，没有时为 0
     pub partial_bytes: u64,
     /// 上次完整校验（下载、导入或校验）的结果；没有记录、记录与文件现在的大小或修改时间不符，或文件不可用时为空
     pub verified: Option<bool>,
+    /// 钉定版本的主文件页面，用户自行下载时打开
+    pub url: String,
 }
 
 /// 引导需要的全部状态
@@ -229,14 +234,18 @@ pub struct SetupStatus {
     pub step: u32,
     /// 主模型
     pub model: ModelFileStatus,
-    /// 多模态模型（mmproj）
+    /// 多模态模型（mmproj）；Android 上与 `model` 相同（LiteRT 通用版含全部模态）
     pub mmproj: ModelFileStatus,
+    /// Android：本机芯片的 NPU 模型；芯片没有 NPU 版或不是 Android 时为空
+    pub npu: Option<ModelFileStatus>,
+    /// Android：NPU 模型对应的芯片，如“高通 SM8550”
+    pub npu_chip: Option<String>,
+    /// Android：分词器 `tokenizer.json` 的下载页（与模型不在同一个仓库），手动导入时也要它；电脑上为空
+    pub tokenizer_url: Option<String>,
     /// 最近一次模型任务；本次运行没有任务时为空
     pub task: Option<ModelTask>,
     pub selftest: SelftestStatus,
     pub proxy: ProxySetting,
-    /// 钉定版本的模型文件页面的前缀（`rummage_embed::space` 的 `REPO` 与 `COMMIT`），后接文件名即该文件的下载页，用户自行下载模型时打开
-    pub model_url: String,
 }
 
 /// 某类文件的数量与总大小
@@ -293,6 +302,7 @@ mod tests {
                 ready: true,
                 partial_bytes: 0,
                 verified: Some(true),
+                url: "https://huggingface.co/a/blob/b/a.gguf".into(),
             },
             mmproj: ModelFileStatus {
                 name: "b.gguf".into(),
@@ -300,7 +310,18 @@ mod tests {
                 ready: false,
                 partial_bytes: 2,
                 verified: None,
+                url: "https://huggingface.co/a/blob/b/b.gguf".into(),
             },
+            npu: Some(ModelFileStatus {
+                name: "c.litertlm".into(),
+                bytes: 5,
+                ready: false,
+                partial_bytes: 0,
+                verified: None,
+                url: "https://huggingface.co/c/blob/d/c.litertlm".into(),
+            }),
+            npu_chip: Some("高通 SM8550".into()),
+            tokenizer_url: Some("https://huggingface.co/e/blob/f/tokenizer.json".into()),
             task: Some(ModelTask {
                 kind: ModelTaskKind::Download,
                 state: ModelTaskState::Running,
@@ -357,7 +378,6 @@ mod tests {
                 mode: ProxyMode::Custom,
                 url: "http://127.0.0.1:7890".into(),
             },
-            model_url: "https://huggingface.co/a/blob/b".into(),
         });
         round_trip(Estimate {
             scanning: true,

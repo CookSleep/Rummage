@@ -74,14 +74,21 @@ impl Drop for ImageSource {
     }
 }
 
+/// `AImageDecoder_resultToString` 要 API 31，最低支持的 API 30 上没有，这里自己给出名称
 fn image_result(code: i32) -> String {
-    // SAFETY: 参数是任意整数都可以；返回静态字符串或空指针。
-    let p = unsafe { sys::AImageDecoder_resultToString(code) };
-    if p.is_null() {
-        return format!("错误码 {code}");
-    }
-    // SAFETY: 非空时是以 NUL 结尾的静态字符串。
-    unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+    let name = match code {
+        sys::ANDROID_IMAGE_DECODER_INCOMPLETE => "INCOMPLETE",
+        sys::ANDROID_IMAGE_DECODER_ERROR => "ERROR",
+        sys::ANDROID_IMAGE_DECODER_INVALID_CONVERSION => "INVALID_CONVERSION",
+        sys::ANDROID_IMAGE_DECODER_INVALID_SCALE => "INVALID_SCALE",
+        sys::ANDROID_IMAGE_DECODER_BAD_PARAMETER => "BAD_PARAMETER",
+        sys::ANDROID_IMAGE_DECODER_INVALID_INPUT => "INVALID_INPUT",
+        sys::ANDROID_IMAGE_DECODER_SEEK_ERROR => "SEEK_ERROR",
+        sys::ANDROID_IMAGE_DECODER_INTERNAL_ERROR => "INTERNAL_ERROR",
+        sys::ANDROID_IMAGE_DECODER_UNSUPPORTED_FORMAT => "UNSUPPORTED_FORMAT",
+        _ => return format!("错误码 {code}"),
+    };
+    format!("{name}（错误码 {code}）")
 }
 
 fn check_image(code: i32) -> Result<(), String> {

@@ -18,13 +18,8 @@
 # .cache/third-party/llama.cpp/<标签>/win-vulkan-x64/。其中的 llama.dll、mtmd.dll、ggml*.dll 与 CPU 包逐字节相同，只多出 ggml-vulkan.dll；
 # Vulkan 加载器由显卡驱动提供，包内不带。
 #
-# -Variant android：取 llama-<标签>-bin-android-arm64.tar.gz，只取出 libggml-base.so、libggml.so、libllama.so、
-# libmtmd.so 与全部 CPU 后端 libggml-cpu-android_*.so（ggml 运行时按 CPU 特性选一个加载），不取 rpc、common 与工具；
-# 用 NDK 的 llvm-strip --strip-unneeded 去符号后放到 .cache/third-party/llama.cpp/<标签>/android-arm64/arm64-v8a/，
-# 由 Gradle 打进 APK 的 lib/arm64-v8a/。需要环境变量 NDK_HOME。去符号后的文件不校验哈希，以压缩包的 SHA-256 为准。
-# 这一项也在发布工作流的 Linux 上用 PowerShell 7 运行：路径用 / 分隔，NDK 的 llvm-strip 与 tar 按平台选择。
 
-param([ValidateSet('cpu', 'vulkan', 'android')][string]$Variant = 'cpu')
+param([ValidateSet('cpu', 'vulkan')][string]$Variant = 'cpu')
 
 . (Join-Path $PSScriptRoot 'common.ps1')
 
@@ -69,55 +64,6 @@ $Headers = @(
 )
 
 $baseDir = Join-Path $RepoRoot ".cache/third-party/llama.cpp/$Tag"
-
-if ($Variant -eq 'android') {
-  $Tgz = "llama-$Tag-bin-android-arm64.tar.gz"
-  $TgzSize = 74273214
-  # GitHub Release 接口给出的 digest，与本机下载后的计算结果一致。
-  $TgzSha256 = '1f5f6ce695e205fe1207093b85202821e49811c19ca50bc7c34cc4038bbdb294'
-  $SoFiles = @(
-    'libggml-base.so', 'libggml.so', 'libllama.so', 'libmtmd.so',
-    'libggml-cpu-android_armv8.0_1.so', 'libggml-cpu-android_armv8.2_1.so', 'libggml-cpu-android_armv8.2_2.so',
-    'libggml-cpu-android_armv8.6_1.so', 'libggml-cpu-android_armv9.0_1.so', 'libggml-cpu-android_armv9.2_1.so',
-    'libggml-cpu-android_armv9.2_2.so'
-  )
-  $outDir = Join-Path $baseDir 'android-arm64/arm64-v8a'
-  $need = @($SoFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $outDir $_) -PathType Leaf) })
-  if ($need.Count -eq 0) {
-    Write-Host "llama.cpp $Tag（Android arm64）已就绪：$outDir"
-    return
-  }
-  if (-not $env:NDK_HOME) { throw '请先设置环境变量 NDK_HOME（Android NDK 的目录）。' }
-  # Windows PowerShell 5.1 没有 $IsWindows
-  $onWindows = $env:OS -eq 'Windows_NT'
-  $prebuilt = if ($onWindows) { 'windows-x86_64/bin/llvm-strip.exe' } else { 'linux-x86_64/bin/llvm-strip' }
-  $strip = Join-Path $env:NDK_HOME "toolchains/llvm/prebuilt/$prebuilt"
-  if (-not (Test-Path -LiteralPath $strip -PathType Leaf)) { throw "找不到 $strip。" }
-  $tgzPath = Join-Path $baseDir $Tgz
-  if (-not (Test-FileHash $tgzPath $TgzSha256 $TgzSize)) {
-    Write-Host ("下载 {0}（{1}）……" -f $Tgz, (Format-Bytes $TgzSize))
-    Invoke-VerifiedDownload "https://github.com/ggml-org/llama.cpp/releases/download/$Tag/$Tgz" $tgzPath $TgzSize $TgzSha256
-  }
-  # 用系统自带的 tar 解压到临时目录，只取需要的文件；Windows 上指定 System32 中的 bsdtar，PATH 中可能先有 Git 带的 GNU tar，它把 D: 当成远程主机
-  $tar = if ($onWindows) { Join-Path $env:SystemRoot 'System32/tar.exe' } else { 'tar' }
-  $tmpDir = Join-Path $baseDir 'android-arm64/.extract'
-  if (Test-Path -LiteralPath $tmpDir) { Remove-Item -LiteralPath $tmpDir -Recurse -Force }
-  New-Item -ItemType Directory -Force -Path $tmpDir, $outDir | Out-Null
-  try {
-    & $tar -xzf $tgzPath -C $tmpDir @($need | ForEach-Object { "llama-$Tag/$_" })
-    if ($LASTEXITCODE -ne 0) { throw "解压 $Tgz 失败（退出码 $LASTEXITCODE）。" }
-    foreach ($name in $need) {
-      $dest = Join-Path $outDir $name
-      & $strip --strip-unneeded -o "$dest.part" (Join-Path $tmpDir "llama-$Tag/$name")
-      if ($LASTEXITCODE -ne 0) { throw "去除 $name 的符号失败（退出码 $LASTEXITCODE）。" }
-      Move-Item -LiteralPath "$dest.part" -Destination $dest -Force
-    }
-  } finally {
-    Remove-Item -LiteralPath $tmpDir -Recurse -Force
-  }
-  Write-Host "已从 $Tgz 取出并去符号 $($need.Count) 个文件：$outDir"
-  return
-}
 
 if ($Variant -ne 'cpu') {
   # 压缩包大小与 SHA-256 取自 GitHub Release 接口的 digest；文件哈希为本机解压后的计算结果。

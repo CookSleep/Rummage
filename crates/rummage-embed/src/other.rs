@@ -92,6 +92,14 @@ pub fn cpu_name() -> Option<String> {
     None
 }
 
+/// NPU 只在 Android 上用
+pub fn preload_npu(_dir: &Path) {}
+
+/// 芯片型号（Android 的 `ro.soc.model`），选 NPU 模型用；电脑上为空
+pub fn soc_model() -> String {
+    String::new()
+}
+
 pub fn driver_version(_description: &str) -> Option<String> {
     None
 }

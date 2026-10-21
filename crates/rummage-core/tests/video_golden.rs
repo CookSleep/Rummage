@@ -58,6 +58,7 @@ fn ffmpeg_frames_near_golden_vectors() {
                 description: gpu.description.clone(),
                 pci_id: gpu.pci_id.clone(),
             }),
+            litert: None,
         },
         limits,
     )

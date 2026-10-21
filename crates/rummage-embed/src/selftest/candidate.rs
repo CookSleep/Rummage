@@ -28,13 +28,13 @@ pub(super) fn test_in_order(
 ) {
     let mut stopped = false;
     for (i, r) in reports.iter_mut().enumerate() {
-        if stopped && r.backend == Backend::Vulkan && !reused.get(i).is_some_and(|x| *x) {
+        if stopped && r.backend.accel() && !reused.get(i).is_some_and(|x| *x) {
             r.status = Status::Skipped;
             r.reason = Some(SKIPPED_REASON.to_string());
             continue;
         }
         test_one(i, r);
-        stopped |= r.backend == Backend::Vulkan && r.driver_error;
+        stopped |= r.backend.accel() && r.driver_error;
     }
 }
 
@@ -191,7 +191,7 @@ fn measure(
         r.description = d.description;
     }
 
-    let gpu = r.backend == Backend::Vulkan;
+    let gpu = r.backend.accel();
     let mut low = Vec::new();
     let mut times = Vec::new();
     for s in &golden.samples {

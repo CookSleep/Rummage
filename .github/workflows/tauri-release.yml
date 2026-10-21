@@ -165,13 +165,13 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: .cache/third-party/llama.cpp
-          key: third-party-android-${{ hashFiles('scripts/fetch-llama.ps1', 'scripts/common.ps1') }}
+          path: .cache/third-party
+          key: third-party-android-${{ hashFiles('scripts/fetch-litert.ps1', 'scripts/common.ps1') }}
 
-      # llama.cpp 的 android-arm64 预编译包，校验 SHA-256 后去符号，Gradle 打进 APK
-      - name: Fetch llama.cpp
+      # LiteRT-LM 运行库、GPU 加速器与 NPU 分发库，校验 SHA-256 后由 Gradle 打进 APK
+      - name: Fetch LiteRT-LM
         shell: pwsh
-        run: ./scripts/fetch-llama.ps1 -Variant android
+        run: ./scripts/fetch-litert.ps1 -Platform android_arm64
 
       - run: npm ci
 

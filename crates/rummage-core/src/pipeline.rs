@@ -564,8 +564,9 @@ impl Pipeline {
             calib_cv: Condvar::new(),
         });
         let requeued = {
+            let backend = shared.model_backend();
             let db = lock(&shared.db);
-            shared.requeue_stale(&db)
+            shared.requeue_stale(&db, backend)
         };
         match requeued {
             Ok(n) if n.is_empty() => {}

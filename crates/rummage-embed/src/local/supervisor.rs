@@ -137,8 +137,13 @@ impl Supervisor {
                 "连续 {MAX_FAILURES} 次显存或内存分配失败"
             )));
         } else if gpu {
+            let what = if cfg!(target_os = "android") {
+                "GPU 或 NPU "
+            } else {
+                "显卡"
+            };
             self.dead = Some(Dead::Unavailable(format!(
-                "显卡后端失效，本次运行不再使用它（{err}）"
+                "{what}后端失效，本次运行不再使用它（{err}）"
             )));
             // 数值异常是确定的结果，原样返回：自检据此记为“未通过”，不当作驱动错误
             if matches!(err, Error::BadVector(_)) {
@@ -179,7 +184,8 @@ impl Supervisor {
         }
         let args = self.spec.args(mmproj);
         let proc = Proc::spawn(&self.spec.exe, args, self.limits.mem_bytes)?;
-        self.with_mmproj = mmproj && self.spec.mmproj.is_some();
+        // LiteRT 不分 mmproj，进程启动后就能处理图像与音频
+        self.with_mmproj = (mmproj || self.spec.litert.is_some()) && self.spec.mmproj.is_some();
         let pid = proc.child.id();
         lock(&self.status).job = Some(proc.job.clone());
         let first = proc.recv(self.limits.init_timeout);
@@ -370,6 +376,7 @@ impl Supervisor {
                 let req = ToWorker::Image {
                     width: rgb.width,
                     height: rgb.height,
+                    tokens,
                 };
                 // 档位决定向量，向量属于该档位的图像空间；长图切片的档位可以与整图不同。
                 (req, rgb.data, cfg.image(tokens))
@@ -381,6 +388,7 @@ impl Supervisor {
                     let req = ToWorker::Image {
                         width: rgb.width,
                         height: rgb.height,
+                        tokens,
                     };
                     (req, rgb.data, space)
                 } else {
@@ -389,7 +397,7 @@ impl Supervisor {
                         VideoPart::Text(prefix::query(&text)),
                         VideoPart::Frame(Arc::new(rgb)),
                     ];
-                    let (req, payload) = video_request(&parts, usize::MAX)?;
+                    let (req, payload) = video_request(&parts, usize::MAX, tokens)?;
                     (req, payload, space)
                 }
             }
@@ -421,7 +429,7 @@ impl Supervisor {
                 if self.spec.mmproj.is_none() {
                     return Err(Error::NoMmproj);
                 }
-                let (req, payload) = video_request(&parts, max_tokens)?;
+                let (req, payload) = video_request(&parts, max_tokens, 0)?;
                 (req, payload, cfg.media(&preprocess))
             }
             text => {

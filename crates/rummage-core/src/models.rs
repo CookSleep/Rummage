@@ -1,6 +1,10 @@
 //! 模型文件的下载、导入与校验。
 //! - 下载源：Hugging Face（默认）、镜像 hf-mirror.com 或用户填写的兼容地址；地址钉定仓库提交
-//!   （`resolve/<提交>/<文件名>`），仓库、提交与已知哈希表都在 `rummage_embed::space`。
+//!   （`resolve/<提交>/<文件名>`），仓库、提交与已知哈希表都在 `rummage_embed::space` 与 `npu`。每个文件带自己的仓库与提交
+//!   （`Pinned`）：Android 的 LiteRT 模型与分词器在两个仓库中。
+//! - 高通 NPU 的 QNN 运行库（`rummage_embed::npu`）从 Maven Central 的 AAR 中取：不下载整个包，按记下的位置用 HTTP Range
+//!   先取条目的本地文件头（得到文件名与扩展字段的长度），再取压缩数据，解压（deflate）到 `.part`，核对大小与 SHA-256 后改名。
+//!   不走 Hugging Face 的下载源，同样跟随代理设置；文件小（每个不超过约 5 MB），不续传。
 //! - 下载前请求 `/api/models/<仓库>/tree/<提交>` 取文件大小与 `lfs.oid`（即 SHA-256），与已知表核对，不一致时拒绝
 //!   （镜像可能不同步或内容被替换，向量空间也按已知哈希计算）；接口不可用（返回错误状态或内容无法解析）时直接用已知表。
 //!   连不上下载源时直接报错，不再请求文件。
@@ -26,6 +30,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::header::{CONTENT_RANGE, RANGE};
 use reqwest::{Client, StatusCode, Url};
+use rummage_embed::npu::{self, QnnEntry};
 use rummage_embed::space::{self, ModelFile};
 use rummage_proto::{ModelSource, ModelTaskPhase};
 use sha2::{Digest, Sha256};
@@ -51,6 +56,49 @@ pub enum Error {
     /// 给用户看的中文整句
     #[error("{0}")]
     Failed(String),
+}
+
+/// 钉定在某个仓库提交上的模型文件
+#[derive(Debug, Clone, Copy)]
+pub struct Pinned {
+    pub file: &'static ModelFile,
+    pub repo: &'static str,
+    pub commit: &'static str,
+}
+
+impl Pinned {
+    /// 电脑的 GGUF 模型（`space::REPO`）
+    pub const fn gguf(file: &'static ModelFile) -> Self {
+        Pinned {
+            file,
+            repo: space::REPO,
+            commit: space::COMMIT,
+        }
+    }
+
+    /// LiteRT 的通用版与 NPU 版模型（`space::LITERT_REPO`）
+    pub const fn litert(file: &'static ModelFile) -> Self {
+        Pinned {
+            file,
+            repo: space::LITERT_REPO,
+            commit: space::LITERT_COMMIT,
+        }
+    }
+
+    /// LiteRT 数切片长度用的分词器（`space::TOKENIZER_REPO`）
+    pub const TOKENIZER: Pinned = Pinned {
+        file: &space::TOKENIZER,
+        repo: space::TOKENIZER_REPO,
+        commit: space::TOKENIZER_COMMIT,
+    };
+
+    /// 钉定版本的文件页面
+    pub fn page(&self, base: &str) -> String {
+        format!(
+            "{base}/{}/blob/{}/{}",
+            self.repo, self.commit, self.file.name
+        )
+    }
 }
 
 /// 当前文件的进度
@@ -230,27 +278,37 @@ async fn cancelled(cancel: &AtomicBool) {
     }
 }
 
-/// 下载 `files` 到 `dir`（`<数据目录>\models\<子目录>`），已正确的文件跳过。`base` 为 `base_url` 的结果
+/// 下载 `files` 到 `dir`（`<数据目录>\models\<子目录>`），再从 QNN 包中取出 `qnn` 到 `qnn_dir`（见模块说明），
+/// 已正确的文件跳过。`base` 为 `base_url` 的结果
+#[allow(clippy::too_many_arguments)]
 pub fn download(
     base: &str,
-    files: &[&'static ModelFile],
+    files: &[Pinned],
     dir: &Path,
+    qnn: &[&'static QnnEntry],
+    qnn_dir: &Path,
     route: &Route,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(&Progress),
 ) -> Result<(), Error> {
-    let mut rep = Reporter::new(progress, files.len());
+    let mut rep = Reporter::new(progress, files.len() + qnn.len());
     let mut todo = Vec::new();
     for (i, f) in files.iter().enumerate() {
-        rep.start(ModelTaskPhase::Checking, f, i, 0);
-        if !valid(&dir.join(f.name), f, cancel, &mut rep)? {
+        rep.start(ModelTaskPhase::Checking, f.file, i, 0);
+        if !valid(&dir.join(f.file.name), f.file, cancel, &mut rep)? {
             todo.push((i, *f));
         }
     }
-    let Some(&(first, first_file)) = todo.first() else {
+    let mut qnn_todo = Vec::new();
+    for (i, e) in qnn.iter().enumerate() {
+        rep.start(ModelTaskPhase::Checking, &e.file, files.len() + i, 0);
+        if !valid(&qnn_dir.join(e.file.name), &e.file, cancel, &mut rep)? {
+            qnn_todo.push((files.len() + i, *e));
+        }
+    }
+    if todo.is_empty() && qnn_todo.is_empty() {
         return Ok(());
-    };
-    fs::create_dir_all(dir).map_err(write_error)?;
+    }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -270,26 +328,125 @@ pub fn download(
                 log::error!("无法创建下载用的网络客户端：{err}");
                 Error::Failed("无法创建网络连接，请检查代理设置后重试。".into())
             })?;
-        rep.start(ModelTaskPhase::Preparing, first_file, first, 0);
-        let info = remote_info(&client, route, base, cancel).await?;
+        if !todo.is_empty() {
+            fs::create_dir_all(dir).map_err(write_error)?;
+        }
+        // 每个仓库只读一次文件列表
+        let mut lists: Vec<(&str, Option<Vec<Remote>>)> = Vec::new();
         for (i, f) in todo {
-            if let Some(list) = &info {
-                check_remote(list, f)?;
+            let known = lists.iter().position(|(repo, _)| *repo == f.repo);
+            let list = match known {
+                Some(k) => &lists[k].1,
+                None => {
+                    rep.start(ModelTaskPhase::Preparing, f.file, i, 0);
+                    let info = remote_info(&client, route, base, &f, cancel).await?;
+                    lists.push((f.repo, info));
+                    &lists[lists.len() - 1].1
+                }
+            };
+            if let Some(list) = list {
+                check_remote(list, f.file)?;
             }
-            let url = format!(
-                "{base}/{}/resolve/{}/{}",
-                space::REPO,
-                space::COMMIT,
-                f.name
-            );
+            let url = format!("{base}/{}/resolve/{}/{}", f.repo, f.commit, f.file.name);
             let url = Url::parse(&url)
                 .map_err(|_| Error::Failed("下载源地址格式不正确，请检查后重试。".into()))?;
-            let part = dir.join(format!("{}.part", f.name));
-            fetch(&client, route, &url, f, &part, i, cancel, &mut rep).await?;
-            fs::rename(&part, dir.join(f.name)).map_err(rename_error)?;
+            let part = dir.join(format!("{}.part", f.file.name));
+            fetch(&client, route, &url, f.file, &part, i, cancel, &mut rep).await?;
+            fs::rename(&part, dir.join(f.file.name)).map_err(rename_error)?;
+        }
+        if !qnn_todo.is_empty() {
+            fs::create_dir_all(qnn_dir).map_err(write_error)?;
+        }
+        for (i, e) in qnn_todo {
+            let part = qnn_dir.join(format!("{}.part", e.file.name));
+            fetch_qnn(&client, route, e, &part, i, cancel, &mut rep).await?;
+            fs::rename(&part, qnn_dir.join(e.file.name)).map_err(rename_error)?;
         }
         Ok(())
     })
+}
+
+/// 用 HTTP Range 取 `[start, start + len)`；须回 206 且起点相符
+async fn range(
+    client: &Client,
+    url: &Url,
+    proxied: bool,
+    start: u64,
+    len: u64,
+    cancel: &AtomicBool,
+) -> Result<Vec<u8>, Error> {
+    let req = client
+        .get(url.clone())
+        .header(RANGE, format!("bytes={start}-{}", start + len - 1));
+    let resp = tokio::select! {
+        r = req.send() => r.map_err(|err| net_error(&err, proxied))?,
+        () = cancelled(cancel) => return Err(Error::Cancelled),
+    };
+    let status = resp.status();
+    if !status.is_success() {
+        log::warn!("下载 NPU 运行库时 Maven Central 返回 {status}");
+        return Err(status_error(status));
+    }
+    if status != StatusCode::PARTIAL_CONTENT || range_start(&resp) != Some(start) {
+        log::warn!("下载 NPU 运行库时 Maven Central 没有按请求返回部分内容（{status}）。");
+        return Err(Error::Failed(
+            "下载 NPU 运行库时服务器返回的数据不对，请稍后重试。".into(),
+        ));
+    }
+    let body = tokio::select! {
+        b = resp.bytes() => b.map_err(|err| net_error(&err, proxied))?,
+        () = cancelled(cancel) => return Err(Error::Cancelled),
+    };
+    if body.len() as u64 != len {
+        return Err(Error::Failed("下载 NPU 运行库时连接中断，请重试。".into()));
+    }
+    Ok(body.to_vec())
+}
+
+/// 从 QNN 包中取出一个条目，解压到 `part` 并核对（见模块说明）
+async fn fetch_qnn(
+    client: &Client,
+    route: &Route,
+    entry: &'static QnnEntry,
+    part: &Path,
+    index: usize,
+    cancel: &AtomicBool,
+    rep: &mut Reporter<'_>,
+) -> Result<(), Error> {
+    let url = Url::parse(npu::QNN_URL).expect("内置的地址格式正确");
+    let proxied = route.proxies(&url);
+    rep.start(ModelTaskPhase::Downloading, &entry.file, index, 0);
+    // 本地文件头 30 字节：签名、……、文件名长度（26）、扩展字段长度（28）
+    let head = range(client, &url, proxied, entry.offset, 30, cancel).await?;
+    let le16 = |i: usize| u64::from(u16::from_le_bytes([head[i], head[i + 1]]));
+    if head[..4] != *b"PK\x03\x04" {
+        log::warn!("QNN 包中 {} 的位置不是本地文件头。", entry.file.name);
+        return Err(Error::Failed(
+            "下载的 NPU 运行库与预期的不同，请稍后重试。".into(),
+        ));
+    }
+    let data = entry.offset + 30 + le16(26) + le16(28);
+    let packed = range(client, &url, proxied, data, entry.compressed, cancel).await?;
+    rep.advance(entry.file.size / 2);
+    let mut raw = Vec::with_capacity(entry.file.size as usize);
+    flate2::read::DeflateDecoder::new(&packed[..])
+        .take(entry.file.size + 1)
+        .read_to_end(&mut raw)
+        .map_err(|err| {
+            log::warn!("无法解压 QNN 包中的 {}：{err}", entry.file.name);
+            Error::Failed("下载的 NPU 运行库已损坏，请重试。".into())
+        })?;
+    if raw.len() as u64 != entry.file.size || hex(&Sha256::digest(&raw)) != entry.file.sha256 {
+        return Err(Error::Failed(format!(
+            "下载的 \"{}\" 不完整或已损坏，请重试。",
+            entry.file.name
+        )));
+    }
+    let mut out = File::create(part).map_err(write_error)?;
+    out.write_all(&raw).map_err(write_error)?;
+    out.sync_all().map_err(write_error)?;
+    rep.advance(entry.file.size);
+    Ok(())
 }
 
 /// 文件列表接口中的一项：(路径, 大小, SHA-256)
@@ -300,9 +457,10 @@ async fn remote_info(
     client: &Client,
     route: &Route,
     base: &str,
+    pinned: &Pinned,
     cancel: &AtomicBool,
 ) -> Result<Option<Vec<Remote>>, Error> {
-    let url = format!("{base}/api/models/{}/tree/{}", space::REPO, space::COMMIT);
+    let url = format!("{base}/api/models/{}/tree/{}", pinned.repo, pinned.commit);
     let Ok(url) = Url::parse(&url) else {
         return Err(Error::Failed("下载源地址格式不正确，请检查后重试。".into()));
     };

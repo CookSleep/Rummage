@@ -6,6 +6,8 @@
 //! - 图片：整图向量须是当前档位的版本；再按库中记下的宽高判断现在是不是长图：是长图却没有当前版本的切片、
 //!   不是长图却有切片，或有其他版本的向量，都要重建。普通比例的图片只在档位变了时重建，调低判定比例后新成为长图的会补上切片。
 //! - 只比较参数版本，不比较空间 ID：后端不同（CPU / Vulkan）的空间视为兼容，换了设备不重建。
+//!   例外是换了主模型文件（`Wanted::model`，如手机上在 NPU 模型与 LiteRT 通用版之间切换）：向量所在空间的主模型与要用的不同时，
+//!   整个文件重建。
 //! - 没有向量的文件（全是静音的音频、没有正文的文档）无法判断，不重建。
 //! - `requeue_stale` 把这些文件已完成的作业改回 `pending` 并标为重建作业（`jobs` 模块说明），片段与向量原样保留，
 //!   新结果写入时才在同一事务中替换，重建期间旧向量照常可搜。占位文件不放回：领取时跳过它们，放回后会一直停在待处理。
@@ -37,6 +39,8 @@ pub struct Wanted {
     pub video_av: Option<String>,
     /// 文档的内嵌媒体标记应含的各项（JSON 数组）：过滤参数的版本与开启的各模态的参数版本
     pub doc_media: String,
+    /// 要用的主模型的 SHA-256（空间的 `model_sha256`）；为空时不比较
+    pub model: Option<String>,
 }
 
 /// 文档的正文片段有参数版本不是 `:text` 的向量
@@ -69,6 +73,9 @@ impl Db {
             "(f.ext IN ({exts}) AND EXISTS (SELECT 1 FROM json_each(:media) w
               WHERE w.value NOT IN (SELECT value FROM json_each(f.meta_json, '$.media'))))"
         );
+        let model_stale = "(:model IS NOT NULL AND EXISTS (SELECT 1 FROM segments s
+              JOIN vectors v ON v.segment_id = s.id JOIN spaces sp ON sp.id = v.space_id
+              WHERE s.file_id = f.id AND sp.model_sha256 <> :model))";
         for kind in &w.kinds {
             let (cond, mut args): (String, Vec<(&str, &dyn ToSql)>) = match *kind {
                 "image" => (
@@ -102,15 +109,17 @@ impl Db {
                     vec![(":text", &w.text), (":media", &w.doc_media)],
                 ),
             };
-            // 文档只重算过时的部分（`jobs.parts`），其他种类整个重算
+            // 文档只重算过时的部分（`jobs.parts`），其他种类与换了模型的文档整个重算
             let parts = if *kind == "document" {
                 format!(
-                    "(SELECT (CASE WHEN {TEXT_STALE} THEN {PART_TEXT} ELSE 0 END)
-                       | (CASE WHEN {media_stale} THEN {PART_MEDIA} ELSE 0 END) FROM files f WHERE f.id = jobs.file_id)"
+                    "(SELECT CASE WHEN {model_stale} THEN 3 ELSE (CASE WHEN {TEXT_STALE} THEN {PART_TEXT} ELSE 0 END)
+                       | (CASE WHEN {media_stale} THEN {PART_MEDIA} ELSE 0 END) END FROM files f WHERE f.id = jobs.file_id)"
                 )
             } else {
                 "3".to_string()
             };
+            let cond = format!("{cond} OR {model_stale}");
+            args.push((":model", &w.model));
             args.extend([
                 (":kind", kind as &dyn ToSql),
                 (":now", &now),
@@ -141,7 +150,7 @@ impl Db {
                              WHERE stage IN ('pending', 'preprocessing', 'embedding') AND file_id IN (
                                SELECT f.id FROM files f WHERE f.kind = 'document' AND ({cond}))"
                         ),
-                        named_params! { ":text": &w.text, ":media": &w.doc_media },
+                        named_params! { ":text": &w.text, ":media": &w.doc_media, ":model": &w.model },
                     )
                     .map_err(|err| self.err(err))?;
             }
@@ -200,6 +209,7 @@ mod tests {
             video: "video-v1-w2-o0-f2-t70-v".into(),
             video_av: None,
             doc_media: "[]".into(),
+            model: None,
         }
     }
 
@@ -282,6 +292,41 @@ mod tests {
                 .execute("UPDATE jobs SET stage = 'stored'", [])
                 .unwrap();
         }
+    }
+
+    /// 换了主模型文件：向量在别的模型的空间中的文件整个重建，不论参数版本
+    #[test]
+    fn model_change_rebuilds_everything() {
+        let e = Env::new();
+        e.file("普通.png", "image", Some((640, 480)), &["image-v1-t140"]);
+        e.file("说明.md", "document", None, &["text-v1-c384-o15"]);
+        let same = Wanted {
+            model: Some(text_space().model_sha256),
+            ..wanted()
+        };
+        assert!(e.requeue(&same).is_empty());
+        let other = Wanted {
+            model: Some("npu".into()),
+            ..wanted()
+        };
+        assert_eq!(
+            e.requeue(&other),
+            BTreeMap::from([("document".into(), 1), ("image".into(), 1)])
+        );
+        assert_eq!(e.pending(), ["普通.png", "说明.md"]);
+        let parts: i64 = e
+            .fx
+            .db
+            .lock()
+            .unwrap()
+            .conn
+            .query_row(
+                "SELECT j.parts FROM jobs j JOIN files f ON f.id = j.file_id WHERE f.name = '说明.md'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(parts, 3);
     }
 
     /// 只改长图判定比例或分段上限：只有长图要重建，普通图片不动；没有切片的长图补上；不再是长图的删掉切片

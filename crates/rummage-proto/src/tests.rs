@@ -110,14 +110,24 @@ fn request_round_trip() {
         Request::DownloadModels {
             source: ModelSource::Mirror,
             mmproj: true,
+            npu: false,
         },
         Request::ImportModels {
             paths: vec![r"D:\下载.gguf".into()],
         },
         Request::CancelModelTask,
-        Request::VerifyModel { mmproj: false },
-        Request::VerifyModels { mmproj: true },
-        Request::DeleteModel { mmproj: false },
+        Request::VerifyModel {
+            mmproj: false,
+            npu: true,
+        },
+        Request::VerifyModels {
+            mmproj: true,
+            npu: false,
+        },
+        Request::DeleteModel {
+            mmproj: false,
+            npu: true,
+        },
         Request::SetProxy {
             setting: ProxySetting {
                 mode: ProxyMode::Custom,
@@ -130,6 +140,7 @@ fn request_round_trip() {
         },
         Request::UnblockGpu {
             device: "gpu:RTX|0000:01:00.0".into(),
+            failed: false,
         },
         Request::SetRootExcludes {
             id: 2,

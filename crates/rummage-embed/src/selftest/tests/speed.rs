@@ -19,7 +19,7 @@ const OBJECTS: VideoSpeed = VideoSpeed {
 };
 
 fn plan_with(values: &BTreeMap<String, ParamValue>, video: VideoSpeed, images: bool) -> SpeedPlan {
-    let g = golden::load(&golden_dir(), values, video, u64::MAX).unwrap();
+    let g = golden::load(&golden_dir(), values, video, u64::MAX, golden::Refs::Gguf).unwrap();
     plan(&golden_dir(), &g, values, video, images, u64::MAX).unwrap()
 }
 
@@ -48,7 +48,14 @@ fn reuses_golden_timings_when_params_match() {
     // 图片总是按当前档位取黄金样本，各档都复用
     for tier in [70, 280, 1120] {
         values.insert("image_tokens".into(), ParamValue::Int(tier));
-        let g = golden::load(&golden_dir(), &values, OBJECTS, u64::MAX).unwrap();
+        let g = golden::load(
+            &golden_dir(),
+            &values,
+            OBJECTS,
+            u64::MAX,
+            golden::Refs::Gguf,
+        )
+        .unwrap();
         assert!(g.samples.iter().all(|s| match &s.input {
             Input::Image { tokens, .. } => *tokens == tier as u32,
             _ => s.modality != Modality::Image,
