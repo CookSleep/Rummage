@@ -231,6 +231,11 @@ impl<R: Runtime> Android<R> {
         Ok(res.granted)
     }
 
+    /// 打开本应用的系统应用信息页
+    pub async fn open_app_settings(&self) -> Result<(), Error> {
+        self.0.run_mobile_plugin_async("openAppSettings", ()).await
+    }
+
     /// 用其他应用打开文件；没有能打开它的应用时返回否
     pub async fn open_file(&self, path: &Path) -> Result<bool, Error> {
         let res: Opened = self

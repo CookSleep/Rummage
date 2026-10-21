@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { ModelFileStatus, ModelSource, ModelTask, ProxySetting, SelftestStatus, SetupStatus } from '../../types'
 import { formatSize } from '../../lib/format'
 import { isAndroid, openExternal } from '../../lib/platform'
-import { ChevronRightIcon, CpuIcon, DocumentIcon, FileIcon, ImageIcon, NpuIcon } from '../icons'
+import { ChevronRightIcon, CpuIcon, DocumentIcon, FileIcon, ImageIcon, NpuIcon, PauseIcon, PlayIcon } from '../icons'
 import { HoverTip } from '../Tip'
 import ProxyForm, { PROXY_LABEL } from './ProxyForm'
 import { CARD_ROW, CARD_ROW_HOVER, ICON_TILE, INPUT, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SEGMENTS, SMALL_BUTTON, segmentClass } from './styles'
@@ -105,7 +105,7 @@ export function ModelRow({ info, file, running, actions }: { info: ModelInfo; fi
   const state = file.ready
     ? `${formatSize(file.bytes)} · 已下载`
     : !running && file.partialBytes > 0
-      ? `已下载 ${formatSize(file.partialBytes)} / ${formatSize(file.bytes)}`
+      ? `${formatSize(file.bytes)} · 未下载完`
       : `${formatSize(file.bytes)} · 未下载`
   return (
     <div className={CARD_ROW}>
@@ -169,11 +169,11 @@ export function ImportRow({ disabled, picking, onImport, tokenizerUrl, npu }: { 
                     <ExternalLink href={tokenizerUrl} className="ml-1">
                       tokenizer.json
                     </ExternalLink>
-                    ，一起导入。自动识别是哪个文件，校验通过后使用。
-                    {npu && 'NPU 模型还要的运行库不能导入，导入后点下载取得，不经过 Hugging Face。'}
+                    ，一起导入。导入时会自动识别文件，校验通过后即可使用。
+                    {npu && 'NPU 模型所需的运行库不能导入，导入模型后点“下载”获取，这一项不从 Hugging Face 下载。'}
                   </>
                 )
-              : '直接下载不顺利时的备选方式：点击上面的模型名称打开下载页，下载列出的 .gguf 文件后导入。自动识别是哪个模型，校验通过后使用。'}
+              : '直接下载不顺利时的备选方式：点击上面的模型名称打开下载页，下载列出的 .gguf 文件后导入。导入时会自动识别是哪个模型，校验通过后即可使用。'}
         </span>
       </span>
       <span className={ROW_ACTIONS}>
@@ -276,23 +276,49 @@ function taskText(t: ModelTask, label: (file: string) => string) {
 
 /** 进行中的任务：说明、字节数与速度、进度条（删除没有进度，不显示进度条） */
 export function TaskProgress({ task, label = (f) => ` ${f}`, className = '' }: { task: ModelTask; label?: (file: string) => string; className?: string }) {
+  return <ProgressBar text={taskText(task, label)} done={task.done} total={task.total} speed={task.speed} bar={task.kind !== 'delete'} className={className} />
+}
+
+/** 暂停或出错中断的下载（`interrupted`）：已下载的部分，进度条停在那里 */
+export function PausedProgress({ label, file, interrupted, className = '' }: { label: string; file: ModelFileStatus; interrupted: boolean; className?: string }) {
+  return <ProgressBar text={`${interrupted ? '下载中断' : '已暂停'}：${label}`} done={file.partialBytes} total={file.bytes} bar className={className} paused />
+}
+
+function ProgressBar({ text, done, total, speed, bar, paused, className }: { text: string; done: number; total: number; speed?: number | null; bar: boolean; paused?: boolean; className: string }) {
   return (
     <div className={className}>
       <div className="flex items-baseline justify-between gap-x-3 text-xs text-gray-500 dark:text-gray-400 max-sm:flex-wrap max-sm:gap-y-0.5">
-        <span className="truncate max-sm:whitespace-normal">{taskText(task, label)}</span>
-        {task.total > 0 && (
+        <span className="truncate max-sm:whitespace-normal">{text}</span>
+        {total > 0 && (
           <span className="flex-shrink-0">
-            {formatSize(task.done)} / {formatSize(task.total)}
-            {task.speed ? ` · ${formatSize(task.speed)}/s` : ''}
+            {formatSize(done)} / {formatSize(total)}
+            {speed ? ` · ${formatSize(speed)}/s` : ''}
           </span>
         )}
       </div>
-      {task.kind !== 'delete' && (
+      {bar && (
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]">
-          <div className="h-full rounded-full bg-blue-500 transition-all duration-200" style={{ width: `${task.total ? (task.done / task.total) * 100 : 0}%` }} />
+          <div className={`h-full rounded-full transition-all duration-200 ${paused ? 'bg-gray-400 dark:bg-gray-500' : 'bg-blue-500'}`} style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
         </div>
       )}
     </div>
+  )
+}
+
+/** 进度条右侧暂停或继续下载的图标按钮 */
+export function PauseResumeButton({ paused, disabled, onClick }: { paused: boolean; disabled?: boolean; onClick: () => void }) {
+  const label = paused ? '继续下载' : '暂停下载'
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="relative flex flex-shrink-0 rounded-lg p-1.5 text-gray-500 transition hover:bg-black/[0.05] hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
+    >
+      {paused ? <PlayIcon className="h-5 w-5" /> : <PauseIcon className="h-5 w-5" />}
+      <HoverTip label={label} />
+    </button>
   )
 }
 

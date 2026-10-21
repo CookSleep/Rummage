@@ -11,6 +11,8 @@
     <!-- Android 14 上没有 mediaProcessing 类型，改用 dataSync（见 IndexService） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 正在建立索引时不让 CPU 随息屏休眠（IndexService） -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 请用户允许不受电池优化限制 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- 应用内更新：用 PackageInstaller 会话安装下载的 APK（ApkInstaller） -->
@@ -21,11 +23,15 @@
             android:name="com.cooksleep.rummage.storage.IndexService"
             android:exported="false"
             android:foregroundServiceType="mediaProcessing|dataSync" />
-        <!-- GPU、NPU 推理在单独的进程中，出错或超时时可以强行结束（EmbedService） -->
+        <!-- GPU、NPU 推理在单独的进程中，出错或超时时可以强行结束；换设备时新旧推理进程各在一个（EmbedService） -->
         <service
             android:name="com.cooksleep.rummage.storage.EmbedService"
             android:exported="false"
             android:process=":embed" />
+        <service
+            android:name="com.cooksleep.rummage.storage.EmbedService2"
+            android:exported="false"
+            android:process=":embed2" />
         <!--
           LiteRT 的加速器用到的系统与厂商库（Android 12 起要声明才能加载；没有时只是不能用对应的加速器）：
           GPU 为 OpenCL；NPU 为高通的 FastRPC、联发科的 NeuroPilot 与 Google Tensor 的 EdgeTPU，

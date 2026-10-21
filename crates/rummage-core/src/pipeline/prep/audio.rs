@@ -20,7 +20,7 @@ pub(super) fn audio_file(shared: &Shared, task: Task, qh: Vec<u8>, clock: &Clock
         Err(err) => return failed(job, Some(&qh), err),
     };
     let space = media_space_row(&engine.cfg, &audio_version(&task.params));
-    match lock(&shared.db).media_copy_source(&ch, &space.id, job.file_id) {
+    match lock(&shared.db).media_copy_source(&ch, &space, job.file_id) {
         Ok(None) => {}
         Ok(Some(from)) => {
             return Prep::Done(Outcome::Copied {

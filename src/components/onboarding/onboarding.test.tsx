@@ -14,7 +14,7 @@ const ROOT: RootInfo = { id: 1, path: 'D:\\照片', offline: false, missing: fal
 /** 添加按钮连同其下一直显示的提示 */
 const ADD = '添加文件夹只添加需要搜索的文件夹，不建议添加整个磁盘'
 const KINDS = { documents: true, images: true, audio: false, video: false }
-const ESTIMATE: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000 } }, scanning: false }], freeGb: 100 }
+const ESTIMATE: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000, slices: 0 } }, scanning: false }], freeGb: 100 }
 
 /** 第一次调用失败，之后成功 */
 function failOnce(message: string, value: unknown) {

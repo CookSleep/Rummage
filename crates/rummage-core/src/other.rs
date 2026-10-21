@@ -87,3 +87,9 @@ pub(crate) fn sense(_dir: &Path) -> Sensed {
 pub(crate) fn free_gb(_dir: &Path) -> Option<f64> {
     None
 }
+
+/// 无法判断上次退出的原因，按崩溃处理
+#[cfg(not(target_os = "android"))]
+pub(crate) fn crashed(_window: Duration) -> io::Result<bool> {
+    Ok(true)
+}

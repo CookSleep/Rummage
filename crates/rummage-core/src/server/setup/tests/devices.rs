@@ -258,6 +258,7 @@ pub(super) fn start_with_pipeline(dir: &Path) -> Arc<State> {
         available: |path, _| path.is_file(),
         factory: Box::new(|_| unreachable!("没有主模型时不创建推理后端")),
         driver_events: Box::new(|_| unreachable!("没有推理后端，不会失效")),
+        crashed: |_| Ok(true),
         file_timeout: None,
         gpus: fake_gpus,
         litert: None,

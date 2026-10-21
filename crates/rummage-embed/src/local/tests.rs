@@ -105,6 +105,7 @@ fn restart_clears_failures() {
         dead: Some(Dead::Unavailable("显卡后端失效".to_string())),
         status: Arc::new(Mutex::new(Status::default())),
         with_mmproj: true,
+        kills: 0,
     };
     assert!(matches!(
         sup.ensure_started(false),
@@ -244,6 +245,7 @@ fn image_tier_checked() {
         dead: None,
         status: Arc::new(Mutex::new(Status::default())),
         with_mmproj: false,
+        kills: 0,
     };
     let space = SpaceId("x".to_string());
     let cfg = SpaceConfig::current(Backend::Cpu);
@@ -287,6 +289,7 @@ fn count_text() {
         dead: None,
         status: Arc::new(Mutex::new(Status::default())),
         with_mmproj: false,
+        kills: 0,
     };
     // 文本输入去启动（不存在的）推理进程。
     let err = sup.count(&Input::Query("猫".into())).unwrap_err();
@@ -381,6 +384,7 @@ fn gpu_sup_with_tail(tail: &[&str]) -> Supervisor {
         dead: None,
         status,
         with_mmproj: true,
+        kills: 0,
     }
 }
 
@@ -486,6 +490,7 @@ fn query_too_long_has_own_message() {
         dead: None,
         status: Arc::new(Mutex::new(Status::default())),
         with_mmproj: false,
+        kills: 0,
     };
     let space = SpaceId("x".to_string());
     let cfg = SpaceConfig::current(Backend::Cpu);

@@ -243,6 +243,34 @@ impl Db {
         res.map_err(|err| self.err(err))
     }
 
+    /// 每个根目录随机取最多 `limit` 张图片（条件同 `kind_totals`），返回 `(根目录 id, 路径)`，供引导抽样估计长图的切片数
+    pub fn sample_images(&self, limit: u32) -> Result<Vec<(i64, PathBuf)>, DbError> {
+        self.conn
+            .prepare(
+                "SELECT root_id, path, rel_path, ext FROM (
+                   SELECT f.root_id, r.path, f.rel_path, f.ext,
+                     ROW_NUMBER() OVER (PARTITION BY f.root_id ORDER BY RANDOM()) AS n
+                   FROM files f JOIN roots r ON r.id = f.root_id
+                   WHERE f.kind = 'image' AND f.cloud = 0 AND f.status <> 'too_large')
+                 WHERE n <= ?1",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map([limit], |row| {
+                    let root: String = row.get(1)?;
+                    let rel: String = row.get(2)?;
+                    Ok((row.get(0)?, PathBuf::from(root).join(rel), row.get(3)?))
+                })?
+                .collect::<Result<Vec<(i64, PathBuf, String)>, _>>()
+            })
+            .map(|rows| {
+                rows.into_iter()
+                    .filter(|r| wants_job("image", &r.2))
+                    .map(|r| (r.0, r.1))
+                    .collect()
+            })
+            .map_err(|err| self.err(err))
+    }
+
     /// 各根目录中能识别内容的文件（`wants_job`；不含占位文件与超过大小上限的）按种类的数量与总大小，
     /// 不看引导中开启了哪些类型。返回 `(根目录 id, 种类, 文件数, 字节数)`，供引导预估索引时间与空间
     pub fn kind_totals(&self) -> Result<Vec<(i64, String, u64, u64)>, DbError> {

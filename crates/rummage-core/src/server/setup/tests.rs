@@ -83,6 +83,31 @@ fn no_result_after_onboarding_is_stale() {
     assert!(st.devices.is_empty() && st.stale);
 }
 
+/// Android 上只有 NPU 模型时不能选 CPU：CPU 要用通用版
+#[test]
+fn cpu_needs_generic_model() {
+    let dir = crate::test_dir();
+    let state = State::new("t".into(), Db::open(dir.path()));
+    let mut c = cfg(dir.path());
+    c.litert = Some(embed_selftest::LiteRtFiles {
+        runtime_dir: dir.path().join("litert"),
+        tokenizer: dir.path().join("tokenizer.json"),
+        cache_dir: dir.path().join("cache"),
+        npu: None,
+    });
+    state.configure(c);
+    let set = |device: &str| {
+        respond(
+            &state,
+            Request::SetPreferredDevice {
+                device: device.into(),
+            },
+        )
+    };
+    assert!(matches!(set(CPU_DEVICE), Err(e) if e.message.contains("通用模型")));
+    assert_eq!(set(AUTO_DEVICE), Ok(Reply::Done));
+}
+
 #[test]
 fn preferred_device_and_proxy() {
     let dir = crate::test_dir();
@@ -153,6 +178,13 @@ fn estimate_counts_roots() {
     std::fs::write(docs.path().join("a.txt"), b"hello").unwrap();
     std::fs::write(docs.path().join("b.png"), b"png").unwrap();
     std::fs::write(docs.path().join("c.pdf"), b"pdf").unwrap();
+    // 长图：抽样读文件头得到宽高，按当前参数推算切片数
+    let long = rummage_media::png(&rummage_media::Rgb {
+        width: 64,
+        height: 400,
+        data: vec![255; 64 * 400 * 3],
+    });
+    std::fs::write(docs.path().join("d.png"), &long).unwrap();
     let state = open(dir.path());
     let body = Request::AddRoot {
         path: docs.path().to_string_lossy().into_owned(),
@@ -178,11 +210,24 @@ fn estimate_counts_roots() {
     // 数据目录所在磁盘的剩余空间
     assert_eq!(e.free_gb.is_some_and(|gb| gb > 0.0), cfg!(windows));
     assert_eq!(e.roots.len(), 1);
-    assert_eq!(e.roots[0].files, 3);
+    assert_eq!(e.roots[0].files, 4);
     assert_eq!(
         e.roots[0].kinds["document"],
-        KindTotal { files: 2, bytes: 8 }
+        KindTotal {
+            files: 2,
+            bytes: 8,
+            slices: 0
+        }
     );
-    assert_eq!(e.roots[0].kinds["image"], KindTotal { files: 1, bytes: 3 });
+    let slices = rummage_media::slices(64, 400, 2.5, 12).len() as u64;
+    assert!(slices > 0);
+    assert_eq!(
+        e.roots[0].kinds["image"],
+        KindTotal {
+            files: 2,
+            bytes: 3 + long.len() as u64,
+            slices
+        }
+    );
     drop(state);
 }

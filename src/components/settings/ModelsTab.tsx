@@ -5,7 +5,7 @@ import { errorMessage } from '../../lib/errors'
 import { formatSize } from '../../lib/format'
 import ConfirmDialog from '../ConfirmDialog'
 import { isAndroid } from '../../lib/platform'
-import { ImportRow, type ModelInfo, ModelRow, modelInfos, modelLabel, rowFile, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from '../onboarding/ModelDownload'
+import { ImportRow, type ModelInfo, ModelRow, modelInfos, modelLabel, PausedProgress, PauseResumeButton, rowFile, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from '../onboarding/ModelDownload'
 import { showToast } from '../Toast'
 import { BUTTON, CARD, ERROR_TEXT, SMALL_BUTTON, SMALL_DANGER_BUTTON, SMALL_PRIMARY_BUTTON } from '../onboarding/styles'
 import { ROW_DESC, SECTION_TITLE } from './styles'
@@ -87,9 +87,10 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
       : '删除后不能按内容搜索，只显示文件名或正文中含有搜索词的结果，也不再识别新的文件内容。\n\n已建立的索引保留，重新下载或导入后恢复。'
 
   const args = (m: ModelInfo) => ({ mmproj: m.mmproj, npu: isAndroid && m.npu })
+  const startDownload = (m: ModelInfo) => call('download_models', { source: toSource(source), ...args(m) })
   const actions = (file: ModelFileStatus, m: ModelInfo) => {
     const download = (text: string) => (
-      <button type="button" className={SMALL_PRIMARY_BUTTON} disabled={blocked || picking} onClick={() => call('download_models', { source: toSource(source), ...args(m) })}>
+      <button type="button" className={SMALL_PRIMARY_BUTTON} disabled={blocked || picking} onClick={() => startDownload(m)}>
         {text}
       </button>
     )
@@ -99,13 +100,9 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
       </button>
     )
     if (!file.ready) {
+      // 下载了一部分的在下方显示暂停的进度，从那里继续
       if (file.partialBytes === 0) return download('下载')
-      return (
-        <>
-          {download('继续下载')}
-          {remove}
-        </>
-      )
+      return remove
     }
     return (
       <>
@@ -145,14 +142,30 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
         {running && task && (
           <div className="flex items-center gap-3">
             <TaskProgress task={task} label={modelLabel(setup)} className="min-w-0 flex-1" />
-            {task.kind !== 'delete' && (
-              <button type="button" className={`flex-shrink-0 ${BUTTON}`} onClick={() => call('cancel_model_task')}>
-                {task.kind === 'download' ? '暂停' : '取消'}
-              </button>
+            {task.kind === 'download' ? (
+              <PauseResumeButton paused={false} onClick={() => call('cancel_model_task')} />
+            ) : (
+              task.kind !== 'delete' && (
+                <button type="button" className={`flex-shrink-0 ${BUTTON}`} onClick={() => call('cancel_model_task')}>
+                  取消
+                </button>
+              )
             )}
           </div>
         )}
-        {/* 暂停的下载在行中显示已下载的大小；下载、导入成功时行中的状态已说明结果；校验的结果与取消导入用胶囊通知显示 */}
+        {/* 暂停或出错中断的下载：进度条停在已下载的位置，点图标续传 */}
+        {!running &&
+          infos.map((m) => {
+            const file = rowFile(setup, m)
+            if (file.ready || file.partialBytes === 0) return null
+            return (
+              <div key={m.label} className="flex items-center gap-3">
+                <PausedProgress label={m.label} file={file} interrupted={task?.kind === 'download' && task.state === 'failed'} className="min-w-0 flex-1" />
+                <PauseResumeButton paused disabled={blocked || picking} onClick={() => startDownload(m)} />
+              </div>
+            )
+          })}
+        {/* 暂停的下载由上面的进度说明；下载、导入成功时行中的状态已说明结果；校验的结果与取消导入用胶囊通知显示 */}
         {acted && !running && task?.message && task.kind !== 'verify' && task.state !== 'cancelled' && !((task.kind === 'download' || task.kind === 'import') && task.state === 'done') && (
           <p data-selectable-text className={`text-xs ${taskMessageClass(task)}`}>
             {task.message}

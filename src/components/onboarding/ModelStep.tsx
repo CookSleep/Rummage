@@ -5,7 +5,7 @@ import { errorMessage } from '../../lib/errors'
 import { DownloadIcon } from '../icons'
 import { showToast } from '../Toast'
 import { isAndroid } from '../../lib/platform'
-import { ImportRow, MODELS, ModelRow, modelInfos, modelLabel, ProxyStatus, requiredModel, rowFile, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from './ModelDownload'
+import { ImportRow, MODELS, ModelRow, modelInfos, modelLabel, PausedProgress, PauseResumeButton, ProxyStatus, requiredModel, rowFile, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from './ModelDownload'
 import { BUTTON, CARD, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
 
 /**
@@ -36,8 +36,8 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
   const [starting, setStarting] = useState(unverified && !running)
   // 校验刚结束、重新读取的状态还没到时文件仍是未校验，不显示“重新校验”
   const verifyDone = task?.kind === 'verify' && task.state === 'done'
-  // 有下载了一部分的 .part 时续传
-  const resumable = files.some((f) => f.partialBytes > 0)
+  // 有下载了一部分的 .part 时显示暂停的进度，续传
+  const paused = files.find((f) => !f.ready && f.partialBytes > 0)
 
   const call = (cmd: string, args?: Record<string, unknown>) => {
     setError('')
@@ -95,14 +95,25 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
       {running && task && (
         <div className="mt-4 flex items-center gap-3">
           <TaskProgress task={task} label={modelLabel(status)} className="min-w-0 flex-1" />
-          {task.kind !== 'delete' && (
-            <button type="button" className={`flex-shrink-0 ${BUTTON}`} onClick={() => call('cancel_model_task')}>
-              {task.kind === 'download' ? '暂停' : '取消'}
-            </button>
+          {task.kind === 'download' ? (
+            <PauseResumeButton paused={false} onClick={() => call('cancel_model_task')} />
+          ) : (
+            task.kind !== 'delete' && (
+              <button type="button" className={`flex-shrink-0 ${BUTTON}`} onClick={() => call('cancel_model_task')}>
+                取消
+              </button>
+            )
           )}
         </div>
       )}
-      {/* 成功时模型行的状态已说明结果；暂停的下载在行中显示已下载的大小；取消校验、导入用胶囊通知说明 */}
+      {/* 暂停或出错中断的下载：进度条停在已下载的位置，点图标续传 */}
+      {!running && paused && (
+        <div className="mt-4 flex items-center gap-3">
+          <PausedProgress label={modelLabel(status)(paused.name).trim()} file={paused} interrupted={task?.kind === 'download' && task.state === 'failed'} className="min-w-0 flex-1" />
+          <PauseResumeButton paused disabled={picking} onClick={download} />
+        </div>
+      )}
+      {/* 成功时模型行的状态已说明结果；暂停的下载由上面的进度说明；取消校验、导入用胶囊通知说明 */}
       {!running && task?.message && task.state !== 'done' && task.state !== 'cancelled' && (
         <p data-selectable-text className={`mt-3 text-xs ${taskMessageClass(task)}`}>
           {task.message}
@@ -121,12 +132,14 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
           <SourcePicker value={source} onChange={setSource} disabled={running} />
           <ProxyStatus proxy={status.proxy} onProxy={onProxy} />
 
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button type="button" className={`inline-flex items-center gap-1.5 ${PRIMARY_BUTTON}`} disabled={running || picking} onClick={download}>
-              <DownloadIcon className="h-4 w-4" />
-              {files.some((f) => f.verified === false) ? '重新下载' : resumable ? '继续下载' : '开始下载'}
-            </button>
-          </div>
+          {!paused && (
+            <div className="flex justify-end pt-1">
+              <button type="button" className={`inline-flex items-center gap-1.5 ${PRIMARY_BUTTON}`} disabled={running || picking} onClick={download}>
+                <DownloadIcon className="h-4 w-4" />
+                {files.some((f) => f.verified === false) ? '重新下载' : '开始下载'}
+              </button>
+            </div>
+          )}
         </div>
       )}
       {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}

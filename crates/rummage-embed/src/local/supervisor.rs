@@ -5,11 +5,15 @@
 //!   例外是本次请求期间 stderr 中有显存或内存分配失败（单个输入过大），连续 `MAX_FAILURES` 次才判为显存不足
 //!   （`Error::OutOfMemory`）。设备丢失返回 `Error::DeviceLost`，找不到显卡返回 `Error::GpuNotFound`，
 //!   之后的请求都直接返回失效原因（`Dead`）。
+//! - GPU 模式的推理进程被系统结束（Android 上内存不足、后台冻结等，`platform::killed_by_system`）不算后端失效：重新拉起，
+//!   正在处理的请求重发一次；连续 `MAX_FAILURES` 次才照常按失败处理。
 //! - 结束推理进程（`stop`）最多等 `KILL_GRACE`：结束不了时记为 `Dead::Stuck`（GPU、CPU 模式都是），不再拉起。
 //! - 唤醒后验证用 `restart` 清除失败次数与“不可用”状态；设备丢失、结束不了的状态保留。
 use std::io::ErrorKind;
 use std::process::ExitStatus;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use rummage_llama::PATCH_PIXELS;
 use rummage_media::video::VideoPart;
@@ -20,6 +24,7 @@ use super::{
     prefixed, retry_mismatch, video_request,
 };
 use crate::frame::{self, FromWorker, ToWorker};
+use crate::platform;
 use crate::space::{SpaceConfig, SpaceId};
 use crate::{Embedding, Error, Input, KILL_GRACE, MAX_FAILURES, prefix, vector};
 
@@ -57,6 +62,8 @@ pub(super) struct Supervisor {
     pub(super) status: Arc<Mutex<Status>>,
     /// 当前的推理进程加载了 mmproj。
     pub(super) with_mmproj: bool,
+    /// 推理进程连续被系统结束的次数（`killed_by_system`），成功一次清零
+    pub(super) kills: u32,
 }
 
 impl Supervisor {
@@ -230,10 +237,12 @@ impl Supervisor {
         if let Some(dead) = &self.dead {
             return Err(dead.error());
         }
-        // 进程已经退出（崩溃或被结束）：CPU 模式记一次失败，本次请求重新拉起；GPU 模式不再拉起。
-        if let Some(p) = &mut self.proc
-            && !matches!(p.child.try_wait(), Ok(None))
-        {
+        // 进程已经退出（崩溃或被结束）：CPU 模式记一次失败，本次请求重新拉起；GPU 模式不再拉起，被系统结束的除外。
+        let exited = self
+            .proc
+            .as_mut()
+            .is_some_and(|p| !matches!(p.child.try_wait(), Ok(None)));
+        if exited && !self.killed_by_system() {
             let err = self.fail(Error::Crashed("推理进程已退出".to_string()), true);
             if self.dead.is_some() {
                 return Err(err);
@@ -264,13 +273,41 @@ impl Supervisor {
         self.stop();
         self.with_mmproj = false;
         self.failures = 0;
+        self.kills = 0;
         if matches!(self.dead, Some(Dead::Unavailable(_) | Dead::Gone(_))) {
             self.dead = None;
         }
     }
 
+    /// GPU 模式的推理进程已退出，且是被系统结束的（见模块说明）：结束残留、清掉进程，返回真；连续第 `MAX_FAILURES` 次时返回假
+    fn killed_by_system(&mut self) -> bool {
+        let Some(p) = &self.proc else {
+            return false;
+        };
+        if self.spec.gpu.is_none() || !platform::killed_by_system(&p.child, &p.job) {
+            return false;
+        }
+        self.kills += 1;
+        if self.kills >= MAX_FAILURES {
+            return false;
+        }
+        log::warn!("推理进程被系统结束，重新启动。");
+        self.stop();
+        true
+    }
+
     /// 发送一个请求并等待回复。超时、崩溃、推理出错都在这里按失败处理，返回的是 `Vector` 或 `Counted` 帧。
+    /// 推理进程在处理时被系统结束的，重新拉起后重发一次。
     fn send(&mut self, req: &ToWorker, payload: &[u8]) -> Result<(FromWorker, Vec<u8>), Error> {
+        self.request(req, payload, true)
+    }
+
+    fn request(
+        &mut self,
+        req: &ToWorker,
+        payload: &[u8],
+        retry: bool,
+    ) -> Result<(FromWorker, Vec<u8>), Error> {
         self.ensure_started(matches!(
             req,
             ToWorker::Image { .. } | ToWorker::Audio | ToWorker::Video { .. }
@@ -285,6 +322,9 @@ impl Supervisor {
             // 超限时什么都没写，进程仍可用。
             if err.kind() == ErrorKind::InvalidInput {
                 return Err(Error::InvalidInput(err.to_string()));
+            }
+            if retry && self.exited() && self.killed_by_system() {
+                return self.request(req, payload, false);
             }
             return Err(self.fail(Error::Crashed(format!("无法发送请求：{err}")), true));
         }
@@ -313,7 +353,29 @@ impl Supervisor {
                 Err(self.fail(Error::Protocol(format!("推理时收到 {other:?}")), true))
             }
             Recv::Timeout => Err(self.fail(Error::InferTimeout(self.limits.infer_timeout), true)),
-            Recv::Closed(msg) => Err(self.fail(Error::Crashed(msg), true)),
+            Recv::Closed(msg) => {
+                if retry && self.exited() && self.killed_by_system() {
+                    return self.request(req, payload, false);
+                }
+                Err(self.fail(Error::Crashed(msg), true))
+            }
+        }
+    }
+
+    /// 推理进程已经退出：被结束时输出先关闭，进程可能还要一会儿才不在，最多等 1 秒
+    fn exited(&mut self) -> bool {
+        let Some(p) = self.proc.as_mut() else {
+            return false;
+        };
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            if !matches!(p.child.try_wait(), Ok(None)) {
+                return true;
+            }
+            if Instant::now() > deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(20));
         }
     }
 
@@ -330,6 +392,7 @@ impl Supervisor {
         match vector::normalize(raw) {
             Ok(v) => {
                 self.failures = 0;
+                self.kills = 0;
                 Ok(v)
             }
             // 不合格的向量计入连续失败。

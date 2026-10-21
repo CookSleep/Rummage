@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { DeviceResult, DeviceStatus, ParamValues, SelftestStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { isAndroid } from '../../lib/platform'
-import { deviceName, SELFTEST_TEXT, SPEED_STALE_TEXT, speedStale, switchedDevice, switchedText } from '../../lib/device'
+import { deviceName, SPEED_STALE_TEXT, speedStale, switchedDevice, switchedText } from '../../lib/device'
 import { useParamValues } from '../../hooks/useParamValues'
 import { AudioIcon, BanIcon, CheckCircleIcon, ClockIcon, CpuIcon, DocumentIcon, GpuIcon, ImageIcon, MinusCircleIcon, NpuIcon, SpinnerIcon, VideoIcon, XCircleIcon } from '../icons'
 import ConfirmDialog, { renderMessage } from '../ConfirmDialog'
@@ -149,15 +149,15 @@ export function DeviceList({ st, values }: { st: SelftestStatus; values: ParamVa
 
 /**
  * 选择使用的设备；引导与设置页共用。选项为自动、最近一次检测通过的每块显卡、CPU，目前不能用的显卡由后台拒绝并说明原因。
- * 选了的显卡不能用时核心实际按自动选择，菜单也显示“自动”
+ * 选了的显卡不能用时核心实际按自动选择，菜单也显示“自动”。`cpu` 为假时（Android 上只有 NPU 模型，CPU 要用通用模型）不列出 CPU
  */
-export function DevicePicker({ st }: { st: SelftestStatus }) {
+export function DevicePicker({ st, cpu }: { st: SelftestStatus; cpu: boolean }) {
   // 选择设备失败的原因，显示在下拉菜单下方
   const [pickError, setPickError] = useState('')
   const options = [
     { label: '自动', value: 'auto' },
     ...st.devices.filter((d) => d.gpu && d.status === 'passed' && !st.blocked.some((b) => b.id === d.id)).map((d) => ({ label: deviceName(d, st.devices), value: d.id })),
-    { label: 'CPU', value: 'cpu' },
+    ...(cpu ? [{ label: 'CPU', value: 'cpu' }] : []),
   ]
   const current = !st.preferredError && options.some((o) => o.value === st.preferred) ? st.preferred : 'auto'
 
@@ -190,14 +190,14 @@ export function DevicePicker({ st }: { st: SelftestStatus }) {
 }
 
 /**
- * 第 4 步：设备自检。允许跳过、只用 CPU；
+ * 第 4 步：设备自检。允许跳过、只用 CPU（`cpu` 为假时没有这条出路，见 `DevicePicker`）；
  * 检测在核心进程的推理子进程中进行，进度与每个设备的结果经事件推来，完成后索引立即改用选出的设备。
  * 检测结果列表下方是一行卡片：将使用的设备与说明，右侧是“开始检测 / 重新检测”小按钮；还没检测时再给“只用 CPU”。
  * 检测完成后卡片下方是与设置页相同的设备下拉菜单，可选自动、CPU 或检测通过的显卡，卡片随后台返回的状态更新。结果过期时不拦截，有待建立索引的文件且未暂停时后台服务自动重新检测（期间用 CPU）。页面上的主按钮只有引导底部的“下一步”。
  * 卡片上的“高级”打开只列出影响速度的参数的弹窗（`SpeedParamsDialog`）；改了测速用到的参数时检测结果上方提示耗时是修改前的，不自动重新检测。
  * 未通过的设备可在结果中重新检测，已屏蔽的设备也在结果中，可以解除屏蔽，与设置页相同（`DeviceList`）
  */
-export default function SelftestStep({ selftest, model }: { selftest: SelftestStatus; model: boolean }) {
+export default function SelftestStep({ selftest, model, cpu, text }: { selftest: SelftestStatus; model: boolean; cpu: boolean; text: string }) {
   const [error, setError] = useState('')
   const [advanced, setAdvanced] = useState(false)
   const values = useParamValues(true)
@@ -207,7 +207,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
   const switched = switchedDevice(st)
   const tested = st.devices.length > 0
   // 有检测结果后用下拉菜单选择设备；还没检测时“只用 CPU”是另一条出路
-  const offerCpu = !st.running && !cpuOnly && !tested
+  const offerCpu = cpu && !st.running && !cpuOnly && !tested
 
   const call = (cmd: 'run_selftest' | 'set_preferred_device') => {
     setError('')
@@ -221,7 +221,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
   return (
     <div>
       <h2 className="text-base font-bold text-gray-800 dark:text-gray-100">检测设备</h2>
-      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{SELFTEST_TEXT}</p>
+      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{text}</p>
 
       {/* 还没检测过时也列出已屏蔽的设备，以便解除屏蔽 */}
       {(tested || st.blocked.length > 0) && (
@@ -244,7 +244,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
                   : selected
                     ? `将使用「${deviceName(selected, st.devices)}」`
                     : tested
-                      ? '将使用「CPU」'
+                      ? cpu ? '将使用「CPU」' : '没有可用的设备'
                       : '尚未检测'}
             </span>
             {!st.running && (
@@ -266,9 +266,9 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
                               ? '已选择使用这个设备'
                               : '已选择使用这块显卡'
                             : tested && !selected
-                              ? '没有通过检测的设备，将尝试使用 CPU'
+                              ? cpu ? '没有通过检测的设备，将尝试使用 CPU' : '没有通过检测的设备，CPU 和 GPU 要用通用模型'
                               : !tested
-                                ? renderMessage('也可以跳过检测，只用 CPU，之后可在「设置 → 设备」中检测')
+                                ? cpu ? renderMessage('也可以跳过检测，只用 CPU，之后可在「设置 → 设备」中检测') : '检测后选用通过检测的设备'
                                 : '检测通过的设备中速度最快'}
               </span>
             )}
@@ -294,7 +294,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
       {advanced && values && <SpeedParamsDialog values={values} onClose={() => setAdvanced(false)} />}
       {!st.running && tested && (
         <div className="mt-4">
-          <DevicePicker st={st} />
+          <DevicePicker st={st} cpu={cpu} />
         </div>
       )}
     </div>

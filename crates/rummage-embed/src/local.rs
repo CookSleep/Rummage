@@ -410,6 +410,7 @@ impl LocalBackend {
             dead: None,
             status: status.clone(),
             with_mmproj: false,
+            kills: 0,
         };
         let q = queue.clone();
         let thread = thread::Builder::new()

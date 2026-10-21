@@ -3,6 +3,7 @@
 //! - 主进程：启动时登记启动方法（`register`）。启动时经 JNI 调 `EmbedProcess.start` 绑定服务，参数以换行连接成一个字符串
 //!   （参数中只有路径与选项，没有换行）；结束时调 `EmbedProcess.stop` 解除绑定。插件的类不在系统类加载器中，用应用 Context
 //!   的类加载器加载。
+//! - 推理进程自己退出时，按 `ActivityManager.getHistoricalProcessExitReasons` 中这个进程号的记录判断是否被系统结束（`killed`）。
 //! - `:embed` 进程：服务在自己的线程中调 `runWorker`（`Java_…_runWorker`），在那条连接上运行推理，返回退出码后服务结束整个进程。
 use std::io;
 
@@ -13,6 +14,9 @@ use super::with_context;
 
 /// `EmbedProcess` 的完整类名
 const LAUNCHER_CLASS: &str = "com.cooksleep.rummage.storage.EmbedProcess";
+/// 算作被系统结束的退出原因（`ApplicationExitInfo.REASON_*`）：被信号结束、内存不足、系统的其他结束、冻结。
+/// 崩溃、ANR、自己退出等按出错处理
+const SYSTEM_KILLS: [i32; 4] = [2, 3, 13, 14];
 
 /// 用应用 Context 的类加载器加载插件中的类
 fn plugin_class<'local>(
@@ -39,7 +43,7 @@ fn plugin_class<'local>(
     env.cast_local::<JClass>(class)
 }
 
-fn start(socket: &str, args: &[String]) -> io::Result<()> {
+fn start(socket: &str, args: &[String], slot: usize) -> io::Result<()> {
     let ok = with_context(|env, ctx| {
         let class = plugin_class(env, ctx)?;
         let socket = env.new_string(socket)?;
@@ -47,11 +51,12 @@ fn start(socket: &str, args: &[String]) -> io::Result<()> {
         env.call_static_method(
             &class,
             jni_str!("start"),
-            jni_sig!("(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Z"),
+            jni_sig!("(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;I)Z"),
             &[
                 JValue::Object(ctx),
                 JValue::Object(&socket),
                 JValue::Object(&args),
+                JValue::Int(slot as i32),
             ],
         )?
         .z()
@@ -80,9 +85,75 @@ fn stop(socket: &str) {
     }
 }
 
+fn killed(pid: u32, since: i64) -> Option<bool> {
+    let res = with_context(|env, ctx| {
+        let name = env.new_string("activity")?;
+        let am = env
+            .call_method(
+                ctx,
+                jni_str!("getSystemService"),
+                jni_sig!("(Ljava/lang/String;)Ljava/lang/Object;"),
+                &[JValue::Object(&name)],
+            )?
+            .l()?;
+        let pkg = env
+            .call_method(
+                ctx,
+                jni_str!("getPackageName"),
+                jni_sig!("()Ljava/lang/String;"),
+                &[],
+            )?
+            .l()?;
+        let list = env
+            .call_method(
+                &am,
+                jni_str!("getHistoricalProcessExitReasons"),
+                jni_sig!("(Ljava/lang/String;II)Ljava/util/List;"),
+                &[
+                    JValue::Object(&pkg),
+                    JValue::Int(pid as i32),
+                    JValue::Int(1),
+                ],
+            )?
+            .l()?;
+        if env
+            .call_method(&list, jni_str!("isEmpty"), jni_sig!("()Z"), &[])?
+            .z()?
+        {
+            return Ok(None);
+        }
+        let info = env
+            .call_method(
+                &list,
+                jni_str!("get"),
+                jni_sig!("(I)Ljava/lang/Object;"),
+                &[JValue::Int(0)],
+            )?
+            .l()?;
+        let at = env
+            .call_method(&info, jni_str!("getTimestamp"), jni_sig!("()J"), &[])?
+            .j()?;
+        if at < since {
+            return Ok(None);
+        }
+        let reason = env
+            .call_method(&info, jni_str!("getReason"), jni_sig!("()I"), &[])?
+            .i()?;
+        Ok(Some(SYSTEM_KILLS.contains(&reason)))
+    });
+    res.unwrap_or_else(|err| {
+        log::warn!("无法查询推理进程的退出原因：{err}");
+        Some(false)
+    })
+}
+
 /// 登记 `:embed` 进程的启动方法；在启动后台服务之前调用
 pub fn register() {
-    rummage_embed::set_launcher(rummage_embed::Launcher { start, stop });
+    rummage_embed::set_launcher(rummage_embed::Launcher {
+        start,
+        stop,
+        killed,
+    });
 }
 
 /// `:embed` 进程中 `EmbedService.runWorker(socket, args)` 的实现（见模块说明）

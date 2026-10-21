@@ -356,6 +356,7 @@ fn start_busy(dir: &std::path::Path) -> Arc<State> {
         available: |path, _| path.is_file(),
         factory: Box::new(|_| unreachable!("没有主模型时不创建推理后端")),
         driver_events: Box::new(|_| unreachable!("没有推理后端，不会失效")),
+        crashed: |_| Ok(true),
         file_timeout: None,
         gpus: Vec::new,
         litert: None,
@@ -400,6 +401,7 @@ fn query_too_long_reported() {
         available: |path, _| path.is_file(),
         factory: Box::new(|_| Ok(Arc::new(TooLong) as Arc<dyn rummage_embed::EmbeddingBackend>)),
         driver_events: Box::new(|_| unreachable!("没有显卡引擎")),
+        crashed: |_| Ok(true),
         file_timeout: None,
         gpus: Vec::new,
         litert: None,
@@ -459,6 +461,7 @@ fn search_without_inference_skips_engine() {
             Err(rummage_embed::Error::Spawn("模拟启动失败".into()))
         }),
         driver_events: Box::new(|_| unreachable!("没有显卡引擎")),
+        crashed: |_| Ok(true),
         file_timeout: None,
         gpus: Vec::new,
         litert: None,

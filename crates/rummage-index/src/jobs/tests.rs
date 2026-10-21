@@ -1,6 +1,7 @@
 //! 作业的测试：领取顺序与写回、模型未就绪时跳过、失败与黑名单、过期结果、复用相同内容的向量、恢复与释放
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 use super::*;
 use crate::{normalize_root, scan_root};
@@ -258,18 +259,30 @@ fn audio_stored_copied_and_too_long() {
             .clone()
     };
     assert_eq!(meta_of(&a.name), meta);
-    // 内容相同的音频：同一空间才能复制，复制片段、向量与元数据
+    // 内容相同的音频：同一模型的空间才能复制（后端可以不同），复制片段、向量与元数据
     let db = e.db();
+    let aud = audio_space();
+    let gpu = Space {
+        id: "aud-gpu".into(),
+        backend: "gpu".into(),
+        ..audio_space()
+    };
+    let other = Space {
+        id: "other".into(),
+        model_sha256: "m2".into(),
+        ..audio_space()
+    };
     assert_eq!(
-        db.media_copy_source(&[7], "aud", b.file_id).unwrap(),
+        db.media_copy_source(&[7], &aud, b.file_id).unwrap(),
         Some(a.file_id)
     );
     assert_eq!(
-        db.media_copy_source(&[7], "other", b.file_id).unwrap(),
-        None
+        db.media_copy_source(&[7], &gpu, b.file_id).unwrap(),
+        Some(a.file_id)
     );
-    assert_eq!(db.media_copy_source(&[8], "aud", b.file_id).unwrap(), None);
-    assert_eq!(db.media_copy_source(&[7], "aud", a.file_id).unwrap(), None);
+    assert_eq!(db.media_copy_source(&[7], &other, b.file_id).unwrap(), None);
+    assert_eq!(db.media_copy_source(&[8], &aud, b.file_id).unwrap(), None);
+    assert_eq!(db.media_copy_source(&[7], &aud, a.file_id).unwrap(), None);
     drop(db);
     let copy = Outcome::Copied {
         kind: "audio",
@@ -433,15 +446,35 @@ fn copy_from_same_content() {
         media_failed: None,
     };
     e.db().apply(&[(a.clone(), img)]).unwrap();
-    assert_eq!(
-        e.db()
-            .copy_source(&[7], "img", "sv", 2.5, b.file_id)
-            .unwrap(),
-        Some(a.file_id)
-    );
-    let source = |space, file| e.db().copy_source(&[7], space, "sv", 2.5, file).unwrap();
-    assert_eq!(source("other", b.file_id), None);
-    assert_eq!(source("img", a.file_id), None);
+    let img = Space {
+        id: "img".into(),
+        preprocess: "image-v1-t140".into(),
+        ..space()
+    };
+    let source = |space: &Space, file| e.db().copy_source(&[7], space, "sv", 2.5, file).unwrap();
+    assert_eq!(source(&img, b.file_id), Some(a.file_id));
+    // 只是后端不同的空间也能复制；模型或档位不同的不能
+    let vulkan = Space {
+        id: "img-vulkan".into(),
+        backend: "vulkan".into(),
+        ..img.clone()
+    };
+    assert_eq!(source(&vulkan, b.file_id), Some(a.file_id));
+    for other in [
+        Space {
+            id: "other".into(),
+            model_sha256: "m2".into(),
+            ..img.clone()
+        },
+        Space {
+            id: "img280".into(),
+            preprocess: "image-v1-t280".into(),
+            ..img.clone()
+        },
+    ] {
+        assert_eq!(source(&other, b.file_id), None);
+    }
+    assert_eq!(source(&img, a.file_id), None);
     let copy = Outcome::Copied {
         kind: "image",
         quick_hash: vec![1],
@@ -548,7 +581,7 @@ fn copy_long_image_with_slices() {
     };
     let source = |ratio| {
         e.db()
-            .copy_source(&[7], "img", "sv1", ratio, b.file_id)
+            .copy_source(&[7], &img, "sv1", ratio, b.file_id)
             .unwrap()
     };
     // 只有整图向量：按 2.5 是长图，不能复制；按 3.5 不是长图，可以
@@ -571,7 +604,7 @@ fn copy_long_image_with_slices() {
     assert_eq!(source(2.5), Some(a.file_id));
     assert_eq!(
         e.db()
-            .copy_source(&[7], "img", "sv0", 2.5, b.file_id)
+            .copy_source(&[7], &img, "sv0", 2.5, b.file_id)
             .unwrap(),
         None
     );
@@ -606,6 +639,32 @@ fn copy_long_image_with_slices() {
     e.db().apply(&[(b.clone(), copy("sv0"))]).unwrap();
     assert_eq!(copied(), ["{} img image-v1-t140"]);
     assert_eq!(e.job(&b.name).0, "stored");
+    // 参数版本相同、但属于另一个模型的切片不复制
+    reset();
+    let other = NewSegment {
+        space: Some(Box::new((
+            Space {
+                id: "npu560".into(),
+                model_sha256: "m2".into(),
+                preprocess: "image-v1-t560".into(),
+                ..space()
+            },
+            "sv1".to_string(),
+        ))),
+        ..seg(r#"{"region":1}"#, None)
+    };
+    let segs = vec![
+        seg("{}", None),
+        seg(r#"{"region":0}"#, Some(("img560", "sv1"))),
+        other,
+    ];
+    e.db().apply(&[(a.clone(), stored(segs))]).unwrap();
+    reset();
+    e.db().apply(&[(b.clone(), copy("sv1"))]).unwrap();
+    assert_eq!(
+        copied(),
+        ["{} img image-v1-t140", r#"{"region":0} img560 sv1"#]
+    );
 }
 
 #[test]
@@ -653,7 +712,65 @@ fn recover_and_release() {
         )])
         .unwrap();
     e.db().claim_job(true, true, true).unwrap().unwrap();
-    assert_eq!(e.db().recover_jobs().unwrap(), 2);
+    let interrupted = || {
+        e.db()
+            .conn
+            .execute(
+                "UPDATE jobs SET stage = 'embedding', updated_at = updated_at - 5000 WHERE stage = 'pending'",
+                [],
+            )
+            .unwrap()
+    };
+    // 不是核心自己崩溃（被系统结束等）：放回、不计失败；按最早的作业开始处理至今的时长查
+    let mut window = Duration::ZERO;
+    let n = e
+        .db()
+        .recover_jobs(|w| {
+            window = w;
+            false
+        })
+        .unwrap();
+    assert_eq!(n, (2, false));
+    assert!(window >= Duration::from_secs(0) && window < Duration::from_secs(5));
+    assert_eq!(
+        e.count("SELECT COUNT(*) FROM jobs WHERE stage = 'pending' AND attempts = 0"),
+        3
+    );
+    // 没有中断的作业时不查
+    assert_eq!(e.db().recover_jobs(|_| unreachable!()).unwrap(), (0, false));
+    // 同一个文件连续两次在中断时都在处理：即使不是崩溃也计一次失败；上次没有中断的（第三个文件）只记下
+    e.db()
+        .conn
+        .execute("UPDATE jobs SET stage = 'embedding'", [])
+        .unwrap();
+    assert_eq!(e.db().recover_jobs(|_| false).unwrap(), (3, false));
+    assert_eq!(
+        e.count("SELECT COUNT(*) FROM jobs WHERE stage = 'pending' AND attempts = 1"),
+        2
+    );
+    assert_eq!(
+        e.count("SELECT COUNT(*) FROM jobs WHERE stage = 'pending' AND attempts = 0 AND last_error IS NOT NULL"),
+        1
+    );
+    e.db()
+        .conn
+        .execute("UPDATE jobs SET attempts = 0, last_error = NULL", [])
+        .unwrap();
+    // 核心崩溃：各计一次失败
+    interrupted();
+    e.db()
+        .conn
+        .execute(
+            "UPDATE jobs SET stage = 'pending' WHERE file_id = (SELECT MAX(file_id) FROM jobs)",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        e.db()
+            .recover_jobs(|w| w >= Duration::from_secs(5))
+            .unwrap(),
+        (2, true)
+    );
     assert_eq!(
         e.count("SELECT COUNT(*) FROM jobs WHERE stage = 'pending' AND attempts = 1"),
         2
@@ -663,7 +780,7 @@ fn recover_and_release() {
         .conn
         .execute("UPDATE jobs SET stage = 'embedding', attempts = 2", [])
         .unwrap();
-    assert_eq!(e.db().recover_jobs().unwrap(), 3);
+    assert_eq!(e.db().recover_jobs(|_| true).unwrap(), (3, true));
     assert_eq!(
         e.count("SELECT COUNT(*) FROM jobs WHERE stage = 'failed'"),
         3

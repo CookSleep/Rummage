@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { CoreStatus, ParamValues, RootInfo, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { KIND_PARAMS, type Kinds, kindsOf, needsMmproj } from '../../lib/kinds'
+import { selftestText } from '../../lib/device'
 import { isAndroid } from '../../lib/platform'
 import { useBackLayer } from '../../hooks/useBackLayer'
 import { useConfigImport } from '../../hooks/useConfigImport'
@@ -223,7 +224,7 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
             <KindsStep kinds={kinds} mmprojBytes={status.mmproj.bytes} mmprojReady={status.mmproj.ready} onChange={setKind} preset={preset} onPreset={choosePreset} />
           )}
           {running && step === 2 && kinds && <ModelStep status={status} mmproj={mmprojOn} onProxy={(proxy) => onStatus((s) => ({ ...s, proxy }))} />}
-          {running && step === 3 && <SelftestStep selftest={st} model={isAndroid ? anyModelReady(status) : status.model.ready} />}
+          {running && step === 3 && <SelftestStep selftest={st} model={isAndroid ? anyModelReady(status) : status.model.ready} cpu={!isAndroid || status.model.ready} text={selftestText(status)} />}
           {running && step === 4 && kinds && <EstimateStep kinds={kinds} preset={preset} selftest={st} minFreeGb={minFreeGb} />}
           {running && step === 4 && isAndroid && (
             <div className="mt-5">

@@ -254,6 +254,9 @@ pub struct SetupStatus {
 pub struct KindTotal {
     pub files: u64,
     pub bytes: u64,
+    /// 图片：长图切片的总段数，由核心按抽样推算；其他种类为 0
+    #[serde(default)]
+    pub slices: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -385,7 +388,14 @@ mod tests {
                 id: 1,
                 path: r"D:\资料".into(),
                 files: 3,
-                kinds: BTreeMap::from([("image".to_string(), KindTotal { files: 2, bytes: 9 })]),
+                kinds: BTreeMap::from([(
+                    "image".to_string(),
+                    KindTotal {
+                        files: 2,
+                        bytes: 9,
+                        slices: 3,
+                    },
+                )]),
                 scanning: true,
             }],
             free_gb: Some(12.5),
@@ -412,7 +422,11 @@ mod tests {
         assert_eq!(encode(&DeviceStatus::Blacklisted), r#""blacklisted""#);
         assert_eq!(encode(&GpuState::Absent), r#""absent""#);
         assert_eq!(encode(&ModelTaskKind::Verify), r#""verify""#);
-        let line = encode(&KindTotal { files: 1, bytes: 2 });
-        assert_eq!(line, r#"{"files":1,"bytes":2}"#);
+        let line = encode(&KindTotal {
+            files: 1,
+            bytes: 2,
+            slices: 0,
+        });
+        assert_eq!(line, r#"{"files":1,"bytes":2,"slices":0}"#);
     }
 }

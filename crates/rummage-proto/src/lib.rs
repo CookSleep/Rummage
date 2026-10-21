@@ -652,7 +652,7 @@ pub struct IndexStatus {
     pub by_kind: BTreeMap<String, IndexCounts>,
     /// 推理使用的设备名称；未启动时为空
     pub backend: Option<String>,
-    /// `state` 为 `error` 时的原因，中文整句
+    /// `state` 为 `error` 时的原因，中文整句；为 `no_model` 时是只有 NPU 模型、NPU 却用不了的说明，缺少模型时为空
     pub error: Option<String>,
     /// 按最近的处理速度估算的剩余秒数；数据不足、暂停、出错或空闲时为空
     pub eta_s: Option<u64>,

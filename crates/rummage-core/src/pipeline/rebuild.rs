@@ -6,8 +6,9 @@
 //!   可能内嵌媒体的文档只重算内嵌媒体。
 //! - 重建与建索引同一套调度：排在新增与内容变化的文件之后（`rummage_index::jobs`），受同样的暂停条件约束。
 //! - 进度：`total` 为这一批的文件数，新的修改加入的文件计入同一批，剩余为 0 时清零（`Shared::rebuild_status`）。
-//! - 换了主模型文件（手机上在 NPU 模型与 LiteRT 通用版之间切换）的文件整个重建：要用的模型按
-//!   要选用的设备（与建引擎时的选择相同）；`reload`（设备检测完成、用户换了设备）后也检查一次。
+//! - 换了主模型文件（手机上在 NPU 模型与 LiteRT 通用版之间切换）的文件整个重建：启动时要用的模型按要选用的设备
+//!   （与建引擎时的选择相同）；之后每次新建的引擎与上一个的模型不同时（换设备、检测完成、设备出错后改用别的）按新引擎的
+//!   模型再检查一次，正在处理的作业全部作废（`Shared::requeue`）。
 use std::collections::BTreeMap;
 
 use rummage_embed::space;
@@ -141,11 +142,21 @@ impl Pipeline {
     /// 提交互斥：提交在前的已是 `stored`，会按版本判断；在后的会在提交时被改为放回。返回各种类放回的已完成作业数。
     /// 改参数时 `active` 由 `void_kinds` 给出
     pub fn requeue(&self, active: &[&str]) -> Result<BTreeMap<String, usize>, DbError> {
-        let backend = self.shared.model_backend();
-        let db = lock(&self.shared.db);
+        self.shared.requeue(active, self.shared.model_backend())
+    }
+}
+
+impl Shared {
+    /// `Pipeline::requeue` 的实现：要用的模型为后端 `backend` 的
+    pub(super) fn requeue(
+        &self,
+        active: &[&str],
+        backend: Backend,
+    ) -> Result<BTreeMap<String, usize>, DbError> {
+        let db = lock(&self.db);
         let ids = db.active_jobs(active)?;
-        let n = self.shared.requeue_stale(&db, backend)?;
-        let mut stale = lock(&self.shared.stale);
+        let n = self.requeue_stale(&db, backend)?;
+        let mut stale = lock(&self.stale);
         for id in ids {
             if !stale.contains(&id) {
                 stale.push(id);
@@ -153,8 +164,8 @@ impl Pipeline {
         }
         drop(stale);
         drop(db);
-        self.shared.wake();
-        self.shared.broadcast();
+        self.wake();
+        self.broadcast();
         Ok(n)
     }
 }

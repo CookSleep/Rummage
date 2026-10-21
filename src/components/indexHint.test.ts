@@ -12,6 +12,12 @@ describe('indexHint', () => {
     expect(indexHint({ ...base, etaS: 300 })).toBe('正在建立索引：已处理 66 / 70，预计还需约 5 分钟，完成前，尚未处理的文件只能按文件名搜索')
   })
 
+  it('缺少模型时提示下载；只有 NPU 模型、NPU 却用不了时用核心给的说明', () => {
+    expect(indexHint({ ...base, state: 'no_model' })).toBe('尚未下载文字模型，无法识别文件内容。可在「设置 → 模型」中下载或导入，之后会继续建立索引。')
+    const npu = 'NPU 出错，无法识别文件内容。可在「设置 → 模型」中下载通用模型，改用 GPU 或 CPU。'
+    expect(indexHint({ ...base, state: 'no_model', error: npu })).toBe(npu)
+  })
+
   it('只数本轮要建的文件，不数之前已建好的', () => {
     expect(indexHint(base, new Date(), 60)).toBe('正在建立索引：已处理 6 / 10，完成前，尚未处理的文件只能按文件名搜索')
     // 本轮中删掉了文件时不出现负数

@@ -62,6 +62,11 @@ pub struct Config {
 }
 
 impl Config {
+    /// 能用 CPU：电脑上总能（缺主模型时另有提示）；LiteRT 的 CPU 与 GPU 要用通用版，只有 NPU 模型时不能
+    pub fn cpu_model_ok(&self) -> bool {
+        self.litert.is_none() || space::LITERT_MODEL.check(&self.model).is_ok()
+    }
+
     /// 能编码文字（主模型可用）：电脑为 GGUF 主模型；LiteRT 为通用版或本机芯片的 NPU 模型，另要分词器
     pub fn text_model_ok(&self) -> bool {
         match &self.litert {
@@ -126,6 +131,8 @@ pub struct Options {
     pub factory: Factory,
     /// GPU 后端失效时用来判断是否持久屏蔽
     pub driver_events: DriverEvents,
+    /// 核心上次退出是否为自己崩溃，参数为要查的最近一段时间（`Db::recover_jobs`）；查询失败时返回错误
+    pub crashed: fn(Duration) -> io::Result<bool>,
     /// 覆盖参数表的 `file_timeout_s`，测试用
     pub file_timeout: Option<Duration>,
     /// 见 `Config::gpus`
@@ -172,6 +179,7 @@ impl Options {
                 thread::sleep(selftest::TDR_LOG_WAIT);
                 selftest::driver_events(since.elapsed() + selftest::TDR_WINDOW_MARGIN)
             }),
+            crashed: crate::platform::crashed,
             file_timeout: None,
             gpus,
             litert: None,

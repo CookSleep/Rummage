@@ -28,7 +28,7 @@ pub(super) fn video_file(shared: &Shared, task: Task, qh: Vec<u8>, clock: &Clock
     };
     let (av_space, v_space) = spaces(&task);
     for sp in av_space.iter().chain([&v_space]) {
-        match lock(&shared.db).media_copy_source(&ch, &sp.id, job.file_id) {
+        match lock(&shared.db).media_copy_source(&ch, sp, job.file_id) {
             Ok(None) => {}
             Ok(Some(from)) => {
                 return Prep::Done(Outcome::Copied {

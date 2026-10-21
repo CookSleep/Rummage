@@ -20,7 +20,7 @@ function def(key: string, label: string, platform = ''): ParamDef {
 const DEFS = [def('pause_on_battery', '未接电源时暂停'), def('pause_when_screen_on', '亮屏时暂停', 'android'), def('pause_on_fullscreen', '全屏时暂停', 'windows')]
 
 async function open() {
-  mockCore({
+  const calls = mockCore({
     param_defs: () => DEFS,
     get_params: () => ({}),
     get_notices: () => [],
@@ -43,6 +43,7 @@ async function open() {
     />,
   )
   await flush()
+  return calls
 }
 
 const tab = (label: string) => click([...document.querySelectorAll<HTMLElement>('nav button')].find((b) => b.textContent === label)!)
@@ -56,6 +57,14 @@ describe('Android 上的设置', () => {
     expect(text()).not.toContain('全屏时暂停')
     expect(text()).toContain('后台运行')
     expect(text()).toContain('控制建立索引时占用的手机资源')
+  })
+
+  it('“系统的后台管控”打开本应用的系统应用信息页', async () => {
+    const calls = await open()
+    await tab('资源')
+    expect(text()).toContain('系统的后台管控')
+    await click([...document.querySelectorAll<HTMLElement>('button')].find((b) => b.textContent === '打开应用信息')!)
+    expect(calls.some((c) => c.cmd === 'open_app_settings')).toBe(true)
   })
 
   it('外观页没有“关闭窗口时”，数据页没有“打开”和“更改位置”', async () => {

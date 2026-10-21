@@ -155,6 +155,7 @@ export interface IndexStatus extends IndexCounts {
   paused: PauseReason | null
   byKind: Record<string, IndexCounts>
   backend: string | null
+  /** `state` 为 `error` 时的原因；为 `no_model` 时是只有 NPU 模型、NPU 却用不了的说明，缺少模型时为空 */
   error: string | null
   /** 按最近的处理速度估算的剩余秒数；数据不足、暂停、出错或空闲时为空 */
   etaS: number | null
@@ -437,6 +438,8 @@ export interface SetupStatus {
 export interface KindTotal {
   files: number
   bytes: number
+  /** 图片：长图切片的总段数，由核心按抽样推算；其他种类为 0 */
+  slices: number
 }
 
 /** 刚添加的文件夹，对应 Rust `src-tauri` 的 `setup::AddedRoot` */

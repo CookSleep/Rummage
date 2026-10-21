@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rummage_embed::Backend;
+
 use super::{Engine, Pipeline, Shared, lock};
 
 /// 释放时置位，`Pipeline::wait_released` 据此确认旧引擎的推理进程已退出
@@ -131,14 +133,15 @@ impl Pipeline {
     }
 
     /// 按当前的选择、自检记录与参数重建引擎（自检完成、用户选择的设备改变后，或 `index_images`、`index_audio`、`index_video`、推理线程数、推理进程的内存上限与启动时限修改后）。
-    /// 不清除本次运行停用的显卡：本次运行中出过错的 GPU 不再使用
+    /// 不清除本次运行停用的显卡：本次运行中出过错的 GPU 不再使用。换了模型文件时由新建引擎时放回要重建的文件（`engine`）
     pub fn reload(&self) {
         self.shared.retire(&mut lock(&self.shared.engine));
-        // 换了设备可能换了模型文件（LiteRT 的 NPU），要重建的文件按新的选择判断
-        if let Err(err) = self.requeue(&[]) {
-            log::error!("无法检查哪些文件要按新的设备重建：{err}");
-        }
         self.shared.wake();
+    }
+
+    /// 要选用的设备是 LiteRT 的 NPU（与其他后端用不同的模型文件）。会读自检记录
+    pub fn npu_chosen(&self) -> bool {
+        self.shared.model_backend() == Backend::Npu
     }
 
     /// 处于某种暂停中（引导、设备检测、模型任务、清空索引），没有引擎

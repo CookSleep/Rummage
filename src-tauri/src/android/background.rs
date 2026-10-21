@@ -10,6 +10,8 @@
 //!   应用回到前台时发送 `exhausted: false` 解除。
 //! - 通知中的数字与界面的索引提示一致（`shown`）：有待处理的文件时只数本轮要建的文件（`progress`），只剩按新设置重建时为重建的进度。
 //! - 事件与进度在同一个任务中按到达顺序处理，插件调用不会交错。
+//! - 后台运行：电池优化白名单（`request_battery_unrestricted`）；部分系统另有自己的后台管控，前台服务、唤醒锁与白名单都挡不住，
+//!   退到后台几秒后冻结整个应用，只能由用户在应用信息的电量或电池设置中放行（`open_app_settings`）。
 //! - 通知权限（Android 13 起）在完成引导时请求一次（`request_notifications`），被拒绝时服务照常运行，不再追问。
 use rummage_proto::{IndexState, IndexStatus, PauseReason};
 
@@ -216,6 +218,22 @@ pub async fn request_battery_unrestricted<R: Runtime>(app: AppHandle<R>) -> Resu
             crate::search::error(
                 ApiError::INTERNAL,
                 "无法打开电池优化设置，请在系统设置中允许 Rummage 不受电池优化限制。",
+            )
+        })
+}
+
+/// 打开 Rummage 的系统应用信息页，用户在其中允许后台运行（部分系统在电池优化之外另有后台管控）
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn open_app_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), ApiError> {
+    app.state::<Android<R>>()
+        .open_app_settings()
+        .await
+        .map_err(|err| {
+            log::warn!("无法打开应用信息：{err}");
+            crate::search::error(
+                ApiError::INTERNAL,
+                "无法打开应用信息，请在系统设置的应用列表中找到 Rummage。",
             )
         })
 }

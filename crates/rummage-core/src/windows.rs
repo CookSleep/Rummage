@@ -4,6 +4,8 @@
 //! 管道每个实例都带上安全描述符并拒绝远程客户端；接受一个连接后立即创建下一个实例，新客户端随时可以连上
 //!
 //! 关机、注销与电源事件的隐藏窗口见 `session`，进程优先级与暂停条件的检测见 `resource`。
+//! 上次退出是否为崩溃（`crashed`）：查 Application 通道中 Windows 错误报告记下的“Application Error”事件 1000，
+//! 出错程序为本程序；结束任务、断电、关机都没有这个事件。
 use std::convert::Infallible;
 use std::ffi::c_void;
 use std::fs::{self, File};
@@ -342,4 +344,32 @@ pub fn sparse_file(path: &Path, len: u64) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     f.set_len(len)
+}
+
+/// 最近 `window` 内本程序是否崩溃过（见模块说明）
+pub(crate) fn crashed(window: Duration) -> io::Result<bool> {
+    let exe = std::env::current_exe()?;
+    let name = exe
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let query = format!(
+        "*[System[Provider[@Name='Application Error'] and EventID=1000 and TimeCreated[timediff(@SystemTime) <= {}]]]",
+        window.as_millis()
+    );
+    let tag = format!("<data name='appname'>{name}</data>");
+    Ok(rummage_embed::event_xml("Application", &query)?
+        .iter()
+        .any(|xml| xml.to_lowercase().contains(&tag)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 查询语句能在本机的系统日志上执行；测试程序本身没有崩溃过
+    #[test]
+    fn crashed_query_runs() {
+        assert!(!crashed(Duration::from_secs(7 * 24 * 3600)).unwrap());
+    }
 }

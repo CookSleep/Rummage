@@ -18,6 +18,7 @@
 //!     AMD（amdkmdag、amdwddmg）内核驱动的警告及以上级别事件（Level ≤ 3）。
 //!     时间窗口用 `timediff(@SystemTime)`（距现在的毫秒数），
 //!     不必换算日期。查询本身失败时返回错误，不能当作没有事件放行。
+//! - `event_xml`：通用的系统日志查询，核心进程启动时也用它查自己上次是否崩溃。
 
 use std::ffi::{CStr, OsString, c_char, c_int};
 use std::fs::File;
@@ -112,6 +113,11 @@ impl Drop for Job {
         // SAFETY: 句柄有效且只关闭一次；作业设了 KILL_ON_JOB_CLOSE，关闭即结束其中的进程。
         unsafe { CloseHandle(self.0) };
     }
+}
+
+/// 推理进程是被系统结束的：只有 Android 能区分
+pub fn killed_by_system(_child: &Child, _job: &Job) -> bool {
+    false
 }
 
 /// 启动推理子进程（标准输入输出都是管道）并放进作业
@@ -329,10 +335,23 @@ fn render_xml(event: &EvtHandle) -> io::Result<String> {
 
 /// 最近 `window` 内的显卡驱动事件，每条写成“来源 事件 ID 时间”。
 pub fn driver_events(window: Duration) -> io::Result<Vec<String>> {
-    let channel: Vec<u16> = "System\0".encode_utf16().collect();
-    let query: Vec<u16> = format!("{}\0", driver_events_query(window))
-        .encode_utf16()
-        .collect();
+    Ok(event_xml("System", &driver_events_query(window))?
+        .iter()
+        .map(|xml| {
+            format!(
+                "{} 事件 {}（{}）",
+                xml_field(xml, "Provider Name='", '\''),
+                event_id(xml),
+                xml_field(xml, "SystemTime='", '\''),
+            )
+        })
+        .collect())
+}
+
+/// 用 XPath `query` 查系统日志通道 `channel`，返回各事件的 XML；查询本身失败时返回错误
+pub fn event_xml(channel: &str, query: &str) -> io::Result<Vec<String>> {
+    let channel: Vec<u16> = format!("{channel}\0").encode_utf16().collect();
+    let query: Vec<u16> = format!("{query}\0").encode_utf16().collect();
     // SAFETY: 两个字符串以 NUL 结尾，调用期间有效；会话为 0 表示本机。
     let handle = unsafe { EvtQuery(0, channel.as_ptr(), query.as_ptr(), EvtQueryChannelPath) };
     if handle == 0 {
@@ -364,13 +383,7 @@ pub fn driver_events(window: Duration) -> io::Result<Vec<String>> {
         // 先全部包装，渲染出错提前返回时其余句柄也会关闭。
         let events: Vec<EvtHandle> = batch[..n as usize].iter().map(|&h| EvtHandle(h)).collect();
         for e in &events {
-            let xml = render_xml(e)?;
-            out.push(format!(
-                "{} 事件 {}（{}）",
-                xml_field(&xml, "Provider Name='", '\''),
-                event_id(&xml),
-                xml_field(&xml, "SystemTime='", '\''),
-            ));
+            out.push(render_xml(e)?);
         }
     }
 }

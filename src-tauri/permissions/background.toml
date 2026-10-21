@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "background"
-description = "允许主窗口查询是否已不受电池优化限制，以及打开系统的电池优化授权页面（仅 Android）"
-commands.allow = ["battery_unrestricted", "request_battery_unrestricted"]
+description = "允许主窗口查询是否已不受电池优化限制，打开系统的电池优化授权页面与本应用的系统应用信息页（仅 Android）"
+commands.allow = ["battery_unrestricted", "request_battery_unrestricted", "open_app_settings"]

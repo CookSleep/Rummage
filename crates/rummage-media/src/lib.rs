@@ -66,6 +66,16 @@ pub enum Error {
     InvalidPixels { width: u32, height: u32 },
 }
 
+/// 只读文件头得到宽高（不解码像素，不看 EXIF 方向）；读不出或格式不认识时为空
+pub fn dimensions(path: &Path) -> Option<(u32, u32)> {
+    image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
+}
+
 /// 解码第一帧并转成 8 位 RGB，已按 EXIF 方向转正、透明部分合成到白底。
 /// 像素数（宽 × 高）超过 `max_pixels` 时返回 `Error::TooLarge`，不分配像素内存。
 pub fn decode(path: &Path, max_pixels: u64) -> Result<Rgb, Error> {

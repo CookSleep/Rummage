@@ -17,7 +17,8 @@
 //! 它在自检记录中通过检测、未被屏蔽、仍在系统中、本次运行中没有出过问题就用它，否则按没有选择处理。
 //! 自检由引导或设置发起（`server::setup`）：检测期间 `hold` 让调度线程不领取作业并丢弃当前引擎，
 //! `wait_released` 等处理中的作业结束、旧引擎的推理进程退出后才开始检测；检测完成后 `reload` 按新记录重建引擎，不需要重启。
-//! 结果过期时核心在后台自动检测：期间不 `hold`，改为 `cpu_only` 暂时只用 CPU、照常建索引，只等用 GPU 的旧引擎释放。
+//! 结果过期时核心在后台自动检测：期间不 `hold`，改为 `cpu_only` 暂时只用 CPU、照常建索引，只等用 GPU 的旧引擎释放；
+//! 选用 LiteRT 的 NPU 时仍 `hold`（CPU 用的通用版与 NPU 的模型不同）。
 //! 引导未完成时（`meta` 表的 `onboarded` 为 `0`）同样 `hold`，扫描与文件名索引照常进行。
 //! `hold` 的设置与 `engine` 中的检查都在引擎槽的锁内，不会在设置之后又建出新引擎。
 //! 本次运行中显卡出的问题记在 `Shared::disabled`（运行中失效、唤醒验证失败）：停用的显卡选设备、重新检测时都跳过；
@@ -36,7 +37,8 @@
 //! 放弃等待的任务线程（超时）达到 `index_threads` 个时，预处理线程暂停领取新作业，直到它们退出（`prep`）。
 //! 领取作业与退出时放回作业都在数据库锁内，并在锁内检查停止标志：放回之后不会再领出新作业。
 //! 停止：`stop` 让各线程在手头的文件处理完后退出，并把处理中的作业放回 `pending`（不计失败）；
-//! 核心崩溃时没有这一步，下次启动由 `Db::recover_jobs` 计一次失败。
+//! 核心没有正常退出时没有这一步，下次启动由 `Db::recover_jobs` 处理：上次是核心自己崩溃时计一次失败，被系统或用户结束的不计
+//! （`Options::crashed`）。
 //! 降温：`set_slow` 打开时调度线程一次只处理一个作业，完成后休息与它处理时长相同的时间再领取下一个（`schedule`）。
 //! 暂停：`set_paused` 给出原因（`resource`）时调度线程不再领取新作业，并丢弃推理引擎，推理进程随正在推理的片段算完而退出，
 //! 不再占用显卡与内存；原因变化时立即广播一次 `IndexProgress`。系统睡眠与唤醒验证期间同样不领取新作业，报为
@@ -100,6 +102,8 @@ const _: () = assert!(rummage_embed::vector::COARSE_DIM == rummage_index::vindex
 
 /// 没有作业时兜底检查的间隔
 const IDLE_CHECK: Duration = Duration::from_secs(60);
+/// 查上次是否崩溃时在作业开始处理至今的时长上多看的时间：系统日志与数据库的时间戳来自不同的时钟
+const CRASH_WINDOW_MARGIN: Duration = Duration::from_secs(60);
 /// 推理线程记住的最近图片、音频、视频片段向量数（长图、音频、视频每段一项），用于同时处理的相同文件（还没写入数据库）
 const RECENT_IMAGES: usize = 1024;
 /// 视频预设（参数 `video_preset`）：(值, 窗口秒数, 每窗口帧数, 带音频)，都不重叠；值 0 为“自定义”，用高级项
@@ -258,6 +262,8 @@ struct Shared {
     /// 运行中失效、唤醒验证失败的 GPU 记入这里，与核心的设备检测共用（`State::disabled`）
     disabled: DisabledGpus,
     engine: Mutex<Option<Arc<Engine>>>,
+    /// 最近新建的引擎所用主模型的 SHA-256，启动时为要用的模型（`engine` 据此判断换了模型文件）
+    model: Mutex<Option<String>>,
     /// 推理进程结束不了时给用户看的原因：本次运行不再建任何引擎（`engine`）
     dead: Mutex<Option<String>>,
     /// 后台自动检测设备进行中，暂时只用 CPU、照常建索引（`Pipeline::cpu_only`）。只在引擎槽的锁内修改
@@ -274,6 +280,8 @@ struct Shared {
     /// 最近一次丢弃（`hold`、`reload`、`drop_engine`）的引擎的释放标志，`wait_released` 一并等它
     last_released: Mutex<Option<Arc<AtomicBool>>>,
     no_model: AtomicBool,
+    /// 只有 NPU 模型、NPU 却用不了（本次运行停用或已屏蔽）时给用户的说明，`no_model` 时代替缺少模型的提示（`Shared::npu_note`）
+    npu_note: Mutex<Option<String>>,
     /// 当前引擎没有加载 mmproj
     no_mmproj: AtomicBool,
     /// 推理后端创建失败的原因
@@ -399,7 +407,13 @@ impl Shared {
         let media_pending = ["image", "audio", "video"]
             .iter()
             .any(|k| counts.get(*k).is_some_and(|c| c.pending > 0));
-        let state = if self.no_model.load(Ordering::Relaxed) {
+        let no_model = self.no_model.load(Ordering::Relaxed);
+        let error = if no_model {
+            lock(&self.npu_note).clone()
+        } else {
+            error
+        };
+        let state = if no_model {
             IndexState::NoModel
         } else if error.is_some() {
             IndexState::Error
@@ -510,9 +524,21 @@ impl Pipeline {
         disabled: DisabledGpus,
         paused: Option<PauseReason>,
     ) -> Pipeline {
-        match lock(&db).recover_jobs() {
-            Ok(0) => {}
-            Ok(n) => log::warn!("{n} 个文件在上次退出时正在处理，各计一次失败。"),
+        // 查不到上次退出的原因时按崩溃处理，不让反复导致崩溃的文件一直重试
+        let crashed = |window| {
+            (opts.crashed)(window + CRASH_WINDOW_MARGIN).unwrap_or_else(|err| {
+                log::warn!("无法查询上次退出的原因，按意外退出处理：{err}");
+                true
+            })
+        };
+        match lock(&db).recover_jobs(crashed) {
+            Ok((0, _)) => {}
+            Ok((n, true)) => {
+                log::warn!("{n} 个文件在上次 Rummage 意外退出时正在处理，各计一次失败。")
+            }
+            Ok((n, false)) => {
+                log::info!("{n} 个文件在上次退出时正在处理，退出不是它们引起的，放回重新处理。")
+            }
             Err(err) => log::error!("无法恢复上次中断的作业：{err}"),
         }
         let threads = int(&lock(&params), "index_threads").max(1) as usize;
@@ -533,6 +559,7 @@ impl Pipeline {
             opts,
             disabled,
             engine: Mutex::new(None),
+            model: Mutex::new(None),
             dead: Mutex::new(None),
             cpu_only: AtomicBool::new(false),
             preferred: Mutex::new(preferred),
@@ -542,6 +569,7 @@ impl Pipeline {
             held_clear: AtomicBool::new(false),
             last_released: Mutex::new(None),
             no_model: AtomicBool::new(false),
+            npu_note: Mutex::new(None),
             no_mmproj: AtomicBool::new(false),
             error: Mutex::new(None),
             stuck: Arc::new(prep::Stuck::default()),
@@ -565,6 +593,7 @@ impl Pipeline {
         });
         let requeued = {
             let backend = shared.model_backend();
+            *lock(&shared.model) = Some(shared.opts.space(backend).model_sha256);
             let db = lock(&shared.db);
             shared.requeue_stale(&db, backend)
         };

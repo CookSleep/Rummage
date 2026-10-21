@@ -191,3 +191,44 @@ fn claimed_job_takes_params_at_claim() {
         ["image-v1-t560"]
     );
 }
+
+/// 新建的引擎与上一个的模型不同（手机上在 NPU 与通用版之间切换）：向量来自别的模型的文件整个重建，
+/// 处理中的作业作废；模型相同时只换引擎、不重建
+#[test]
+fn engine_model_change_rebuilds() {
+    let mut e = env(&[("说明.md", "# 标题\n\n正文。\n".as_bytes())]);
+    e.start(true, true);
+    e.wait_idle(0);
+    let p = e.pipeline.as_ref().unwrap();
+    let shared = &p.shared;
+    p.reload();
+    assert!(p.query_engine().is_some());
+    assert_eq!(
+        e.count("SELECT COUNT(*) FROM jobs WHERE stage = 'pending'"),
+        0
+    );
+    // 已有向量与上一个引擎都算作另一个模型的
+    let conn = e.conn();
+    conn.execute_batch(
+        "INSERT INTO spaces SELECT 'old-' || id, family, 'old', mmproj_sha256, runtime, backend, precision,
+           prefix_scheme, preprocess, created_at FROM spaces;
+         UPDATE vectors SET space_id = 'old-' || space_id;",
+    )
+    .unwrap();
+    *lock(&shared.model) = Some("old".into());
+    let embeds = e.stub.embeds.load(Ordering::Relaxed);
+    p.reload();
+    assert!(p.query_engine().is_some());
+    assert_eq!(
+        lock(&shared.model).as_deref(),
+        Some(gguf().model_sha256.as_str())
+    );
+    e.wait_until(|s| s.state == IndexState::Idle && s.rebuild.is_none());
+    assert!(e.stub.embeds.load(Ordering::Relaxed) > embeds);
+    assert_eq!(
+        e.strings(
+            "SELECT DISTINCT sp.model_sha256 FROM vectors v JOIN spaces sp ON sp.id = v.space_id"
+        ),
+        [gguf().model_sha256]
+    );
+}

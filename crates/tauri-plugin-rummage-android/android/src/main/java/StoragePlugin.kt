@@ -272,6 +272,13 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
     resolveUnrestricted(invoke)
   }
 
+  /** 打开本应用的系统应用信息页：各厂商的后台运行、耗电管理设置都从这里进入，是所有系统共有的入口 */
+  @Command
+  fun openAppSettings(invoke: Invoke) {
+    activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}")))
+    invoke.resolve()
+  }
+
   /** Android 13 起请求通知权限，不等用户的选择；被拒绝时进度通知不显示，前台服务照常运行 */
   @Command
   fun requestNotifications(invoke: Invoke) {

@@ -47,6 +47,11 @@ impl Job {
     }
 }
 
+/// 推理进程是被系统结束的：只有 Android 能区分
+pub fn killed_by_system(_child: &Child, _job: &Job) -> bool {
+    false
+}
+
 /// 启动推理子进程（标准输入输出都是管道）并记下它的 pid
 pub fn spawn(
     exe: &Path,

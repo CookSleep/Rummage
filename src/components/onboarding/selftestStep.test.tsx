@@ -31,7 +31,7 @@ const VALUES = { image_tokens: 280, long_image_tokens: 140, video_frame_tokens: 
 describe('SelftestStep 测速结果', () => {
   it('显示按当前设置的单个文件耗时，悬停说明含义', async () => {
     mockCore({ get_params: () => VALUES })
-    render(<SelftestStep selftest={TESTED} model />)
+    render(<SelftestStep selftest={TESTED} model cpu text="" />)
     await flush()
     expect(text()).toContain('15.0 s')
     expect(document.querySelector('[aria-label="按当前设置，每张图片约 15.0 s"]')).not.toBeNull()
@@ -41,7 +41,7 @@ describe('SelftestStep 测速结果', () => {
 
   it('测速用到的参数改过时提示耗时是修改前的，不重新检测', async () => {
     const calls = mockCore({ get_params: () => ({ ...VALUES, image_tokens: 560 }) })
-    render(<SelftestStep selftest={TESTED} model />)
+    render(<SelftestStep selftest={TESTED} model cpu text="" />)
     await flush()
     expect(text()).toContain(SPEED_STALE_TEXT)
     expect(document.querySelector('[aria-label="按修改前的设置，每张图片约 15.0 s"]')).not.toBeNull()
@@ -50,7 +50,7 @@ describe('SelftestStep 测速结果', () => {
 
   it('没有测速结果（旧的检测结果）时显示样本耗时', async () => {
     mockCore({ get_params: () => VALUES })
-    render(<SelftestStep selftest={selftest({ devices: [device()], selected: 0 })} model />)
+    render(<SelftestStep selftest={selftest({ devices: [device()], selected: 0 })} model cpu text="" />)
     await flush()
     expect(document.querySelector('[aria-label="检测样本中每张图片的用时"]')).not.toBeNull()
   })
@@ -64,7 +64,7 @@ describe('SelftestStep 高级', () => {
 
   it('只列出影响速度的参数，修改影响索引的参数也直接保存', async () => {
     const calls = mockCore({ get_params: () => VALUES, param_defs: () => DEFS, set_param: () => null })
-    render(<SelftestStep selftest={TESTED} model />)
+    render(<SelftestStep selftest={TESTED} model cpu text="" />)
     await flush()
     await click(button('高级'))
     const d = dialog()
@@ -88,7 +88,7 @@ describe('SelftestStep 高级', () => {
 })
 
 describe('EstimateStep 测速结果', () => {
-  const est: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000 } }, scanning: false }], freeGb: 100 }
+  const est: Estimate = { scanning: false, roots: [{ id: 1, path: 'D:\\照片', files: 5, kinds: { image: { files: 5, bytes: 5_000_000, slices: 0 } }, scanning: false }], freeGb: 100 }
   const kinds = { documents: false, images: true, audio: false, video: false }
 
   it('测速用到的参数改过时提示预估按修改前的速度', async () => {

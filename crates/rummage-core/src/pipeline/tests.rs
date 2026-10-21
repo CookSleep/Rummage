@@ -288,6 +288,7 @@ impl Env {
                     Vec::new()
                 })
             }),
+            crashed: |_| Ok(true),
             file_timeout: Some(self.timeout),
             gpus: Vec::new,
             litert: None,

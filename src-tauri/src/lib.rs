@@ -160,6 +160,8 @@ pub fn run() {
             android::background::battery_unrestricted,
             #[cfg(target_os = "android")]
             android::background::request_battery_unrestricted,
+            #[cfg(target_os = "android")]
+            android::background::open_app_settings,
             setup::remove_root,
             setup::get_params,
             setup::set_param,

@@ -73,7 +73,7 @@ function progress(s: IndexStatus, base: number) {
  */
 export function indexHint(s: IndexStatus, now = new Date(), base = 0, device: { name: string; why: string } | null = null) {
   const r = round(s, base)
-  if (s.state === 'no_model') return '尚未下载文字模型，无法识别文件内容。可在「设置 → 模型」中下载或导入，之后会继续建立索引。'
+  if (s.state === 'no_model') return s.error ?? '尚未下载文字模型，无法识别文件内容。可在「设置 → 模型」中下载或导入，之后会继续建立索引。'
   if (s.state === 'error') return s.error ?? '内容识别无法启动，目前只能按文件名搜索。请重新启动 Rummage，或在「设置 → 设备」中选择使用 CPU。'
   if (s.state === 'no_mmproj') return '尚未下载图片与音视频模型，图片、音频和视频目前只能按文件名搜索。可在「设置 → 模型」中下载或导入。'
   if (s.paused?.type === 'manual') {

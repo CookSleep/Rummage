@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { ParamValues, SelftestStatus, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { isAndroid } from '../../lib/platform'
-import { CPU_FALLBACK_TEXT, cpuFallbackReason, cpuFaster, cpuName, deviceName, SELFTEST_TEXT, switchedDevice, switchedText } from '../../lib/device'
+import { CPU_FALLBACK_TEXT, cpuFallbackReason, cpuFaster, cpuName, deviceName, selftestText, switchedDevice, switchedText } from '../../lib/device'
 import { ResetIcon, WarningIcon } from '../icons'
 import { renderMessage } from '../ConfirmDialog'
 import { HoverTip } from '../Tip'
@@ -71,7 +71,7 @@ export default function DeviceTab({ setup, values }: { setup: SetupStatus; value
     <div className="space-y-8">
       <section className="space-y-3">
         <h4 className={SECTION_TITLE}>使用的设备</h4>
-        <DevicePicker st={st} />
+        <DevicePicker st={st} cpu={!isAndroid || setup.model.ready} />
         {(fallback === 'failed' || fallback === 'blocked' || fallback === 'gpusOff') && (
           <div className={NOTICE_BOX}>
             <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
@@ -114,7 +114,7 @@ export default function DeviceTab({ setup, values }: { setup: SetupStatus; value
             {st.running ? '正在检测' : st.devices.length ? '重新检测' : '开始检测'}
           </button>
         </div>
-        <p className={ROW_DESC}>{SELFTEST_TEXT}期间暂停建立索引。{isAndroid ? '未通过的 GPU、NPU 不再参与检测，可以单独重新检测。' : '未通过的显卡在更新显卡驱动或 Rummage 后才会再参与检测，也可以单独重新检测。'}</p>
+        <p className={ROW_DESC}>{selftestText(setup)}期间暂停建立索引。{isAndroid ? '未通过的 GPU、NPU 不再参与检测，可以单独重新检测。' : '未通过的显卡在更新显卡驱动或 Rummage 后才会再参与检测，也可以单独重新检测。'}</p>
         {st.devices.length || st.blocked.length ? <DeviceList st={st} values={values} /> : <p className="text-sm text-gray-500 dark:text-gray-400">还没有检测过</p>}
         {st.error && <p data-selectable-text className={ERROR_TEXT}>{renderMessage(st.error, 'font-semibold')}</p>}
         {!modelReady && <p className={ROW_DESC}>请先下载或导入模型，再检测设备</p>}

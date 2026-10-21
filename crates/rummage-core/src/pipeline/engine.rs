@@ -2,7 +2,8 @@
 //! - 创建：按用户选择的设备（`preferred_device`）与自检记录选设备（`selftest::preferred_gpu`）：选了的显卡不能用时按自动选择，
 //!   自动选择按性能顺序取第一个能用的设备，跳过本次运行中停用的显卡（`Shared::disabled`）；本次运行所有显卡都停用时、
 //!   后台自动检测设备期间（`cpu_only`）只用 CPU。图片、音频、视频的开关变化时重建；视觉 token 档位不属于引擎（`Engine`），改了不重建。`hold` 期间不建引擎，
-//!   检查与设置都在引擎槽的锁内。
+//!   检查与设置都在引擎槽的锁内。LiteRT 的 NPU 用另一个模型文件：选中 NPU 但它的模型不可用时跳过它；新引擎与上一个的模型不同时，
+//!   放回向量来自别的模型的文件，正在处理的作业全部作废（`Shared::requeue`），索引与查询始终用同一个模型。
 //! - 失效（`engine_failed`）：设备丢失、后端失效、推理进程结束不了、显存不足，或显卡算出无效结果（NaN 等）时丢弃该引擎。
 //!   换哪个设备按驱动证据门槛在丢弃时同步决定，新引擎建好之前不会初始化别的显卡：
 //!   - 明确不是驱动问题的（找不到显卡即已拔出、算出 NaN、显存不足）：只停用这块显卡，换剩下的设备中最快的。
@@ -75,6 +76,13 @@ impl Shared {
         let gpu = self.chosen_gpu(&values, self.cpu_only.load(Ordering::Relaxed));
         let backend = gpu.as_ref().map_or(Backend::Cpu, |r| r.backend);
         let Some((images, audio, video)) = self.media_flags(&values, backend, out) else {
+            let note = self.npu_note(&values, backend);
+            let mut cur = lock(&self.npu_note);
+            if *cur != note {
+                *cur = note;
+                let _ = out.send(Msg::Progress);
+            }
+            drop(cur);
             *slot = None;
             return None;
         };
@@ -125,6 +133,18 @@ impl Shared {
         });
         *slot = Some(engine.clone());
         self.set_error(None, out);
+        // 在引擎槽的锁内记下模型，与建引擎的先后一致；放回文件要取数据库锁，在释放之后进行
+        let model = &engine.cfg.model_sha256;
+        let changed = lock(&self.model)
+            .replace(model.clone())
+            .is_some_and(|m| m != *model);
+        drop(slot);
+        if changed {
+            match self.requeue(&["document", "image", "audio", "video"], engine.cfg.backend) {
+                Ok(n) => log::info!("换了模型文件，{n:?} 个文件排队重建。"),
+                Err(err) => log::error!("无法检查哪些文件要按新的模型文件重建：{err}"),
+            }
+        }
         Some(engine)
     }
 
@@ -154,6 +174,57 @@ impl Shared {
         Some((on("index_images"), on("index_audio"), on("index_video")))
     }
 
+    /// 只有 NPU 模型（分词器也在）、NPU 却用不了、用户又是自动选择或选了 NPU 时给用户的说明；其他情况为空。
+    /// NPU 检测通过、本次运行中出错停用的，重新启动后会再试；已屏蔽或没有通过检测的不会。没检测过 NPU 时为空
+    fn npu_note(
+        &self,
+        values: &std::collections::BTreeMap<String, rummage_proto::ParamValue>,
+        backend: Backend,
+    ) -> Option<String> {
+        let opts = &self.opts;
+        let litert = opts.litert.as_ref()?;
+        let usable = |b: Backend| (opts.available)(opts.model_paths(b).0, opts.model_files(b).0);
+        if backend == Backend::Npu
+            || !(opts.available)(&litert.tokenizer, &rummage_embed::space::TOKENIZER)
+            || !usable(Backend::Npu)
+            || usable(Backend::Cpu)
+        {
+            return None;
+        }
+        let report = selftest::last_report(&opts.selftest_cache)?;
+        let npu = report
+            .candidates
+            .iter()
+            .find(|c| c.backend == Backend::Npu)?;
+        let preferred = lock(&self.preferred).clone();
+        if preferred != rummage_proto::AUTO_DEVICE && preferred != npu.device_id() {
+            return None;
+        }
+        let images = ["index_images", "index_audio", "index_video"]
+            .iter()
+            .any(|k| params::flag(values, k));
+        // 不算本次运行中的停用时会选 NPU：是本次运行出错停用的
+        let retry = selftest::preferred_gpu(
+            &opts.selftest_cache,
+            &(opts.gpus)(),
+            images,
+            rummage_proto::AUTO_DEVICE,
+            &[],
+        )
+        .is_some_and(|r| r.backend == Backend::Npu);
+        let disabled = {
+            let d = lock(&self.disabled);
+            d.all || d.keys.contains(&selftest::report_key(npu))
+        };
+        if retry && disabled {
+            return Some("NPU 出错，本次运行无法识别文件内容。可在「设置 → 模型」中下载通用模型，改用 GPU 或 CPU；或重新启动 Rummage 再试 NPU。".to_string());
+        }
+        (!retry && npu.status != selftest::Status::Skipped).then(|| {
+            "NPU 出错，无法识别文件内容。可在「设置 → 模型」中下载通用模型，改用 GPU 或 CPU。"
+                .to_string()
+        })
+    }
+
     /// 按用户的选择与自检记录选用的显卡（LiteRT 的 GPU、NPU 也算）；用 CPU 时为空。本次运行所有显卡都停用、
     /// `cpu_only`（后台自动检测设备期间）时只用 CPU（见模块说明）
     pub(super) fn chosen_gpu(
@@ -172,13 +243,29 @@ impl Shared {
             .iter()
             .any(|k| params::flag(values, k));
         let preferred = lock(&self.preferred).clone();
-        selftest::preferred_gpu(
-            &self.opts.selftest_cache,
-            &(self.opts.gpus)(),
-            any_media && self.mmproj_available(Backend::Cpu),
-            &preferred,
-            &disabled,
-        )
+        let images = any_media && self.mmproj_available(Backend::Cpu);
+        let adapters = (self.opts.gpus)();
+        let pick = |disabled: &[selftest::DeviceKey]| {
+            selftest::preferred_gpu(
+                &self.opts.selftest_cache,
+                &adapters,
+                images,
+                &preferred,
+                disabled,
+            )
+        };
+        let r = pick(&disabled)?;
+        let opts = &self.opts;
+        // NPU 的模型不可用（如已删除）时跳过 NPU，改用其他设备与通用版
+        if r.backend == Backend::Npu
+            && !(opts.available)(
+                opts.model_paths(Backend::Npu).0,
+                opts.model_files(Backend::Npu).0,
+            )
+        {
+            return pick(&[disabled, vec![selftest::report_key(&r)]].concat());
+        }
+        Some(r)
     }
 
     /// 当前时刻与挂起代数

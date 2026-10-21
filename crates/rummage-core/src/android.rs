@@ -8,10 +8,15 @@
 //!   1.0 对应 `SEVERE`。按官方文档，设备不支持或调用明显快于每秒一次时返回 NaN，此时按空处理；检测每 5 秒一次，
 //!   修改参数等操作额外触发的检测可能因此拿不到余量，不影响下一次。
 //! - 剩余空间：`statvfs` 的 `f_bavail × f_frsize`（非特权进程可用的空间）。
+//! - 上次退出是否为崩溃（`crashed`）：`ActivityManager.getHistoricalProcessExitReasons`（API 30）中本应用主进程
+//!   最近一条记录在要查的这段时间内，且原因是 `REASON_CRASH` 或 `REASON_CRASH_NATIVE`。被系统冻结后结束、安装更新、
+//!   用户划掉等都不算；手机重启等没有留下记录时，最近一条是更早的，不算。
 //! - 任何一项查询失败都按“不暂停”处理，只记 debug 日志，与 Windows 相同。
 use std::ffi::CString;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jni::objects::{JObject, JValue};
 use jni::{Env, JavaVM, jni_sig, jni_str};
@@ -22,6 +27,12 @@ mod other;
 pub use other::*;
 
 use crate::resource::Sensed;
+
+/// `ApplicationExitInfo.REASON_CRASH`（Java 异常）与 `REASON_CRASH_NATIVE`（原生代码崩溃）
+const REASON_CRASH: i32 = 4;
+const REASON_CRASH_NATIVE: i32 = 5;
+/// 退出记录最多看这么多条：主进程与推理进程（`:embed`）的记录交错，最近一条主进程的记录在其中
+const EXIT_RECORDS: i32 = 32;
 
 /// 预测温度余量的时间（秒）：官方文档允许 0–60 秒，越远越不准；10 秒足够在升温前放慢，又不至于过早
 const HEADROOM_FORECAST_S: i32 = 10;
@@ -131,4 +142,79 @@ pub(crate) fn free_gb(dir: &Path) -> Option<f64> {
         return None;
     }
     Some(st.f_bavail as f64 * st.f_frsize as f64 / (1u64 << 30) as f64)
+}
+
+/// 本应用主进程最近 `window` 内的上一次退出是否为崩溃（见模块说明）；没有记录时为否
+pub(crate) fn crashed(window: Duration) -> io::Result<bool> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let since = now.saturating_sub(window).as_millis() as i64;
+    with_context(|env, ctx| {
+        let am = service(env, ctx, "activity")?;
+        let pkg = env
+            .call_method(
+                ctx,
+                jni_str!("getPackageName"),
+                jni_sig!("()Ljava/lang/String;"),
+                &[],
+            )?
+            .l()?;
+        let list = env
+            .call_method(
+                &am,
+                jni_str!("getHistoricalProcessExitReasons"),
+                jni_sig!("(Ljava/lang/String;II)Ljava/util/List;"),
+                &[
+                    JValue::Object(&pkg),
+                    JValue::Int(0),
+                    JValue::Int(EXIT_RECORDS),
+                ],
+            )?
+            .l()?;
+        let n = env
+            .call_method(&list, jni_str!("size"), jni_sig!("()I"), &[])?
+            .i()?;
+        // 按时间从新到旧
+        for i in 0..n {
+            let info = env
+                .call_method(
+                    &list,
+                    jni_str!("get"),
+                    jni_sig!("(I)Ljava/lang/Object;"),
+                    &[JValue::Int(i)],
+                )?
+                .l()?;
+            let name = env
+                .call_method(
+                    &info,
+                    jni_str!("getProcessName"),
+                    jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )?
+                .l()?;
+            let main = env
+                .call_method(
+                    &name,
+                    jni_str!("equals"),
+                    jni_sig!("(Ljava/lang/Object;)Z"),
+                    &[JValue::Object(&pkg)],
+                )?
+                .z()?;
+            if main {
+                let at = env
+                    .call_method(&info, jni_str!("getTimestamp"), jni_sig!("()J"), &[])?
+                    .j()?;
+                if at < since {
+                    return Ok(false);
+                }
+                let reason = env
+                    .call_method(&info, jni_str!("getReason"), jni_sig!("()I"), &[])?
+                    .i()?;
+                return Ok(reason == REASON_CRASH || reason == REASON_CRASH_NATIVE);
+            }
+        }
+        Ok(false)
+    })
+    .map_err(io::Error::other)
 }

@@ -36,16 +36,18 @@
 //! - 过期后自动在后台重新检测（`auto_selftest`，由暂停检测线程每 5 秒调用）：只在有待建立索引（含重建）的文件、
 //!   不处于任何暂停（手动、电池、全屏、磁盘空间、睡眠）、不在引导、模型任务或清空索引中、本次运行显卡没出过错、
 //!   用户没有选择只用 CPU 时开始；每次运行只发起一次（失败或超时也不再自动重试），用户本次运行中手动检测过也不再发起。
-//!   检测期间流水线不 `hold`，改为 `Pipeline::cpu_only` 暂时只用 CPU、照常建索引；只测失效的部分（显卡有增减或更换时只测变化的显卡；运行库或模型变化、新需要图片与音视频模型时 CPU 也重测），
+//!   检测期间流水线不 `hold`，改为 `Pipeline::cpu_only` 暂时只用 CPU、照常建索引（选用 NPU 时仍 `hold`：CPU 用的通用版与 NPU 的模型不同）；只测失效的部分（显卡有增减或更换时只测变化的显卡；运行库或模型变化、新需要图片与音视频模型时 CPU 也重测），
 //!   不测有过屏蔽记录的显卡（`selftest::Options::auto`）。通过时按新记录切回显卡，不提示；未通过时保持 CPU，
 //!   `SelftestStatus::auto` 让设置页说明原因。
 //!   与模型任务的互斥、界面显示的检测状态与手动检测相同。
 //!   进行中进入任何暂停（含即将睡眠）时中止（`stop_auto_selftest`，结束检测子进程，不缓存结果；已测完的显卡的屏蔽与未通过记录照常保存，正在测的显卡的子进程结束不了时屏蔽它）。自动检测出错
 //!   （等引擎释放超时、样本无效）或被中止时只写日志，不写 `SelftestStatus::error`，界面照旧显示上次缓存的结果。
 //! - 设备检测、检测状态与选择设备的实现在 `selftest` 子模块。
-//! - 预估只给出各文件夹按种类的数量与大小，以及数据目录所在磁盘的剩余空间，时间与空间由界面按自检速度换算。
+//! - 预估只给出各文件夹按种类的数量与大小、长图切片的段数（每个文件夹随机抽 `ESTIMATE_SAMPLE` 张图片只读文件头，按当前参数
+//!   切段后放大到图片总数），以及数据目录所在磁盘的剩余空间，时间与空间由界面按自检速度换算。
 mod selftest;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -55,9 +57,9 @@ use rummage_embed::npu::{self, QnnEntry};
 use rummage_embed::space::{self, ModelFile};
 use rummage_index::Db;
 use rummage_proto::{
-    AUTO_DEVICE, ApiError, Estimate, Event, KindTotal, ModelFileStatus, ModelTask, ModelTaskKind,
-    ModelTaskPhase, ModelTaskState, ParamValue, Reply, Request, RootEstimate, SelftestStatus,
-    SetupStatus, params,
+    AUTO_DEVICE, ApiError, CPU_DEVICE, Estimate, Event, KindTotal, ModelFileStatus, ModelTask,
+    ModelTaskKind, ModelTaskPhase, ModelTaskState, ParamValue, Reply, Request, RootEstimate,
+    SelftestStatus, SetupStatus, params,
 };
 
 use super::{State, api_error, db, lock, unavailable};
@@ -477,6 +479,13 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
                     models::remove(&dir, f, label)?;
                     set_verified(&s, f.name, None);
                 }
+                // 选了 CPU 而 CPU 要用的通用版已删除：改回自动选择（只有 NPU 模型时不能选 CPU）
+                if s.preferred_device() == CPU_DEVICE
+                    && s.config.get().is_some_and(|c| !c.cpu_model_ok())
+                    && let Err(err) = selftest::set_preferred_device(&s, AUTO_DEVICE.to_string())
+                {
+                    log::warn!("无法把所选的设备改回自动选择：{}", err.message);
+                }
                 Ok(if installed {
                     format!("已删除{label}。")
                 } else {
@@ -721,14 +730,50 @@ fn start_task(
     Ok(Reply::Done)
 }
 
+/// 预估时每个文件夹抽样读取文件头的图片数：只读几 KB，几百张不到一秒
+const ESTIMATE_SAMPLE: u32 = 200;
+
+/// 按抽样的图片推算各文件夹长图切片的总段数：抽到的图片按当前参数切段，段数之和按图片总数放大
+fn estimate_slices(
+    sample: &[(i64, PathBuf)],
+    totals: &[(i64, String, u64, u64)],
+    values: &BTreeMap<String, ParamValue>,
+) -> BTreeMap<i64, u64> {
+    let ratio = params::float(values, "long_image_ratio");
+    let max = params::int(values, "long_image_max_slices").max(0) as u32;
+    let mut out = BTreeMap::new();
+    for (root, path) in sample {
+        // 读文件头也要先排除网盘占位文件
+        if rummage_index::ensure_local(path).is_err() {
+            continue;
+        }
+        let n = rummage_media::dimensions(path).map_or(0, |(w, h)| {
+            rummage_media::slices(w, h, ratio, max).len() as u64
+        });
+        let e = out.entry(*root).or_insert((0u64, 0u64));
+        *e = (e.0 + 1, e.1 + n);
+    }
+    out.into_iter()
+        .map(|(root, (seen, slices))| {
+            let files = totals
+                .iter()
+                .find(|t| t.0 == root && t.1 == "image")
+                .map_or(0, |t| t.2);
+            (root, slices * files / seen.max(1))
+        })
+        .collect()
+}
+
 fn estimate(state: &State) -> Result<Estimate, ApiError> {
-    let (roots, totals) = {
+    let (roots, totals, sample) = {
         let db = db(state)?;
         (
             db.list_roots().map_err(unavailable)?,
             db.kind_totals().map_err(unavailable)?,
+            db.sample_images(ESTIMATE_SAMPLE).map_err(unavailable)?,
         )
     };
+    let slices = estimate_slices(&sample, &totals, &state.params());
     Ok(Estimate {
         scanning: state.scan_busy(),
         free_gb: state
@@ -752,6 +797,11 @@ fn estimate(state: &State) -> Result<Estimate, ApiError> {
                             KindTotal {
                                 files: t.2,
                                 bytes: t.3,
+                                slices: if t.1 == "image" {
+                                    slices.get(&r.id).copied().unwrap_or(0)
+                                } else {
+                                    0
+                                },
                             },
                         )
                     })

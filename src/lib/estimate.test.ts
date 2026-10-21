@@ -6,12 +6,12 @@ const est: Estimate = {
   scanning: false,
   freeGb: null,
   roots: [
-    { id: 1, path: 'D:\资料', files: 120, kinds: { document: { files: 10, bytes: 160_000 }, other: { files: 5, bytes: 1000 } }, scanning: false },
-    { id: 2, path: 'E:\照片', files: 50, kinds: { image: { files: 40, bytes: 80_000_000 } }, scanning: false },
+    { id: 1, path: 'D:\资料', files: 120, kinds: { document: { files: 10, bytes: 160_000, slices: 0 }, other: { files: 5, bytes: 1000, slices: 0 } }, scanning: false },
+    { id: 2, path: 'E:\照片', files: 50, kinds: { image: { files: 40, bytes: 80_000_000, slices: 0 } }, scanning: false },
     // 2 个约 1 小时的 128 kbps 录音（共 115 MB）
-    { id: 3, path: 'F:\录音', files: 2, kinds: { audio: { files: 2, bytes: 115_200_000 } }, scanning: false },
+    { id: 3, path: 'F:\录音', files: 2, kinds: { audio: { files: 2, bytes: 115_200_000, slices: 0 } }, scanning: false },
     // 3 个视频共 360 MB：按 16 Mbps 约 3 分钟，按 1 Mbps 约 48 分钟
-    { id: 4, path: 'G:\视频', files: 3, kinds: { video: { files: 3, bytes: 360_000_000 } }, scanning: false },
+    { id: 4, path: 'G:\视频', files: 3, kinds: { video: { files: 3, bytes: 360_000_000, slices: 0 } }, scanning: false },
   ],
 }
 
@@ -34,12 +34,12 @@ const selftest = (over: Partial<SelftestStatus>): SelftestStatus => ({
 
 describe('pickSpeeds', () => {
   it('优先用选中的设备，只用 CPU 时用 CPU 的检测结果，没有结果时用内置值', () => {
-    expect(pickSpeeds(selftest({}))).toEqual({ textMs: 7, imageMs: 39, audioMs: 48, videoMs: 300, gpu: true, measured: { text: false, image: false, audio: false, video: false } })
-    expect(pickSpeeds(selftest({ preferred: 'cpu' }))).toEqual({ textMs: 30, imageMs: 2000, audioMs: 900, videoMs: 6500, gpu: false, measured: { text: false, image: false, audio: false, video: false } })
+    expect(pickSpeeds(selftest({}))).toEqual({ textMs: 7, imageMs: 39, audioMs: 48, videoMs: 300, sliceMs: 39, gpu: true, measured: { text: false, image: false, audio: false, video: false } })
+    expect(pickSpeeds(selftest({ preferred: 'cpu' }))).toEqual({ textMs: 30, imageMs: 2000, audioMs: 900, videoMs: 6500, sliceMs: 2000, gpu: false, measured: { text: false, image: false, audio: false, video: false } })
     expect(pickSpeeds(selftest({ devices: [], selected: null }))).toEqual(CPU_FALLBACK)
     // 只测了文本时图片用内置值
     const textOnly = selftest({ devices: [{ id: 'cpu', gpu: false, pciId: null, name: 'CPU', status: 'passed', reason: null, textMs: 25, imageMs: null, audioMs: null, videoMs: null, speed: null, state: null }], selected: 0 })
-    expect(pickSpeeds(textOnly)).toEqual({ textMs: 25, imageMs: CPU_FALLBACK.imageMs, audioMs: CPU_FALLBACK.audioMs, videoMs: CPU_FALLBACK.videoMs, gpu: false, measured: { text: false, image: false, audio: false, video: false } })
+    expect(pickSpeeds(textOnly)).toEqual({ textMs: 25, imageMs: CPU_FALLBACK.imageMs, audioMs: CPU_FALLBACK.audioMs, videoMs: CPU_FALLBACK.videoMs, sliceMs: CPU_FALLBACK.sliceMs, gpu: false, measured: { text: false, image: false, audio: false, video: false } })
   })
 })
 
@@ -65,6 +65,16 @@ describe('estimateIndex', () => {
     const none = estimateIndex(est, { documents: false, images: false, audio: false, video: false }, CPU_FALLBACK)
     expect(none.time).toEqual({ low: 0, high: 0 })
     expect(none.disk.low).toBeGreaterThan(0)
+  })
+
+  it('长图的每段按黄金样本的图片耗时计，不按整图档位换算', () => {
+    const kinds = { documents: false, images: true, audio: false, video: false }
+    const base = estimateIndex(est, kinds, CPU_FALLBACK)
+    const long: Estimate = { ...est, roots: [{ ...est.roots[1], kinds: { image: { files: 40, bytes: 80_000_000, slices: 40 } } }] }
+    const r = estimateIndex(long, kinds, CPU_FALLBACK)
+    expect(r.imageFiles).toBe(40)
+    expect(r.time.low - base.time.low).toBeCloseTo(40 * 1.8, 1)
+    expect(r.disk.high).toBeGreaterThan(base.disk.high)
   })
 
   it('音频按文件大小粗估时长，每 8 秒一段', () => {
@@ -110,15 +120,15 @@ describe('测速结果', () => {
   it('有测速结果的项直接用它，其余用黄金样本的耗时', () => {
     const st = selftest({ preferred: 'cpu' })
     st.devices[0] = { ...st.devices[0], speed }
-    expect(pickSpeeds(st)).toEqual({ textMs: 400, imageMs: 5000, audioMs: 900, videoMs: 3000, gpu: false, measured: { text: true, image: true, audio: false, video: true } })
+    expect(pickSpeeds(st)).toEqual({ textMs: 400, imageMs: 5000, audioMs: 900, videoMs: 3000, sliceMs: 2000, gpu: false, measured: { text: true, image: true, audio: false, video: true } })
   })
 
   it('测速结果不再按档位、帧数与切片长度换算，只留解码开销', () => {
-    const measured = { textMs: 400, imageMs: 5000, audioMs: 900, videoMs: 3000, gpu: false, measured: { text: true, image: true, audio: true, video: true } }
+    const measured = { textMs: 400, imageMs: 5000, audioMs: 900, videoMs: 3000, sliceMs: 2000, gpu: false, measured: { text: true, image: true, audio: true, video: true } }
     const images = estimateIndex(est, { documents: false, images: true, audio: false, video: false }, measured)
-    // 40 张 × 5 秒 × 解码开销 1–1.5
+    // 40 张 × 5 秒 × 解码开销 1–1.3
     expect(images.time.low).toBeCloseTo(40 * 5, 1)
-    expect(images.time.high).toBeCloseTo(40 * 5 * 1.5, 1)
+    expect(images.time.high).toBeCloseTo(40 * 5 * 1.3, 1)
     // 找物体：90 段 × 3 秒 × 抽帧开销 1.2
     const video = estimateIndex(est, { documents: false, images: false, audio: false, video: true }, measured)
     expect(video.time.low).toBeCloseTo(90 * 3 * 1.2, 1)
@@ -133,7 +143,7 @@ describe('测速结果', () => {
 
 describe('pickSpeeds 回退', () => {
   it('核心把选中项改为 CPU 时按 CPU 预估', () => {
-    expect(pickSpeeds(selftest({ selected: 0, failed: 'gpu:RTX 4080 SUPER|0000:01:00.0' }))).toEqual({ textMs: 30, imageMs: 2000, audioMs: 900, videoMs: 6500, gpu: false, measured: { text: false, image: false, audio: false, video: false } })
+    expect(pickSpeeds(selftest({ selected: 0, failed: 'gpu:RTX 4080 SUPER|0000:01:00.0' }))).toEqual({ textMs: 30, imageMs: 2000, audioMs: 900, videoMs: 6500, sliceMs: 2000, gpu: false, measured: { text: false, image: false, audio: false, video: false } })
   })
 })
 

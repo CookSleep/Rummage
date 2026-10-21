@@ -1,4 +1,4 @@
-import type { BlockedGpu, DeviceResult, ParamValues, SelftestStatus } from '../types'
+import type { BlockedGpu, DeviceResult, ParamValues, SelftestStatus, SetupStatus } from '../types'
 import { isAndroid } from './platform'
 
 /** 显示名称用到的字段，检测结果与被屏蔽的显卡都有 */
@@ -37,10 +37,13 @@ export function speedStale(d: DeviceResult, values: ParamValues | null) {
 /** 检测结果中的耗时是修改参数前测得的 */
 export const SPEED_STALE_TEXT = '参数已修改，以下耗时为修改前的结果，重新检测后更新'
 
-/** 引导与设备页共用的检测设备说明 */
-export const SELFTEST_TEXT = isAndroid
-  ? '用 CPU、GPU 和 NPU 计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。'
-  : '用 CPU 和每块显卡计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。'
+/** 引导与设备页共用的检测设备说明。Android 上按装好的模型说明测哪些设备：CPU 与 GPU 用通用模型，NPU 用 NPU 模型 */
+export function selftestText(s: SetupStatus) {
+  if (!isAndroid) return '用 CPU 和每块显卡计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。'
+  const npu = Boolean(s.npu?.ready)
+  if (npu && !s.model.ready) return '用 NPU 计算几条样本，确认结果正确并测速。检测约需几分钟。CPU 和 GPU 要用通用模型，下载后才会检测。'
+  return `用 ${npu ? 'CPU、GPU 和 NPU' : 'CPU 和 GPU'} 计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。`
+}
 
 
 /** 用户没有选择只用 CPU，却用 CPU 建立索引的原因，见 `cpuFallbackReason` */

@@ -12,12 +12,15 @@
 //! - 结果由写库线程批量交给 `apply`，一批一个事务。写入前核对文件仍是取作业时的那个（id、根目录、相对路径、
 //!   大小、修改时间都相同）且作业仍在处理中：根目录被移除、文件被删除、处理期间文件变化（扫描已重新排队）
 //!   或作业已被放回时，丢弃该结果。
-//! - 崩溃恢复：核心启动时 `recover_jobs` 把停在 `preprocessing` / `embedding` 的作业计一次失败；
+//! - 崩溃恢复：核心启动时 `recover_jobs` 处理停在 `preprocessing` / `embedding` 的作业：上次是核心自己崩溃时各计一次失败，
+//!   避免某个文件反复导致崩溃；被系统或用户结束、断电等放回 `pending`、不计失败，但同一个文件连续两次在中断时都在处理时
+//!   照样计一次（查不出的崩溃，如内存耗尽被系统结束、关闭了错误报告，也不会无限重试）。
 //!   正常退出时 `release_jobs` 把它们放回 `pending`，不计失败。`quick_hash` 在进入 `embedding` 时写入 `files`，
 //!   在预处理阶段就崩溃的文件还没有它，失败满 3 次时只置为 `failed`、不进黑名单。
 //! - 文件 ID（`Claimed::volume_file_id`，用于识别改名与移动）随任何写入的结果一起写回 `files`。
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -32,6 +35,8 @@ pub fn blacklisted() -> String {
     format!("连续失败 {MAX_ATTEMPTS} 次，不再处理此文件；文件修改后会重新尝试。")
 }
 const CRASHED: &str = "上次处理此文件时 Rummage 意外退出。";
+/// 不是核心自己崩溃的中断，记在放回的作业上（详情中显示为“等待重试”的原因）
+const INTERRUPTED: &str = "上次处理此文件时 Rummage 被结束。";
 /// 出现在“失败文件”列表中、计入失败数的作业（`j` 为 `jobs`）：失败的，以及有内嵌媒体无法识别的已完成文档
 pub(crate) const FAILED: &str =
     "(j.stage = 'failed' OR (j.stage = 'stored' AND j.media_failed > 0))";
@@ -45,9 +50,16 @@ pub const PART_MEDIA: u8 = 2;
 /// `REBUILD_BELOW`，据此识别重建作业
 pub(crate) const REBUILD_SHIFT: i64 = 1 << 45;
 pub(crate) const REBUILD_BELOW: i64 = -(1 << 44);
-/// 整图向量（`v` 为 `vectors`）：在 `?3` 空间中，参数版本即该空间的预处理版本
-const WHOLE: &str =
-    "v.space_id = ?3 AND v.params_version = (SELECT preprocess FROM spaces WHERE id = ?3)";
+/// 向量（`v` 为 `vectors`）所在空间与 `?3` 空间的模型、运行库、精度与前缀方案都相同，只可能后端不同（检索视为兼容，
+/// 见 `search::comparable`）；预处理版本不限
+const SAME_MODEL: &str = "v.space_id IN (SELECT b.id FROM spaces a
+  JOIN spaces b USING (family, model_sha256, runtime, precision, prefix_scheme)
+  WHERE a.id = ?3 AND b.mmproj_sha256 IS a.mmproj_sha256)";
+/// 整图向量：在与 `?3` 兼容的空间中，参数版本即 `?3` 空间的预处理版本
+const WHOLE: &str = "v.space_id IN (SELECT b.id FROM spaces a
+  JOIN spaces b USING (family, model_sha256, runtime, precision, prefix_scheme, preprocess)
+  WHERE a.id = ?3 AND b.mmproj_sha256 IS a.mmproj_sha256)
+  AND v.params_version = (SELECT preprocess FROM spaces WHERE id = ?3)";
 
 /// 取出的作业；`root_id`、`rel_path`、`size`、`mtime` 用于写入前核对文件没有变化
 #[derive(Debug, Clone, PartialEq)]
@@ -109,9 +121,9 @@ pub enum Outcome {
         /// 文档内嵌媒体中这一批无法识别的个数，与是否累加到前几批上（接着上一批时）；没算内嵌媒体时为空
         media_failed: Option<(u32, bool)>,
     },
-    /// 内容相同的图片、音频或视频已有向量，复制文件 `from` 的片段、宽高、元数据与向量：`space_id` 空间中参数版本即该空间
-    /// 预处理版本的向量（整图、音频段、视频窗口），以及参数版本为 `slice_version` 的长图切片（见 `Db::copy_source`；
-    /// 音频与视频为空串）；
+    /// 内容相同的图片、音频或视频已有向量，复制文件 `from` 的片段、宽高、元数据与向量：与 `space_id` 空间兼容（只可能后端不同）、
+    /// 参数版本即该空间预处理版本的向量（整图、音频段、视频窗口），以及同一模型、参数版本为 `slice_version` 的长图切片
+    /// （见 `Db::copy_source`；音频与视频为空串）；
     /// 写入时 `from` 的内容哈希已变或已没有这样的向量，作业放回 `pending`
     Copied {
         kind: &'static str,
@@ -378,7 +390,7 @@ fn apply_one(conn: &Connection, job: &Claimed, out: &Outcome, now: i64) -> rusql
                        EXISTS (SELECT 1 FROM vectors v WHERE v.segment_id = s.id AND {WHOLE})
                      FROM segments s JOIN files f ON f.id = s.file_id
                      WHERE s.file_id = ?1 AND f.content_hash = ?2 AND EXISTS (
-                       SELECT 1 FROM vectors v WHERE v.segment_id = s.id AND ({WHOLE} OR v.params_version = ?4))
+                       SELECT 1 FROM vectors v WHERE v.segment_id = s.id AND ({WHOLE} OR ({SAME_MODEL} AND v.params_version = ?4)))
                      ORDER BY s.id"
                 ))?
                 .query_map(params![from, content_hash, space_id, slice_version], |row| {
@@ -400,7 +412,7 @@ fn apply_one(conn: &Connection, job: &Claimed, out: &Outcome, now: i64) -> rusql
                     &format!(
                         "INSERT INTO vectors (segment_id, space_id, dim, vec, params_version, coarse)
                          SELECT ?1, space_id, dim, vec, params_version, coarse FROM vectors v
-                         WHERE segment_id = ?2 AND ({WHOLE} OR v.params_version = ?4)"
+                         WHERE segment_id = ?2 AND ({WHOLE} OR ({SAME_MODEL} AND v.params_version = ?4))"
                     ),
                     params![sid, old, space_id, slice_version],
                 )?;
@@ -494,22 +506,45 @@ impl Db {
             .map_err(|err| self.err(err))
     }
 
-    /// 核心启动时调用：停在处理中的作业计一次失败（核心崩溃时正在处理的文件）；返回作业数
-    pub fn recover_jobs(&self) -> Result<usize, DbError> {
+    /// 核心启动时调用：处理上次退出时停在处理中的作业（见模块说明）。`crashed` 按最早的作业开始处理至今的时长判断上次
+    /// 是否为核心自己崩溃，没有这样的作业时不调用。返回作业数与是否计了失败
+    pub fn recover_jobs(
+        &self,
+        crashed: impl FnOnce(Duration) -> bool,
+    ) -> Result<(usize, bool), DbError> {
         let now = now_ms();
         let res = self.conn.unchecked_transaction().and_then(|tx| {
-            let rows: Vec<(i64, Option<Vec<u8>>)> = tx
+            let since: Option<i64> = tx.query_row(
+                &format!("SELECT MIN(updated_at) FROM jobs WHERE stage IN {ACTIVE}"),
+                [],
+                |row| row.get(0),
+            )?;
+            let Some(since) = since else {
+                return Ok((0, false));
+            };
+            // 第 3 列：上次中断时也在处理
+            let rows: Vec<(i64, Option<Vec<u8>>, bool)> = tx
                 .prepare(&format!(
-                    "SELECT j.file_id, f.quick_hash FROM jobs j JOIN files f ON f.id = j.file_id
+                    "SELECT j.file_id, f.quick_hash, j.last_error IS ?1 FROM jobs j JOIN files f ON f.id = j.file_id
                      WHERE j.stage IN {ACTIVE}"
                 ))?
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .query_map([INTERRUPTED], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
                 .collect::<rusqlite::Result<_>>()?;
-            for (id, hash) in &rows {
-                fail(&tx, *id, hash.as_deref(), CRASHED, now)?;
+            let count = crashed(Duration::from_millis((now - since).max(0) as u64));
+            for (id, hash, again) in &rows {
+                if count {
+                    fail(&tx, *id, hash.as_deref(), CRASHED, now)?;
+                } else if *again {
+                    fail(&tx, *id, hash.as_deref(), INTERRUPTED, now)?;
+                } else {
+                    tx.execute(
+                        "UPDATE jobs SET stage = 'pending', last_error = ?2, updated_at = ?3 WHERE file_id = ?1",
+                        params![id, INTERRUPTED, now],
+                    )?;
+                }
             }
             tx.commit()?;
-            Ok(rows.len())
+            Ok((rows.len(), count))
         });
         res.map_err(|err| self.err(err))
     }
@@ -603,16 +638,18 @@ impl Db {
             .map_err(|err| self.err(err))
     }
 
-    /// 另一个内容哈希相同、已有 `space_id` 空间整图向量的文件。按当前参数是长图（长边超过短边的 `max_ratio` 倍，
-    /// 与 `rummage_media::slices` 的判定相同）时，还须有参数版本为 `slice_version` 的切片。没有记录宽高的来源无法判断，不用
+    /// 另一个内容哈希相同、已有与 `space` 兼容（只可能后端不同）的整图向量的文件。按当前参数是长图（长边超过短边的 `max_ratio` 倍，
+    /// 与 `rummage_media::slices` 的判定相同）时，还须有同一模型、参数版本为 `slice_version` 的切片。没有记录宽高的来源无法判断，不用。
+    /// 先登记 `space`，供查询与写入时比较
     pub fn copy_source(
         &self,
         content_hash: &[u8],
-        space_id: &str,
+        space: &Space,
         slice_version: &str,
         max_ratio: f64,
         file_id: i64,
     ) -> Result<Option<i64>, DbError> {
+        db::insert_space(&self.conn, space).map_err(|err| self.err(err))?;
         let has = |cond: &str| {
             format!(
                 "EXISTS (SELECT 1 FROM segments s JOIN vectors v ON v.segment_id = s.id
@@ -627,23 +664,24 @@ impl Db {
                        AND (MAX(f.width, f.height) <= ?5 * MIN(f.width, f.height) OR {})
                      LIMIT 1",
                     has(WHOLE),
-                    has("v.params_version = ?4")
+                    has(&format!("{SAME_MODEL} AND v.params_version = ?4"))
                 ),
-                params![content_hash, file_id, space_id, slice_version, max_ratio],
+                params![content_hash, file_id, space.id, slice_version, max_ratio],
                 |row| row.get(0),
             )
             .optional()
             .map_err(|err| self.err(err))
     }
 
-    /// 另一个内容哈希相同、已有 `space_id` 空间向量（参数版本即该空间的预处理版本）的音频或视频文件（做法同图片）。
+    /// 另一个内容哈希相同、已有与 `space` 兼容的向量（参数版本即该空间的预处理版本）的音频或视频文件（做法同图片）。
     /// 全是静音、没有片段的文件不能作为来源
     pub fn media_copy_source(
         &self,
         content_hash: &[u8],
-        space_id: &str,
+        space: &Space,
         file_id: i64,
     ) -> Result<Option<i64>, DbError> {
+        db::insert_space(&self.conn, space).map_err(|err| self.err(err))?;
         self.conn
             .query_row(
                 &format!(
@@ -652,7 +690,7 @@ impl Db {
                        WHERE s.file_id = f.id AND {WHOLE})
                      LIMIT 1"
                 ),
-                params![content_hash, file_id, space_id],
+                params![content_hash, file_id, space.id],
                 |row| row.get(0),
             )
             .optional()

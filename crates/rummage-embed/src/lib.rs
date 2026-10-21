@@ -42,6 +42,8 @@ pub use frame::{DeviceInfo, GpuInfo};
 pub use litert::{Accel, TIERS as LITERT_TIERS};
 pub use local::{Gpu, Limits, LocalBackend, WorkerSpec, list_devices};
 pub use platform::adapters;
+#[cfg(windows)]
+pub use platform::event_xml;
 #[cfg(target_os = "android")]
 pub use platform::{Launcher, serve_embed_process, set_launcher};
 pub use space::{Backend, SpaceConfig, SpaceId};

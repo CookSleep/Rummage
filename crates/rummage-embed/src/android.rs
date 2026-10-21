@@ -9,6 +9,10 @@
 //!   2. 服务进程连上套接字，先发 4 字节小端的进程号，再在同一连接上运行 `run_worker`（JNI 入口在应用中），结束后整个进程退出；
 //!   3. 本进程只接受同一用户（`SO_PEERCRED` 的 uid 与本进程相同）的连接，`ACCEPT_TIMEOUT` 内没有连上就报启动失败。
 //!   4. `Job::kill` 先解除绑定（否则系统会重新拉起服务），再 `SIGKILL`；进程是否还在用 `kill(pid, 0)` 判断。
+//!   5. 同一个服务的所有绑定都在同一个进程中：换设备时旧引擎的推理进程还没结束、新的就已启动，结束旧的会连新的一起结束。
+//!      所以有 `SLOTS` 个服务（`:embed`、`:embed2`），新的推理进程用一个没有推理在运行的（`SLOT_PIDS`），都在用时等它们结束。
+//!   6. 推理进程自己退出时按应用的退出记录（`ApplicationExitInfo`）区分是被系统结束（内存不足、后台冻结等）还是出错
+//!      （`killed_by_system`）：前者由上层重新拉起，后者按后端失效处理。
 //! - 没有作业对象和内存上限；没有单独的 stderr，`spawn` 给出的 stderr 为空。
 //! - NPU：高通的 QNN 库按文件名加载 HTP 的 Stub，而应用只在 nativeLibraryDir 中按文件名查找；推理进程在创建引擎前按完整路径
 //!   预加载分发库目录中的 Stub（`preload_npu`），之后按文件名加载时复用已加载的库。
@@ -40,13 +44,22 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 /// 等 `:embed` 进程连上套接字的时限：包括系统创建进程与加载应用的原生库
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
 const ACCEPT_POLL: Duration = Duration::from_millis(20);
+/// `:embed` 进程的个数（见模块说明），与插件清单中的 `EmbedService`、`EmbedService2` 对应
+const SLOTS: usize = 2;
+/// 各个 `:embed` 进程中运行的推理：启动中为 `Some(None)`，连上后为进程号；进程已不在时可以再用
+static SLOT_PIDS: Mutex<[Option<Option<u32>>; SLOTS]> = Mutex::new([None; SLOTS]);
+/// 推理进程退出后，系统写入退出记录可能稍晚：最多等这么久
+const EXIT_INFO_WAIT: Duration = Duration::from_secs(2);
 
 /// 在 `:embed` 进程中启动与结束推理的方法（见模块说明），由应用在启动时登记
 pub struct Launcher {
-    /// 绑定服务，交给它套接字名与推理进程的参数（含子命令名 `worker`）
-    pub start: fn(socket: &str, args: &[String]) -> io::Result<()>,
+    /// 绑定第 `slot` 个服务（见模块说明），交给它套接字名与推理进程的参数（含子命令名 `worker`）
+    pub start: fn(socket: &str, args: &[String], slot: usize) -> io::Result<()>,
     /// 解除绑定
     pub stop: fn(socket: &str),
+    /// 本应用这个进程号在 `since`（Unix 毫秒）之后的退出记录：被系统结束（内存不足、冻结等）时为 `Some(true)`，
+    /// 崩溃或自己退出时为 `Some(false)`，还没有记录时为 `None`；早于 `since` 的是复用了同一进程号的旧进程的
+    pub killed: fn(pid: u32, since: i64) -> Option<bool>,
 }
 
 static LAUNCHER: OnceLock<Launcher> = OnceLock::new();
@@ -167,6 +180,8 @@ pub enum Child {
     Process {
         pid: u32,
         socket: String,
+        /// 连上的时间（Unix 毫秒），用来排除复用了同一进程号的旧进程的退出记录
+        since: i64,
     },
 }
 
@@ -195,7 +210,7 @@ impl Child {
 
     /// 线程无法强制结束（见模块说明）；推理进程解除绑定并 `SIGKILL`
     pub fn kill(&mut self) -> io::Result<()> {
-        if let Child::Process { pid, socket } = self {
+        if let Child::Process { pid, socket, .. } = self {
             kill_process(socket, *pid);
         }
         Ok(())
@@ -203,6 +218,26 @@ impl Child {
 }
 
 pub type ChildStdin = Box<dyn Write + Send>;
+
+/// 已退出的推理进程是被系统结束的（见模块说明）；推理线程，以及由 `Job::kill` 结束的（自检超时、取消等）总是假
+pub fn killed_by_system(child: &Child, job: &Job) -> bool {
+    let (Child::Process { pid, since, .. }, Some(l)) = (child, LAUNCHER.get()) else {
+        return false;
+    };
+    if job.abort.load(Ordering::Relaxed) {
+        return false;
+    }
+    let started = Instant::now();
+    loop {
+        if let Some(k) = (l.killed)(*pid, *since) {
+            return k;
+        }
+        if started.elapsed() > EXIT_INFO_WAIT {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
 
 /// 启动推理：CPU 在本进程的线程中，GPU、NPU 在 `:embed` 进程中（见模块说明）；`args` 与推理子进程的命令行参数相同
 #[allow(clippy::type_complexity)]
@@ -281,7 +316,12 @@ fn spawn_process(
         .iter()
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
-    (launcher.start)(&socket, &args).map_err(|err| fail("无法启动推理进程", err))?;
+    let slot = take_slot()?;
+    let release = || lock(&SLOT_PIDS)[slot] = None;
+    if let Err(err) = (launcher.start)(&socket, &args, slot) {
+        release();
+        return Err(fail("无法启动推理进程", err));
+    }
     let started = Instant::now();
     let stream = loop {
         match listener.accept() {
@@ -290,11 +330,13 @@ fn spawn_process(
             Err(err) if err.kind() == ErrorKind::WouldBlock => {}
             Err(err) => {
                 (launcher.stop)(&socket);
+                release();
                 return Err(fail("推理进程没能连上", err));
             }
         }
         if started.elapsed() > ACCEPT_TIMEOUT {
             (launcher.stop)(&socket);
+            release();
             return Err(Error::Spawn(format!(
                 "推理进程在 {} 秒内没有启动。",
                 ACCEPT_TIMEOUT.as_secs()
@@ -314,16 +356,50 @@ fn spawn_process(
         Ok(x) => x,
         Err(err) => {
             (launcher.stop)(&socket);
+            release();
             return Err(fail("推理进程没有报告进程号", err));
         }
     };
+    lock(&SLOT_PIDS)[slot] = Some(Some(pid));
     *lock(&job.process) = Some((socket.clone(), pid));
     Ok((
-        Child::Process { pid, socket },
+        Child::Process {
+            pid,
+            socket,
+            since: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as i64),
+        },
         Box::new(stream),
         Box::new(reader),
         Box::new(io::empty()),
     ))
+}
+
+/// 占用一个没有推理在运行的 `:embed` 进程（见模块说明）；都在用时最多等 `ACCEPT_TIMEOUT`
+fn take_slot() -> Result<usize, Error> {
+    let started = Instant::now();
+    loop {
+        {
+            let mut slots = lock(&SLOT_PIDS);
+            let free = slots.iter().position(|s| match s {
+                None => true,
+                Some(Some(pid)) => !alive(*pid),
+                Some(None) => false,
+            });
+            if let Some(i) = free {
+                slots[i] = Some(None);
+                return Ok(i);
+            }
+        }
+        if started.elapsed() > ACCEPT_TIMEOUT {
+            return Err(Error::Spawn(format!(
+                "已有 {SLOTS} 个推理进程在运行，{} 秒内没有结束。",
+                ACCEPT_TIMEOUT.as_secs()
+            )));
+        }
+        thread::sleep(ACCEPT_POLL);
+    }
 }
 
 /// 连接的另一端与本进程是同一个用户（应用自己的 `:embed` 进程）

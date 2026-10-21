@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import app.tauri.Logger
 import app.tauri.plugin.Invoke
@@ -22,6 +23,8 @@ import app.tauri.plugin.JSObject
  * 由 Rust 侧（src-tauri/src/android/background.rs）按索引进度经 [StoragePlugin] 启停。
  * - 常驻通知显示进度，渠道为低重要度；点击打开应用。更新至少间隔 2 秒，避免被系统限流。
  *   因未接电源、亮屏、过热暂停期间服务保持运行，通知标题改为“已暂停建立索引”，正文为暂停原因（`note`）。
+ * - 正在建立索引（没有暂停原因）时持有部分唤醒锁：前台服务只保留进程，不阻止息屏后 CPU 休眠；暂停与停止时释放。
+ *   锁有时限，每次进度更新时续期：处理卡住、进度长时间不动时自行释放，不让 CPU 空等。
  * - Android 15 起 `mediaProcessing` 每 24 小时共有 6 小时额度，用完时系统回调 [onTimeout]，必须几秒内停止：
  *   先报告 `timeout` 事件，立即 `stopSelf`，再发一条普通通知说明原因。
  */
@@ -41,6 +44,7 @@ class IndexService : Service() {
         else -> startForeground(PROGRESS_ID, n)
       }
       running = true
+      hold(this)
     } catch (e: Exception) {
       // ForegroundServiceStartNotAllowedException（应用在后台、额度已用完）等
       Logger.warn(Logger.tags("IndexService"), "前台服务没能进入前台：${e.message}")
@@ -68,6 +72,7 @@ class IndexService : Service() {
 
   override fun onDestroy() {
     running = false
+    hold(this)
     handler.removeCallbacksAndMessages(null)
     super.onDestroy()
   }
@@ -78,6 +83,8 @@ class IndexService : Service() {
     private const val PROGRESS_ID = 1
     private const val QUOTA_ID = 2
     private const val MIN_UPDATE_MS = 2000L
+    /** 唤醒锁的时限：比处理单个文件（含长视频）的时间长，又不至于在卡住时整夜持有 */
+    private const val WAKE_MS = 30 * 60 * 1000L
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -88,6 +95,25 @@ class IndexService : Service() {
     @Volatile private var note: String? = null
     private var shownAt = 0L
     private var updateQueued = false
+    /** 只在主线程上读写（[hold]） */
+    private var wake: PowerManager.WakeLock? = null
+
+    /** 按是否正在建立索引持有或释放唤醒锁；在主线程上调用 */
+    private fun hold(ctx: Context) {
+      val want = running && note == null
+      val w = wake
+      if (want) {
+        // 不计引用：再次 acquire 只是续期
+        val lock = w ?: ctx.getSystemService(PowerManager::class.java)
+          ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Rummage:index")
+          ?.apply { setReferenceCounted(false) }
+        lock?.acquire(WAKE_MS)
+        wake = lock
+      } else if (w != null) {
+        if (w.isHeld) w.release()
+        wake = null
+      }
+    }
 
     private fun channels(nm: NotificationManager) {
       nm.createNotificationChannel(NotificationChannel(PROGRESS_CHANNEL, "建立索引", NotificationManager.IMPORTANCE_LOW))
@@ -138,6 +164,7 @@ class IndexService : Service() {
       if (!running) return
       val app = ctx.applicationContext
       handler.post {
+        hold(app)
         if (updateQueued) return@post
         val wait = shownAt + MIN_UPDATE_MS - SystemClock.elapsedRealtime()
         updateQueued = true

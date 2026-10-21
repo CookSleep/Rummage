@@ -413,7 +413,7 @@ fn image(shared: &Shared, task: Task, qh: Vec<u8>) -> Prep {
     let slice_version = engine.cfg.slice_version(slice_tier, max_ratio, max_slices);
     let image_space = space_row(&engine.cfg, Some(tier));
     let copy =
-        lock(&shared.db).copy_source(&ch, &image_space.id, &slice_version, max_ratio, job.file_id);
+        lock(&shared.db).copy_source(&ch, &image_space, &slice_version, max_ratio, job.file_id);
     match copy {
         Ok(None) => {}
         Ok(Some(from)) => {

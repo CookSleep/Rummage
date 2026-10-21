@@ -266,6 +266,11 @@ pub(super) fn set_preferred_device(state: &Arc<State>, device: String) -> Result
             })
             .map(|r| r.device_id())
     };
+    if device == CPU_DEVICE && !config(state)?.cpu_model_ok() {
+        return Err(bad_request(
+            "CPU 要用通用模型，请先在「设置 → 模型」中下载或导入。",
+        ));
+    }
     // 显卡要在自检记录中通过检测、未被屏蔽、仍在系统中（与流水线选用的条件相同）；本次运行中出了问题的也可以选，
     // 流水线照样跳过它，设备页说明改用了哪个设备
     if device != AUTO_DEVICE && device != CPU_DEVICE {
@@ -504,9 +509,11 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
     let values = state.params();
     let images = mmproj_on(&values) && cfg.media_model_ok();
     let pipeline = state.pipeline.get();
+    // 自动检测期间照常用 CPU 建索引，只等用显卡的旧引擎释放；手动检测暂停建索引。选用 NPU 时自动检测也暂停：
+    // CPU 用的通用版与 NPU 的模型不同，这段时间建的向量检测完还要重建，查询也比较不了 NPU 的向量
+    let cpu_only = auto && pipeline.is_some_and(|p| !p.npu_chosen());
     if let Some(p) = pipeline {
-        // 自动检测期间照常用 CPU 建索引，只等用显卡的旧引擎释放；手动检测暂停建索引
-        let ok = if auto {
+        let ok = if cpu_only {
             let released = p.cpu_only(true);
             p.wait_engine_released(released, release_limit(&values))
         } else {
@@ -515,7 +522,7 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
         };
         if !ok {
             log::warn!("等待处理中的文件结束超时，本次不检测设备。");
-            if auto {
+            if cpu_only {
                 p.cpu_only(false);
             } else {
                 p.hold(Hold::Selftest, false);
@@ -539,7 +546,11 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
     if auto && state.setup.auto_cancel.load(Ordering::Relaxed) {
         log::info!("自动设备检测在开始前被中止。");
         if let Some(p) = pipeline {
-            p.cpu_only(false);
+            if cpu_only {
+                p.cpu_only(false);
+            } else {
+                p.hold(Hold::Selftest, false);
+            }
         }
         *lock(&state.setup.selftest) = SelftestStatus::default();
         state.broadcast_selftest();
@@ -708,7 +719,7 @@ pub(super) fn run_selftest(state: &State, cfg: &Config, onboarding: bool, mode: 
             p.set_preferred_device(AUTO_DEVICE);
         }
         // 自动检测结束时 `cpu_only(false)` 按新记录重建引擎：通过就切回显卡
-        if auto {
+        if cpu_only {
             p.cpu_only(false);
         } else {
             if got {

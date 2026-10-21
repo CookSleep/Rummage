@@ -14,6 +14,8 @@ export interface Speeds {
   audioMs: number
   /** 没有测速结果时为黄金样本的视频片段：6 帧，带声音与只看画面两种的中位数 */
   videoMs: number
+  /** 长图每段：黄金样本的图片耗时（140 档，与默认的切片档位相同；测速不测切片），不按档位换算 */
+  sliceMs: number
   /** 是显卡测出的速度：黄金样本耗时换算到默认档位的倍数按显卡与 CPU 分别取 */
   gpu: boolean
   /** 各项是测速结果，不需要换算 */
@@ -30,6 +32,7 @@ export const CPU_FALLBACK: Speeds = {
   imageMs: 1800,
   audioMs: 800,
   videoMs: 6000,
+  sliceMs: 1800,
   gpu: false,
   measured: { text: false, image: false, audio: false, video: false },
 }
@@ -38,8 +41,8 @@ export const CPU_FALLBACK: Speeds = {
 const CHUNK_COST = [3, 10]
 /** 每个切片对应的原文字节数：384 token、重叠 15%，中英文约 900–1600 字节 */
 const BYTES_PER_CHUNK = [900, 1600]
-/** 长截图按区域切成几张、解码与缩放的开销，图片按单条耗时的 1–1.5 倍算 */
-const IMAGE_COST = [1, 1.5]
+/** 解码与缩放的开销，图片与长图的每段按单条耗时的 1–1.3 倍算；长图的段数由核心抽样推算（`KindTotal.slices`） */
+const IMAGE_COST = [1, 1.3]
 /** 没有测速结果时：自检用 140 档图片，默认的 280 档在显卡上约慢 1.2–1.5 倍、CPU 上约 2.6 倍（SM8550 上建索引实测每张约 17 s，自检 5.2 s，含解码等开销） */
 const IMAGE_TIER = { gpu: [1.2, 1.5], cpu: [2.6, 2.6] }
 /** 每条向量：768 维 f16 + 256 维 int8 粗排 + 行与索引的开销 */
@@ -102,6 +105,7 @@ export function pickSpeeds(st: SelftestStatus): Speeds {
     imageMs: s?.imageMs ?? dev?.imageMs ?? CPU_FALLBACK.imageMs,
     audioMs: s?.audioMs ?? dev?.audioMs ?? CPU_FALLBACK.audioMs,
     videoMs: s?.videoMs ?? dev?.videoMs ?? CPU_FALLBACK.videoMs,
+    sliceMs: dev?.imageMs ?? CPU_FALLBACK.sliceMs,
     gpu: dev?.gpu ?? false,
     measured: { text: s?.textMs != null, image: s?.imageMs != null, audio: s?.audioMs != null, video: s?.videoMs != null },
   }
@@ -112,6 +116,7 @@ export function estimateIndex(est: Estimate, kinds: Kinds, speeds: Speeds, prese
   let docFiles = 0
   let docBytes = 0
   let imageFiles = 0
+  let slices = 0
   let audioFiles = 0
   let audioBytes = 0
   let videoFiles = 0
@@ -122,6 +127,7 @@ export function estimateIndex(est: Estimate, kinds: Kinds, speeds: Speeds, prese
     for (const [kind, t] of Object.entries(root.kinds)) {
       if (kind === 'image' && kinds.images) {
         imageFiles += t.files
+        slices += t.slices
       } else if (kind === 'audio' && kinds.audio) {
         audioFiles += t.files
         audioBytes += t.bytes
@@ -147,10 +153,11 @@ export function estimateIndex(est: Estimate, kinds: Kinds, speeds: Speeds, prese
   const timeMs = (i: 0 | 1) =>
     (i ? chunksHigh : chunksLow) * speeds.textMs * (m.text ? 1 : CHUNK_COST[i])
     + imageFiles * speeds.imageMs * IMAGE_COST[i] * (m.image ? 1 : IMAGE_TIER[tier][i])
+    + slices * speeds.sliceMs * IMAGE_COST[i]
     + segments(i) * speeds.audioMs * AUDIO_COST[i]
     + windows(i) * speeds.videoMs * VIDEO_COST[i] * (m.video ? 1 : (video.frames / GOLDEN_VIDEO_FRAMES) * FRAME_TIER[tier][i])
   const disk = (i: 0 | 1) =>
-    ((i ? chunksHigh : chunksLow) + imageFiles * IMAGE_COST[i] + segments(i) + windows(i)) * VECTOR_BYTES[i]
+    ((i ? chunksHigh : chunksLow) + imageFiles + slices + segments(i) + windows(i)) * VECTOR_BYTES[i]
     + docBytes * TEXT_STORE[i]
     + total * FILE_BYTES[i]
     + imageFiles * THUMB_BYTES[i]
