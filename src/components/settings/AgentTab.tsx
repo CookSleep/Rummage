@@ -6,7 +6,7 @@ import { errorMessage } from '../../lib/errors'
 import { trimPeriod } from '../../lib/format'
 import { CheckIcon, ClaudeCodeIcon, ClaudeIcon, CodexIcon, CopyIcon, CursorIcon, FolderIcon, OpenCodeIcon, VscodeIcon } from '../icons'
 import LoadError from '../LoadError'
-import { CARD, CARD_ROW, ICON_TILE, ROW_ACTIONS, ROW_ICON_BUTTON, ROW_LONG_TEXT, SMALL_BUTTON } from '../onboarding/styles'
+import { CARD, CARD_ROW, ICON_TILE, ROW_ACTIONS, ROW_ICON_BUTTON, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON } from '../onboarding/styles'
 import PathText from '../PathText'
 import { HoverTip } from '../Tip'
 import { showToast } from '../Toast'
@@ -53,7 +53,7 @@ const SUBTITLE_WARN = 'mt-0.5 block text-xs text-amber-600 dark:text-amber-400/9
 function Row({ icon, title, path, note, warn, children }: { icon: ReactNode; title: string; path?: string; note?: string; warn?: boolean; children: ReactNode }) {
   return (
     <div className={CARD_ROW}>
-      <span className={ICON_TILE}>{icon}</span>
+      <span className={`${ROW_ICON_TILE} ${ICON_TILE}`}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-gray-800 dark:text-gray-100">{title}</span>
         {note ? (

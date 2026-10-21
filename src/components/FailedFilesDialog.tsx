@@ -3,23 +3,27 @@ import { createPortal } from 'react-dom'
 import { invoke } from '@tauri-apps/api/core'
 import type { FailedCursor, FailedFile, FailedPage } from '../types'
 import { errorMessage } from '../lib/errors'
+import { revealFile } from '../lib/reveal'
 import { useEscape } from '../hooks/useEscape'
-import { abbreviatePath } from '../lib/format'
-import { rowRange } from '../lib/rowRange'
 import ConfirmDialog, { renderMessage } from './ConfirmDialog'
 import { CloseIcon, KindIcon } from './icons'
 import { BUTTON, ERROR_TEXT, ICON_TILE, PRIMARY_BUTTON, SMALL_BUTTON } from './onboarding/styles'
-import { HoverTip } from './Tip'
+import PathText from './PathText'
+import { showToast } from './Toast'
 
-/** 每行的高度（px），虚拟化按它计算 */
-const ROW_HEIGHT = 76
+/** 可点击的文件名与路径：换行显示完整 */
+const LINK_TEXT = 'text-left [overflow-wrap:anywhere] transition duration-200 hover:text-blue-500 dark:hover:text-blue-400'
+/** 还没量过的行按这个高度（px）估算 */
+const EST_HEIGHT = 76
+/** 可视区域上下各多渲染这么高（px）的行 */
+const OVERSCAN = 400
 /** 每次读取的条数；滚动到已读取部分的末尾附近时读下一页 */
 const PAGE = 200
 
 /**
- * “失败文件”列表：建立索引失败的文件、所在路径与原因，可逐个或全部重试或忽略。
- * 忽略即把文件加入所属文件夹的排除规则并从索引中移除，全部忽略前先确认。
- * 样式沿用 FontLicensesModal（ConfirmDialog 的玻璃面板）；列表定高行虚拟化。按游标分页读取，合并时按文件 ID 去重，
+ * “失败文件”列表：建立索引失败的文件、所在路径与原因，可逐个或全部重试或忽略；点文件名打开文件，点路径在文件管理器中打开所在的文件夹，打不开时复制路径。
+ * 忽略即把文件加入所属文件夹的排除规则并从索引中移除，全部忽略前先确认；操作出错时用胶囊通知。
+ * 样式沿用 FontLicensesModal（ConfirmDialog 的玻璃面板）；文件名与路径换行显示完整，行高不定，按量得的行高虚拟化。按游标分页读取，合并时按文件 ID 去重，
  * 读取期间重试了某一行也不会漏行；读取失败时停止自动读取，显示原因与“重试”。加密文档没有“重试”。Esc 或点遮罩关闭
  */
 export default function FailedFilesDialog({ onClose }: { onClose: () => void }) {
@@ -28,7 +32,6 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
   const [retryable, setRetryable] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [pageError, setPageError] = useState('')
-  const [error, setError] = useState('')
   // 进行中的操作：某一行，或全部重试、全部忽略
   const [busy, setBusy] = useState<number | 'all' | 'ignoreAll' | null>(null)
   const [confirmIgnore, setConfirmIgnore] = useState(false)
@@ -37,6 +40,32 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
   const loading = useRef(false)
   // 已读取的最后一页的最后一行；与当前列表无关，重试移除了这一行也照常从它之后取
   const cursor = useRef<FailedCursor | null>(null)
+  // 量过的行高，按文件 ID；变化时 measured 加一触发重新排布
+  const heights = useRef(new Map<number, number>())
+  const [, setMeasured] = useState(0)
+  const [ro] = useState(
+    () =>
+      new ResizeObserver((entries) => {
+        let changed = false
+        for (const e of entries) {
+          const el = e.target as HTMLElement
+          const id = Number(el.dataset.id)
+          if (heights.current.get(id) === el.offsetHeight) continue
+          heights.current.set(id, el.offsetHeight)
+          changed = true
+        }
+        if (changed) setMeasured((n) => n + 1)
+      }),
+  )
+  useEffect(() => () => ro.disconnect(), [ro])
+  const observe = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (!el) return
+      ro.observe(el)
+      return () => ro.unobserve(el)
+    },
+    [ro],
+  )
 
   // 确认对话框打开时由它处理 Esc
   useEscape(onClose, !confirmIgnore)
@@ -78,7 +107,17 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
     return () => ro.disconnect()
   }, [])
 
-  const range = rowRange(view.top, view.height, ROW_HEIGHT, files.length)
+  let y = 0
+  const tops = files.map((f) => {
+    const top = y
+    y += heights.current.get(f.fileId) ?? EST_HEIGHT
+    return top
+  })
+  const height = y
+  const range = { start: 0, end: 0 }
+  while (range.start < files.length && tops[range.start] + (heights.current.get(files[range.start].fileId) ?? EST_HEIGHT) < view.top - OVERSCAN) range.start++
+  range.end = range.start
+  while (range.end < files.length && tops[range.end] < view.top + view.height + OVERSCAN) range.end++
 
   // 快滚到已读取部分的末尾时读下一页；读取失败后等用户点“重试”
   useEffect(() => {
@@ -88,7 +127,6 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
   /** 重试或忽略一行，成功后从列表中移除 */
   const act = (file: FailedFile, ignore: boolean) => {
     setBusy(file.fileId)
-    setError('')
     invoke(ignore ? 'ignore_failed' : 'retry_failed', { fileId: file.fileId })
       .then(() => {
         setFiles((prev) => prev.filter((f) => f.fileId !== file.fileId))
@@ -97,32 +135,37 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
       })
       .catch((err) => {
         console.warn(ignore ? '忽略失败的文件时出错：' : '重试失败的文件时出错：', err)
-        setError(errorMessage(err, ignore ? '无法忽略，请稍后再试。' : '无法重试，请稍后再试。'))
+        showToast(errorMessage(err, ignore ? '无法忽略，请稍后再试' : '无法重试，请稍后再试'), 'error')
       })
       .finally(() => setBusy(null))
+  }
+
+  const open = (file: FailedFile) => {
+    invoke('open_file', { fileId: file.fileId }).catch((err) => {
+      console.warn('无法打开这个文件：', err)
+      showToast(errorMessage(err, '无法打开这个文件'), 'error')
+    })
   }
 
   const ignoreAll = () => {
     setConfirmIgnore(false)
     setBusy('ignoreAll')
-    setError('')
     invoke('ignore_all_failed')
       .then(onClose)
       .catch((err) => {
         console.warn('忽略全部失败的文件时出错：', err)
-        setError(errorMessage(err, '无法忽略，请稍后再试。'))
+        showToast(errorMessage(err, '无法忽略，请稍后再试'), 'error')
       })
       .finally(() => setBusy(null))
   }
 
   const retryAll = () => {
     setBusy('all')
-    setError('')
     invoke('retry_all_failed')
       .then(onClose)
       .catch((err) => {
         console.warn('重试全部失败的文件时出错：', err)
-        setError(errorMessage(err, '无法重试，请稍后再试。'))
+        showToast(errorMessage(err, '无法重试，请稍后再试'), 'error')
       })
       .finally(() => setBusy(null))
   }
@@ -164,40 +207,42 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 [scrollbar-gutter:stable]"
         >
           {total === 0 && <p className="py-10 text-center text-sm text-gray-400 dark:text-gray-500">没有失败的文件</p>}
-          <div className="relative" style={{ height: files.length * ROW_HEIGHT }}>
+          <div className="relative" style={{ height }}>
             {files.slice(range.start, range.end).map((f, i) => {
               const dir = f.path.slice(0, Math.max(0, f.path.length - f.name.length - 1))
               return (
                 <div
                   key={f.fileId}
-                  className="absolute inset-x-0 flex items-center gap-3 border-b border-black/[0.05] dark:border-white/[0.06]"
-                  style={{ top: (range.start + i) * ROW_HEIGHT, height: ROW_HEIGHT }}
+                  data-id={f.fileId}
+                  ref={observe}
+                  className="absolute inset-x-0 flex items-start gap-3 border-b border-black/[0.05] py-3 dark:border-white/[0.06]"
+                  style={{ top: tops[range.start + i] }}
                 >
                   <span className={ICON_TILE}>
                     <KindIcon kind={f.kind} className="h-4 w-4" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span data-selectable-text className="block truncate text-sm text-gray-800 dark:text-gray-100">{f.name}</span>
-                    <span data-selectable-text className="block truncate text-xs text-gray-400 dark:text-gray-500">
-                      {abbreviatePath(dir)}
-                      <HoverTip label={f.path} wrap />
-                    </span>
+                    <button type="button" onClick={() => open(f)} className={`block text-sm text-gray-800 dark:text-gray-100 ${LINK_TEXT}`}>
+                      {f.name}
+                    </button>
+                    <button type="button" onClick={() => void revealFile(f.fileId, f.path)} className={`mt-0.5 block text-xs text-gray-400 dark:text-gray-500 ${LINK_TEXT}`}>
+                      <PathText path={dir} />
+                    </button>
                     {f.reason && (
-                      <span data-selectable-text className="block truncate text-xs text-red-500 dark:text-red-400">
+                      <span data-selectable-text className="mt-0.5 block text-xs text-red-500 [overflow-wrap:anywhere] dark:text-red-400">
                         {renderMessage(f.reason, 'font-semibold')}
-                        <HoverTip label={f.reason.replace(/\*\*/g, '').replace(/。$/, '')} wrap />
                       </span>
                     )}
-                  </span>
-                  <span className="flex flex-shrink-0 gap-1.5">
-                    {f.retryable && (
-                      <button type="button" className={SMALL_BUTTON} disabled={busy !== null} onClick={() => act(f, false)}>
-                        重试
+                    <span className="mt-2 flex justify-end gap-1.5">
+                      {f.retryable && (
+                        <button type="button" className={SMALL_BUTTON} disabled={busy !== null} onClick={() => act(f, false)}>
+                          重试
+                        </button>
+                      )}
+                      <button type="button" className={SMALL_BUTTON} disabled={busy !== null} onClick={() => act(f, true)}>
+                        忽略
                       </button>
-                    )}
-                    <button type="button" className={SMALL_BUTTON} disabled={busy !== null} onClick={() => act(f, true)}>
-                      忽略
-                    </button>
+                    </span>
                   </span>
                 </div>
               )
@@ -214,15 +259,14 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
         </div>
 
         <div className="shrink-0 px-6 pb-6 pt-4">
-          {error && <p data-selectable-text className={`mb-3 ${ERROR_TEXT}`}>{error}</p>}
           <div className="flex gap-2">
-            <button type="button" className={`flex-1 ${BUTTON}`} onClick={onClose}>
+            <button type="button" className={`flex-1 whitespace-nowrap max-sm:px-2 ${BUTTON}`} onClick={onClose}>
               关闭
             </button>
-            <button type="button" className={`flex-1 ${BUTTON}`} disabled={busy !== null || !total} onClick={() => setConfirmIgnore(true)}>
+            <button type="button" className={`flex-1 whitespace-nowrap max-sm:px-2 ${BUTTON}`} disabled={busy !== null || !total} onClick={() => setConfirmIgnore(true)}>
               {busy === 'ignoreAll' ? '正在忽略' : '全部忽略'}
             </button>
-            <button type="button" className={`flex-1 ${PRIMARY_BUTTON}`} disabled={busy !== null || !retryable} onClick={retryAll}>
+            <button type="button" className={`flex-1 whitespace-nowrap max-sm:px-2 ${PRIMARY_BUTTON}`} disabled={busy !== null || !retryable} onClick={retryAll}>
               {busy === 'all' ? '正在重试' : '全部重试'}
             </button>
           </div>

@@ -5,7 +5,7 @@ import { openExternal } from '../../lib/platform'
 import { DocumentIcon, FileIcon, ImageIcon } from '../icons'
 import { HoverTip } from '../Tip'
 import ProxyForm, { PROXY_LABEL } from './ProxyForm'
-import { CARD_ROW, ICON_TILE, INPUT, ROW_ACTIONS, ROW_LONG_TEXT, SMALL_BUTTON, segmentClass, SEGMENTS } from './styles'
+import { CARD_ROW, ICON_TILE, INPUT, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SEGMENTS, SMALL_BUTTON, segmentClass } from './styles'
 
 // 引导的“下载模型”与设置的“模型”页共用的部分：模型行、导入行、下载源选择、代理状态、任务进度
 
@@ -36,7 +36,7 @@ export function ModelRow({ info, url, file, running, actions }: { info: (typeof 
   const href = `${url}/${file.name}`
   return (
     <div className={CARD_ROW}>
-      <span className={ICON_TILE}>{info.icon}</span>
+      <span className={`${ROW_ICON_TILE} ${ICON_TILE}`}>{info.icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-gray-800 dark:text-gray-100">{info.label}</span>
         <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{info.desc}</span>
@@ -77,7 +77,7 @@ export function ModelRow({ info, url, file, running, actions }: { info: (typeof 
 export function ImportRow({ disabled, picking, onImport }: { disabled: boolean; picking: boolean; onImport: () => void }) {
   return (
     <div className={CARD_ROW}>
-      <span className={ICON_TILE}>
+      <span className={`${ROW_ICON_TILE} ${ICON_TILE}`}>
         <FileIcon className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">

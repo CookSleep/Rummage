@@ -56,6 +56,16 @@ object StoragePaths {
     return if (rel.isEmpty()) root else "$root/$rel"
   }
 
+  /** [fromDocumentId] 的反向：真实路径换成外部存储提供者的文档 ID；不在主存储 [primary] 或 [volumes] 的卷中时为空 */
+  fun toDocumentId(path: String, primary: String, volumes: Map<String, String>): String? {
+    val roots = listOf("primary" to primary) + volumes.toList()
+    for ((vol, root) in roots) {
+      if (path == root) return "$vol:"
+      if (path.startsWith("$root/")) return "$vol:${path.substring(root.length + 1).trim('/')}"
+    }
+    return null
+  }
+
   /** 不与已有文件重名的文件名：`a.gguf` 已存在时依次试 `a (1).gguf`、`a (2).gguf`…… */
   fun uniqueName(name: String, exists: (String) -> Boolean): String {
     if (!exists(name)) return name

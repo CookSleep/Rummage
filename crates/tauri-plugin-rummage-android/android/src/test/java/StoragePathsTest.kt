@@ -35,6 +35,16 @@ class StoragePathsTest {
   }
 
   @Test
+  fun toDocumentId() {
+    assertEquals("primary:DCIM/Camera", StoragePaths.toDocumentId("/storage/emulated/0/DCIM/Camera", primary, volumes))
+    assertEquals("primary:", StoragePaths.toDocumentId("/storage/emulated/0", primary, volumes))
+    assertEquals("1234-5678:Photos/书", StoragePaths.toDocumentId("/storage/1234-5678/Photos/书", primary, volumes))
+    // 只是前缀相同的其他目录不算在卷中
+    assertNull(StoragePaths.toDocumentId("/storage/emulated/01/a", primary, volumes))
+    assertNull(StoragePaths.toDocumentId("/data/data/x", primary, volumes))
+  }
+
+  @Test
   fun mediaRef() {
     val d = StoragePaths.DOWNLOADS
     val m = StoragePaths.MEDIA

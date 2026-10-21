@@ -240,6 +240,15 @@ impl<R: Runtime> Android<R> {
         Ok(res.opened)
     }
 
+    /// 在文件管理器中打开文件所在的文件夹；没有能打开它的应用时返回否
+    pub async fn reveal_file(&self, path: &Path) -> Result<bool, Error> {
+        let res: Opened = self
+            .0
+            .run_mobile_plugin_async("revealFile", PathArgs { path })
+            .await?;
+        Ok(res.opened)
+    }
+
     /// 用系统分享面板分享文件
     pub async fn share_file(&self, path: &Path) -> Result<(), Error> {
         self.0

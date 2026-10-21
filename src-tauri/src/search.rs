@@ -229,6 +229,7 @@ pub(crate) async fn file_info<R: Runtime>(
 }
 
 /// 打开或显示文件：设备未连接时直接说明；调用系统接口可能短暂阻塞，放在阻塞线程中
+#[cfg(not(target_os = "android"))]
 async fn shell<R: Runtime>(
     app: &AppHandle<R>,
     file_id: i64,
@@ -266,6 +267,7 @@ fn ext_in(path: &Path, list: &[&str]) -> bool {
         .is_some_and(|e| list.contains(&e.to_ascii_lowercase().as_str()))
 }
 
+#[cfg(not(target_os = "android"))]
 fn reveal(path: &Path) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(path).map_err(|err| err.to_string())
 }
@@ -331,6 +333,7 @@ pub async fn open_file<R: Runtime>(
     .await
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub async fn reveal_file<R: Runtime>(app: AppHandle<R>, file_id: i64) -> Result<(), ApiError> {
     shell(&app, file_id, |info| reveal(Path::new(&info.path))).await

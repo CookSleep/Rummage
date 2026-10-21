@@ -28,8 +28,11 @@ export const CARD = 'overflow-hidden rounded-2xl border border-transparent bg-bl
 /** 卡片中的一行；手机宽度下可换行，配合 `ROW_ACTIONS` 把右侧的按钮移到文字下方 */
 export const CARD_ROW = 'flex min-h-[56px] w-full items-center gap-3 px-4 py-2.5 max-sm:flex-wrap max-sm:gap-y-2'
 
-/** 卡片行右侧的按钮组（间距由使用处给出）：手机宽度下单独占一行，左缘与文字对齐（行首图标 32px 加间距 12px） */
-export const ROW_ACTIONS = 'flex flex-shrink-0 items-center max-sm:basis-full max-sm:pl-11'
+/** 卡片行右侧的按钮组（间距由使用处给出）：手机宽度下单独占一行，靠右 */
+export const ROW_ACTIONS = 'flex flex-shrink-0 items-center max-sm:basis-full max-sm:justify-end'
+
+/** 按钮组可能另起一行的卡片行的行首图标：手机宽度下靠上，不随折行的文字居中 */
+export const ROW_ICON_TILE = 'max-sm:self-start'
 
 /** 卡片行中的长文字（路径、文件名）：宽屏时截断成一行，手机宽度下换行显示完整 */
 export const ROW_LONG_TEXT = 'truncate max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]'

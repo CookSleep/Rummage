@@ -175,7 +175,7 @@ export default function FontSettingField({ slot, label, description, mode, name,
         </div>
       )}
       <div
-        className="mb-1.5 truncate rounded-xl bg-black/[0.02] px-3 py-2 text-sm text-gray-700 dark:bg-white/[0.03] dark:text-gray-200"
+        className="mb-1.5 rounded-xl bg-black/[0.02] px-3 py-2 [overflow-wrap:anywhere] text-sm text-gray-700 dark:bg-white/[0.03] dark:text-gray-200"
         style={{ fontFamily: buildFontStack(slot, mode, previewName) }}
       >
         {PREVIEW_TEXT[slot]}

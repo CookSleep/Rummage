@@ -4,6 +4,7 @@ import type { ParamValue, ParamValues, RootInfo, SetupStatus } from '../../types
 import { errorMessage } from '../../lib/errors'
 import { useSaveParam } from '../../hooks/useSaveParam'
 import { KIND_PARAMS, type Kinds, kindsOf, needsMmproj } from '../../lib/kinds'
+import { isAndroid } from '../../lib/platform'
 import { WarningIcon } from '../icons'
 import FoldersStep from '../onboarding/FoldersStep'
 import KindsStep from '../onboarding/KindsStep'
@@ -48,7 +49,8 @@ function Excludes({ root, onClose, onSaved }: { root: RootInfo; onClose: () => v
           e.stopPropagation()
           e.currentTarget.blur()
         }}
-        rows={4}
+        // 手机宽度下占位提示的第一行会折成两行
+        rows={isAndroid ? 5 : 4}
         spellCheck={false}
         placeholder={EXCLUDE_PLACEHOLDER}
         aria-label="排除规则"

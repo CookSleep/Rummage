@@ -130,7 +130,10 @@ pub fn run() {
             #[cfg(target_os = "android")]
             android::ui::safe_area,
             search::can_open_at,
+            #[cfg(not(target_os = "android"))]
             search::reveal_file,
+            #[cfg(target_os = "android")]
+            android::ui::reveal_file,
             search::get_history,
             search::add_history,
             search::remove_history,

@@ -5,7 +5,7 @@ import { copyText } from '../lib/clipboard'
 import { errorMessage } from '../lib/errors'
 import { canFindSimilar, formatSize, formatTime, indexStateText, kindLabel, matchPercent, matchText, openAtText } from '../lib/format'
 import { hitPosition } from '../lib/media'
-import { isTauri } from '../lib/platform'
+import { isAndroid, isTauri } from '../lib/platform'
 import { useCoreEvent } from '../hooks/useCoreEvent'
 import { renderMessage } from './ConfirmDialog'
 import { CloseIcon, FolderIcon, KindIcon, OpenIcon, PanelCollapseIcon, ShareIcon, SimilarIcon } from './icons'
@@ -20,10 +20,17 @@ export const PANEL_OVERLAY_BELOW = 900
 /** 建索引期间刷新详情的最短间隔（ms） */
 const REFRESH_MS = 2000
 
-/** 点击文件名或路径时复制；在其中拖选了文字时不复制，留给用户复制选中的部分 */
-async function copyField(el: HTMLElement, text: string, what: string) {
+const REVEAL_TEXT = isAndroid ? '在文件管理器中显示' : '在资源管理器中显示'
+
+/** 在 el 中拖选了文字：这时点击不复制、不打开，留给用户复制选中的部分 */
+function selectedIn(el: HTMLElement) {
   const sel = window.getSelection()
-  if (sel && !sel.isCollapsed && sel.containsNode(el, true)) return
+  return !!sel && !sel.isCollapsed && sel.containsNode(el, true)
+}
+
+/** 点击文件名时复制 */
+async function copyField(el: HTMLElement, text: string, what: string) {
+  if (selectedIn(el)) return
   try {
     await copyText(text)
     showToast(`${what}已复制`, 'success')
@@ -57,8 +64,7 @@ interface DetailsProps {
   hit: SearchHit
   query: string
   onOpen: () => void
-  /** 为空时不显示“在资源管理器中显示”（Android） */
-  onReveal?: () => void
+  onReveal: () => void
   onSimilar: () => void
   /** 为空时不显示“分享”（Windows） */
   onShare?: () => void
@@ -134,9 +140,9 @@ function Details({ hit, query, onOpen, onReveal, onSimilar, onShare }: DetailsPr
 
         <Section title="文件">
           <Row label="路径">
-            <button type="button" data-selectable-text onClick={(e) => void copyField(e.currentTarget, hit.path, '路径')} className={COPY_TEXT}>
+            <button type="button" data-selectable-text onClick={(e) => !selectedIn(e.currentTarget) && onReveal()} className={COPY_TEXT}>
               <PathText path={hit.path} />
-              <HoverTip label="复制路径" />
+              <HoverTip label={REVEAL_TEXT} />
             </button>
           </Row>
           <Row label="类型">{kindLabel(hit.kind)}{info?.ext ? `（.${info.ext}）` : ''}</Row>
@@ -177,12 +183,10 @@ function Details({ hit, query, onOpen, onReveal, onSimilar, onShare }: DetailsPr
             <HoverTip label="分享" />
           </button>
         )}
-        {onReveal && (
-          <button type="button" onClick={onReveal} aria-label="在资源管理器中显示" className={ICON_BUTTON}>
-            <FolderIcon className="h-4 w-4" />
-            <HoverTip label="在资源管理器中显示" />
-          </button>
-        )}
+        <button type="button" onClick={onReveal} aria-label={REVEAL_TEXT} className={ICON_BUTTON}>
+          <FolderIcon className="h-4 w-4" />
+          <HoverTip label={REVEAL_TEXT} />
+        </button>
         <button type="button" onClick={onOpen} className="ml-auto inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white transition duration-200 hover:bg-blue-600">
           <OpenIcon className="h-4 w-4" />
           {at && canJump ? openAtText(at) : '打开'}
@@ -208,8 +212,7 @@ interface Props {
   connected: boolean
   onHide: () => void
   onOpen: () => void
-  /** 为空时不显示“在资源管理器中显示”（Android） */
-  onReveal?: () => void
+  onReveal: () => void
   onSimilar: () => void
   /** 为空时不显示“分享”（Windows） */
   onShare?: () => void

@@ -16,6 +16,7 @@ import { moveSelection, type Direction, type Masonry } from '../lib/masonry'
 import { hitPosition, hitRegion } from '../lib/media'
 import { isAndroid, isTauri } from '../lib/platform'
 import { shouldShowUpdate } from '../lib/releaseUpdates'
+import { revealFile } from '../lib/reveal'
 import { readLocal, writeLocal } from '../lib/storage'
 import { renderMessage } from './ConfirmDialog'
 import CoreStatusNotice from './CoreStatusNotice'
@@ -259,12 +260,13 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
   }
 
   // 打开时带上命中位置（音视频的起点、PDF 的页码），默认程序支持时打开到那里
-  const run = useCallback((cmd: 'open_file' | 'reveal_file' | 'share_file', hit: SearchHit) => {
+  const run = useCallback((cmd: 'open_file' | 'share_file', hit: SearchHit) => {
     remember()
     const args = cmd === 'open_file' ? { fileId: hit.fileId, at: hitPosition(hit) } : { fileId: hit.fileId }
     invoke(cmd, args).catch((err) => {
-      console.warn(cmd === 'share_file' ? '分享文件失败：' : '打开文件失败：', err)
-      showToast(errorMessage(err, cmd === 'share_file' ? '无法分享这个文件' : '无法打开这个文件'), 'error')
+      const what = cmd === 'share_file' ? '分享这个文件' : '打开这个文件'
+      console.warn(`无法${what}：`, err)
+      showToast(errorMessage(err, `无法${what}`), 'error')
     })
   }, [remember])
 
@@ -354,8 +356,12 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
       if (!hits.length) return
       if (e.key === 'Enter' && selected !== null && !onButton) {
         e.preventDefault()
-        // Android 上没有“打开所在位置”
-        run(e.ctrlKey && !isAndroid ? 'reveal_file' : 'open_file', hits[selected])
+        if (!e.ctrlKey) {
+          run('open_file', hits[selected])
+          return
+        }
+        remember()
+        void revealFile(hits[selected].fileId, hits[selected].path)
         return
       }
       const dir = ARROWS[e.key]
@@ -542,7 +548,11 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
           connected={coreStatus === 'running'}
           onHide={wide ? toggleCollapsed : () => setOverlayOpen(false)}
           onOpen={() => selectedHit && run('open_file', selectedHit)}
-          onReveal={isAndroid ? undefined : () => selectedHit && run('reveal_file', selectedHit)}
+          onReveal={() => {
+            if (!selectedHit) return
+            remember()
+            void revealFile(selectedHit.fileId, selectedHit.path)
+          }}
           onSimilar={() => selected !== null && findSimilar(selected)}
           onShare={isAndroid ? () => selectedHit && run('share_file', selectedHit) : undefined}
         />

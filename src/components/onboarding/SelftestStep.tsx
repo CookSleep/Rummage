@@ -11,7 +11,7 @@ import Select from '../Select'
 import Tip, { HoverTip } from '../Tip'
 import { ROW_DESC, ROW_LABEL } from '../settings/styles'
 import SpeedParamsDialog from './SpeedParamsDialog'
-import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
+import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
 
 function ms(v: number) {
   return v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`
@@ -159,7 +159,7 @@ export default function SelftestStep({ selftest, model }: { selftest: SelftestSt
 
       <div className={`mt-2 ${CARD}`}>
         <div className={CARD_ROW}>
-          <span className={tested || cpuOnly ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white' : ICON_TILE}>
+          <span className={`${ROW_ICON_TILE} ${tested || cpuOnly ? 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white' : ICON_TILE}`}>
             {selected?.gpu && !cpuOnly ? <GpuIcon className="h-4 w-4" /> : <CpuIcon className="h-4 w-4" />}
           </span>
           <span className="min-w-0 flex-1">

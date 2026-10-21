@@ -10,7 +10,7 @@ import CoreStatusNotice from '../CoreStatusNotice'
 import { FolderIcon, TrashIcon } from '../icons'
 import LoadError from '../LoadError'
 import { HoverTip } from '../Tip'
-import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_DANGER_BUTTON } from '../onboarding/styles'
+import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_DANGER_BUTTON } from '../onboarding/styles'
 import PathText from '../PathText'
 import ConfigSection from './ConfigSection'
 import { ROW_DESC, SECTION_NOTICE, SECTION_TITLE } from './styles'
@@ -88,7 +88,7 @@ export default function DataTab({ defs, offline, coreStatus }: { defs: ParamDef[
         <h4 className={SECTION_TITLE}>数据目录</h4>
         <div className={CARD}>
           <div className={CARD_ROW}>
-            <span className={ICON_TILE}>
+            <span className={`${ROW_ICON_TILE} ${ICON_TILE}`}>
               <FolderIcon className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
@@ -158,7 +158,7 @@ export default function DataTab({ defs, offline, coreStatus }: { defs: ParamDef[
         {offline ? <CoreStatusNotice status={coreStatus} className={SECTION_NOTICE} /> : (
           <div className={CARD}>
             <div className={CARD_ROW}>
-              <span className={ICON_TILE}>
+              <span className={`${ROW_ICON_TILE} ${ICON_TILE}`}>
                 <TrashIcon className="h-4 w-4" />
               </span>
               <span className="min-w-0 flex-1">

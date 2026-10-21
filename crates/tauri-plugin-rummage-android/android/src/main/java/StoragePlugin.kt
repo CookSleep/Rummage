@@ -147,6 +147,35 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /**
+   * 在文件管理器中打开文件所在的文件夹：换成外部存储提供者的文件夹文档 URI 交给能查看文件夹的应用。
+   * 没有这样的应用时返回 `{ opened: false }`；文件不在外部存储中时报错
+   */
+  @Command
+  fun revealFile(invoke: Invoke) {
+    try {
+      val dir = File(invoke.parseArgs(OpenFileArgs::class.java).path).parent ?: ""
+      val id = StoragePaths.toDocumentId(dir, primary(), volumes())
+      if (id == null) {
+        invoke.reject("文件夹不在手机存储或存储卡中：$dir")
+        return
+      }
+      val ret = JSObject()
+      val uri = DocumentsContract.buildDocumentUri(StoragePaths.EXTERNAL, id)
+      val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
+      try {
+        activity.startActivity(intent)
+        ret.put("opened", true)
+      } catch (e: ActivityNotFoundException) {
+        ret.put("opened", false)
+      }
+      invoke.resolve(ret)
+    } catch (e: Exception) {
+      Logger.error(Logger.tags("StoragePlugin"), "无法打开文件夹", e)
+      invoke.reject(e.message ?: e.toString())
+    }
+  }
+
   /** 用系统分享面板分享文件：同 openFile 经 FileProvider 换成 content URI，并放进 ClipData，接收方才能取得读取权限 */
   @Command
   fun shareFile(invoke: Invoke) {

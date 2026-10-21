@@ -11,7 +11,7 @@ import PathText from '../PathText'
 import { CloseIcon, FilterIcon, FolderIcon, PlusIcon, WarningIcon } from '../icons'
 import { HoverTip } from '../Tip'
 import { showToast } from '../Toast'
-import { CARD, CARD_ROW, CARD_ROW_HOVER, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_ICON_BUTTON, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_PRIMARY_BUTTON } from './styles'
+import { CARD, CARD_ROW, CARD_ROW_HOVER, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_ICON_BUTTON, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_PRIMARY_BUTTON } from './styles'
 
 /** Android 上可一键添加的手机存储中的文件夹，与 src-tauri/src/setup.rs 的 `COMMON_ROOTS` 一致 */
 const COMMON_ROOTS = ['DCIM', 'Pictures', 'Download', 'Documents']
@@ -161,7 +161,7 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
         {roots?.map((r) => (
           <div key={r.id}>
             <div className={CARD_ROW}>
-              <span className={ICON_TILE}>
+              <span className={`${ROW_ICON_TILE} ${ICON_TILE}`}>
                 <FolderIcon className="h-4 w-4" />
               </span>
               <span className="min-w-0 flex-1">
