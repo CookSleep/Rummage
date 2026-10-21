@@ -483,6 +483,30 @@ export interface StorageInfo {
   other: number
 }
 
+/** “Agent”页的 MCP 客户端，对应 Rust `src-tauri/src/agent.rs` 的 `Client` */
+export type AgentClient = 'claudeCode' | 'codex' | 'claudeDesktop' | 'cursor' | 'vscode' | 'opencode'
+
+/** Skill 的安装位置，对应 Rust `SkillTarget`：`~/.claude/skills` 或 `~/.agents/skills` */
+export type SkillTarget = 'claude' | 'agents'
+
+/**
+ * 对应 Rust `State`：没有检测到客户端、未添加、已添加、已添加但命令路径或 Skill 内容与当前不同、
+ * 配置文件格式有误或同名文件夹不是 Rummage 的 Skill
+ */
+export type AgentState = 'notFound' | 'absent' | 'added' | 'outdated' | 'invalid'
+
+/** “Agent”页的状态，对应 Rust `AgentInfo` */
+export interface AgentInfo {
+  /** MCP 服务的可执行文件 `rummage-core.exe` */
+  coreExe: string
+  /** 随安装包附带的 Skill 文件夹 */
+  skillDir: string
+  /** `path` 为该客户端的配置文件 */
+  clients: { id: AgentClient; path: string; state: AgentState }[]
+  /** `path` 为安装后的 Skill 文件夹 */
+  skills: { id: SkillTarget; path: string; state: AgentState }[]
+}
+
 /** 选好的新数据目录，对应 Rust `src-tauri/src/data.rs` 的 `DataDirChange` */
 export interface DataDirChange {
   from: string

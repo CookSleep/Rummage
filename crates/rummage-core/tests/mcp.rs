@@ -81,7 +81,7 @@ impl Mcp {
 }
 
 /// 全部工具，按名称排序
-const TOOLS: [&str; 13] = [
+const TOOLS: [&str; 14] = [
     "add_folder",
     "get_hit_context",
     "get_settings",
@@ -92,6 +92,7 @@ const TOOLS: [&str; 13] = [
     "remove_folder",
     "resume_indexing",
     "retry_failed_files",
+    "save_search_results",
     "search_files",
     "set_setting",
     "update_folder",

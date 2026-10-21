@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "agent"
+description = "允许主窗口查看并修改常用 AI 工具中 Rummage 的 MCP 配置（只改其中名为 rummage 的一项，客户端与配置文件位置固定在 Rust 侧），安装或移除 Rummage 的 Skill（只限 ~/.claude/skills/rummage 与 ~/.agents/skills/rummage），并打开随安装包附带的 Skill 文件夹"
+commands.allow = [
+  "agent_info",
+  "mcp_add",
+  "mcp_remove",
+  "skill_install",
+  "skill_remove",
+  "open_skill_dir",
+]

@@ -21,6 +21,7 @@ macro_rules! emitln {
     }};
 }
 
+pub(crate) mod export;
 mod manage;
 pub(crate) mod output;
 #[cfg(test)]
@@ -35,7 +36,17 @@ use chrono::{Days, Local, NaiveDate, TimeZone};
 use rummage_core::client::{self, Client, ConnectError};
 use rummage_proto::{ApiError, ParamKind, Reply, Request, params};
 
+const BAD_OUTPUT: &str = "--output 的文件扩展名应为 .csv、.json 或 .txt。";
+
 pub(crate) const KINDS: [&str; 5] = ["document", "image", "audio", "video", "other"];
+
+/// 文件类型的英文名，核心的其他类型都记作 `other`（MCP 与导出共用）
+pub(crate) fn kind_name(kind: &str) -> &str {
+    match kind {
+        "document" | "image" | "audio" | "video" => kind,
+        _ => "other",
+    }
+}
 
 /// 文件类型列表（命令行与 MCP 共用）：不区分大小写，跳过空项，去重；有不在 `allowed` 中的类型时返回这一项
 pub(crate) fn parse_kinds<'a>(
@@ -71,7 +82,8 @@ pub fn usage() -> String {
     format!(
         "用法：
   rummage-core search [<查询>] [--image <图片>] [--type <类型,…>] [--folder <文件夹>]
-                      [--since <日期>] [--until <日期>] [--limit <数量>] [--include-weak] [--json]
+                      [--since <日期>] [--until <日期>] [--limit <数量>] [--include-weak]
+                      [--output <文件>] [--json]
   rummage-core status [--json]
   rummage-core context <命中 ID> [--json]
   rummage-core folders [--json]                   已索引的文件夹、识别内容的文件类型与进度
@@ -90,6 +102,7 @@ pub fn usage() -> String {
   类型：document、image、audio、video、other（只按文件名索引的文件），多个用逗号分隔。
   文件夹：已索引的文件夹，可用 status 查看。日期：YYYY-MM-DD，本地时间，包含当天。数量：1–{max}，默认 20。
   --include-weak 同时显示匹配度较低的结果；--json 输出 JSON（非 ASCII 字符转义为 \\uXXXX）。
+  --output 把结果保存到新文件，格式按扩展名：.csv、.json 或 .txt（每行一个路径）。
   命中 ID 见 search 的结果，context 输出该处已索引的正文与前后段落。
   folders 的 --types 为识别内容的文件类型（document、image、audio、video），所有文件夹共用这一设置；
   --exclude 每次给一条排除规则（写法同 .gitignore），可重复；folders set 给出 --exclude 时整体替换原有的规则，
@@ -111,6 +124,7 @@ pub struct SearchArgs {
     pub until: Option<NaiveDate>,
     pub limit: u32,
     pub include_weak: bool,
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -202,6 +216,7 @@ pub fn parse(cmd: &str, args: impl IntoIterator<Item = OsString>) -> Result<Args
         until: None,
         limit: 20,
         include_weak: false,
+        output: None,
     };
     while let Some(arg) = args.next() {
         let flag = arg.to_string_lossy().into_owned();
@@ -224,7 +239,13 @@ pub fn parse(cmd: &str, args: impl IntoIterator<Item = OsString>) -> Result<Args
             || (cmd == "search"
                 && matches!(
                     flag.as_str(),
-                    "--image" | "--type" | "--folder" | "--since" | "--until" | "--limit"
+                    "--image"
+                        | "--type"
+                        | "--folder"
+                        | "--since"
+                        | "--until"
+                        | "--limit"
+                        | "--output"
                 ));
         if !known {
             return Err(format!("无法识别的参数：{flag}。"));
@@ -234,6 +255,13 @@ pub fn parse(cmd: &str, args: impl IntoIterator<Item = OsString>) -> Result<Args
             "--data-dir" => data_dir = Some(PathBuf::from(value)),
             "--image" => s.image = Some(PathBuf::from(value)),
             "--folder" => s.folder = Some(PathBuf::from(value)),
+            "--output" => {
+                let path = PathBuf::from(value);
+                if export::ext(&path).is_none() {
+                    return Err(BAD_OUTPUT.into());
+                }
+                s.output = Some(path);
+            }
             "--type" => {
                 for k in parse_kinds(utf8(value, &flag)?.split([',', '，']), &KINDS)
                     .map_err(|k| format!("无法识别的类型“{k}”，可选：{}。", KINDS.join("、")))?
@@ -457,10 +485,22 @@ async fn run_search(s: &mut Session, a: SearchArgs, json: bool) -> Result<Outcom
         weak_omitted: weak,
         image: a.image.is_some(),
     };
-    let text = if json {
-        output::search_json(&res)
-    } else {
-        output::search_text(&res)
+    let text = match &a.output {
+        Some(path) => {
+            let path = cwd(path)?;
+            export::save(&path, &shown).map_err(|err| match err {
+                export::ExportError::Exists => {
+                    format!("\"{}\" 已存在，请换一个文件名。", path.display())
+                }
+                export::ExportError::Format => BAD_OUTPUT.into(),
+                export::ExportError::Io(err) => {
+                    format!("无法写入 \"{}\"：{err}", path.display())
+                }
+            })?;
+            output::export_text(&res, &path, json)
+        }
+        None if json => output::search_json(&res),
+        None => output::search_text(&res),
     };
     emit(&text).map_err(|err| format!("无法输出结果：{err}"))?;
     Ok(if shown.is_empty() {

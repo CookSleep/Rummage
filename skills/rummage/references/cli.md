@@ -8,7 +8,8 @@
 
 ```
 rummage-core search [<查询>] [--image <图片>] [--type <类型,…>] [--folder <文件夹>]
-                    [--since <日期>] [--until <日期>] [--limit <数量>] [--include-weak] [--json]
+                    [--since <日期>] [--until <日期>] [--limit <数量>] [--include-weak]
+                    [--output <文件>] [--json]
 ```
 
 | 参数 | 说明 |
@@ -20,6 +21,7 @@ rummage-core search [<查询>] [--image <图片>] [--type <类型,…>] [--folde
 | `--since` / `--until` | `YYYY-MM-DD`，本地时间，包含当天 |
 | `--limit` | 1–500，默认 20 |
 | `--include-weak` | 同时显示匹配度较低的结果 |
+| `--output <文件>` | 把结果保存到新文件，格式按扩展名：`.csv`、`.json`、`.txt`（每行一个路径）；文件已存在时报错 |
 | `--json` | 输出 JSON |
 
 文本输出：每个结果一段，首行是序号、文件名、类型和匹配度（有校准分数时），下面是路径，修改日期、大小、匹配方式，“位置：”行（页码、时间段等），文档结果还有“命中 ID”和一段片段。
@@ -34,6 +36,9 @@ rummage-core search [<查询>] [--image <图片>] [--type <类型,…>] [--folde
 - `partial`：索引尚未完成，结果可能不完整。
 - `semanticUnavailable` / `unavailable`：内容识别不可用及原因（`paused`、`no_model`、`images_off`、`no_mmproj`、`engine`、`query_too_long`），此时只有文件名和正文原词的匹配。
 - `weakOmitted`：没有列出的匹配度较低的结果，至少这么多。
+
+给出 `--output` 时不输出结果本身，只说明保存了多少条；加 `--json` 时为 `{"protocol":2,"path","count","partial","semanticUnavailable","unavailable","weakOmitted"}`。
+保存的文件：`.csv` 为 UTF-8（带 BOM），列为 `path,name,kind,size,modified,match,status`；`.json` 为同样字段的对象数组；`.txt` 每行一个路径。`size` 为字节，`modified` 为本地时间 `YYYY-MM-DD HH:MM:SS`，`match` 为匹配度 0–100，没有时为空，`status` 为 `local`、`cloud`（仅在云端）、`offline`（设备未连接）或 `missing`（所在文件夹不存在）。CSV 中以 `=`、`+`、`-`、`@` 开头的值前面加 `'`，Excel 打开时不会当成公式。
 
 ## status
 

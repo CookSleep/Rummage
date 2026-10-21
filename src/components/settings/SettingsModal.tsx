@@ -3,16 +3,17 @@ import { invoke } from '@tauri-apps/api/core'
 import type { Appearance, CoreStatus, Notice, ParamDef, ParamGroup, ParamValue, ParamValues, ProxySetting, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import { setAutoCheck, useReleaseUpdates } from '../../hooks/useReleaseUpdates'
-import { isTauri } from '../../lib/platform'
+import { isAndroid, isTauri } from '../../lib/platform'
 import { dismissAllTooltips } from '../../lib/tooltipDismiss'
 import { useBackLayer } from '../../hooks/useBackLayer'
 import { useCoreEvent } from '../../hooks/useCoreEvent'
 import { renderMessage } from '../ConfirmDialog'
 import CoreStatusNotice from '../CoreStatusNotice'
-import { CloseIcon, CubeIcon, DatabaseIcon, FolderIcon, GaugeIcon, GlobeIcon, GpuIcon, InfoIcon, PaletteIcon, SearchIcon, SettingsIcon, SlidersIcon, StorageIcon, WarningIcon } from '../icons'
+import { CloseIcon, CubeIcon, DatabaseIcon, FolderIcon, GaugeIcon, GlobeIcon, GpuIcon, InfoIcon, PaletteIcon, SearchIcon, SettingsIcon, SlidersIcon, SparklesIcon, StorageIcon, WarningIcon } from '../icons'
 import LoadError from '../LoadError'
 import ProxyForm from '../onboarding/ProxyForm'
 import AboutTab from './AboutTab'
+import AgentTab from './AgentTab'
 import AppearanceTab from './AppearanceTab'
 import DataTab from './DataTab'
 import DeviceTab from './DeviceTab'
@@ -22,9 +23,9 @@ import ParamsTab from './ParamsTab'
 import Toggle from './Toggle'
 import { NOTICE_BOX, ROW_DESC, ROW_LABEL, SECTION_NOTICE, SECTION_TITLE } from './styles'
 
-type TabId = 'folders' | 'search' | 'index' | 'resource' | 'device' | 'models' | 'network' | 'appearance' | 'data' | 'advanced' | 'about'
+type TabId = 'folders' | 'search' | 'index' | 'resource' | 'device' | 'models' | 'network' | 'appearance' | 'data' | 'advanced' | 'agent' | 'about'
 
-const TABS: { id: TabId; label: string; icon: ComponentType<SVGProps<SVGSVGElement>>; group?: ParamGroup }[] = [
+const ALL_TABS: { id: TabId; label: string; icon: ComponentType<SVGProps<SVGSVGElement>>; group?: ParamGroup }[] = [
   { id: 'folders', label: '文件夹', icon: FolderIcon },
   { id: 'search', label: '搜索', icon: SearchIcon, group: 'Search' },
   { id: 'index', label: '索引', icon: DatabaseIcon, group: 'Index' },
@@ -35,8 +36,12 @@ const TABS: { id: TabId; label: string; icon: ComponentType<SVGProps<SVGSVGEleme
   { id: 'appearance', label: '外观', icon: PaletteIcon },
   { id: 'data', label: '数据', icon: StorageIcon },
   { id: 'advanced', label: '高级', icon: SlidersIcon, group: 'Advanced' },
+  { id: 'agent', label: 'Agent', icon: SparklesIcon },
   { id: 'about', label: '关于', icon: InfoIcon },
 ]
+
+// 命令行与 MCP 只在 Windows 上提供，Android 没有“Agent”页
+const TABS = ALL_TABS.filter((t) => !isAndroid || t.id !== 'agent')
 
 const NOTICE_TEXT: Record<Notice, string> = {
   db_restored: '上次更新索引数据库时出错，已从备份恢复。',
@@ -153,6 +158,7 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
   const body = () => {
     // 外观、数据、网络页只有部分依赖后台服务，不可用时只在那一分区显示它的状态；其余各页整页显示
     if (tab === 'about') return <AboutTab />
+    if (tab === 'agent') return <AgentTab />
     if (tab === 'appearance') return <AppearanceTab appearance={appearance} onChange={onAppearance} offline={offline} coreStatus={coreStatus} />
     if (tab === 'data') return <DataTab defs={defs} offline={offline} coreStatus={coreStatus} />
     if (tab === 'network') {

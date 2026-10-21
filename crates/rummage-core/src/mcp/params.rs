@@ -14,6 +14,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::{bad, kinds_param};
+use crate::cli::export::ext;
 use crate::cli::{KINDS, limit_range, parse_date};
 
 /// 默认返回的结果数
@@ -149,6 +150,35 @@ pub struct SearchParams {
     pub include_weak: bool,
 }
 
+/// `save_search_results` 的参数：筛选同 `SearchParams`，没有分页，多了保存的位置
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExportParams {
+    /// Absolute path of the new file, ending in .csv, .json or .txt (one path per line). It must not exist yet.
+    #[serde(deserialize_with = "text")]
+    pub path: String,
+    /// What to find, as for search_files.
+    #[serde(default, deserialize_with = "text")]
+    pub query: String,
+    /// Absolute path of a local image to search by example.
+    #[serde(default, deserialize_with = "text")]
+    pub image_path: String,
+    #[serde(default, deserialize_with = "kinds")]
+    #[schemars(schema_with = "kinds_schema")]
+    pub kinds: Vec<String>,
+    /// Limit to one indexed folder, exactly as listed by index_status.
+    #[serde(default, deserialize_with = "text")]
+    pub folder: String,
+    /// Only files modified on or after this date: YYYY-MM-DD, local time.
+    #[serde(default, deserialize_with = "text")]
+    pub modified_after: String,
+    /// Only files modified on or before this date: YYYY-MM-DD, local time.
+    #[serde(default, deserialize_with = "text")]
+    pub modified_before: String,
+    /// Also save results below the match threshold (usually noise). Default false.
+    #[serde(default, deserialize_with = "flag")]
+    pub include_weak: bool,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ContextParams {
     /// hit_id from a search_files result.
@@ -168,6 +198,7 @@ pub struct Search {
     pub limit: u32,
     pub offset: u32,
     pub include_weak: bool,
+    pub export: Option<String>,
 }
 
 /// 去掉首尾空白，空字符串视为未给出
@@ -232,11 +263,44 @@ pub fn check_search(p: SearchParams) -> Result<Search, String> {
         limit: p.limit,
         offset: p.offset,
         include_weak: p.include_weak,
+        export: None,
     })
 }
 
-/// 向核心请求的数量：要覆盖到这一页的末尾，且不低于核心接受的下限
+/// `save_search_results` 的参数校验：筛选同 `check_search`，再校验保存的位置
+pub fn check_export(p: ExportParams) -> Result<Search, String> {
+    let path = given(p.path).filter(|e| {
+        let e = Path::new(e);
+        e.is_absolute() && ext(e).is_some()
+    });
+    let Some(path) = path else {
+        return Err(
+            r#"path must be an absolute path ending in .csv, .json or .txt. Example: {"path": "C:\\Users\\me\\Desktop\\results.csv"}"#
+                .into(),
+        );
+    };
+    let s = check_search(SearchParams {
+        query: p.query,
+        image_path: p.image_path,
+        kinds: p.kinds,
+        folder: p.folder,
+        modified_after: p.modified_after,
+        modified_before: p.modified_before,
+        limit: DEFAULT_LIMIT,
+        offset: 0,
+        include_weak: p.include_weak,
+    })?;
+    Ok(Search {
+        export: Some(path),
+        ..s
+    })
+}
+
+/// 向核心请求的数量：要覆盖到这一页的末尾，且不低于核心接受的下限；要保存到文件时取到上限
 pub fn request_limit(s: &Search) -> u32 {
+    if s.export.is_some() {
+        return limit_range().1;
+    }
     s.offset.saturating_add(s.limit).max(limit_range().0)
 }
 

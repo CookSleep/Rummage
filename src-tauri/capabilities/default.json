@@ -21,6 +21,7 @@
     "diagnostics",
     "config",
     "update",
+    "agent",
     "log:default",
     {
       "identifier": "opener:allow-open-url",

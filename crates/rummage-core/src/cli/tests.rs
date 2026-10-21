@@ -52,6 +52,8 @@ fn search_args() {
             "--limit",
             "5",
             "--include-weak",
+            "--output",
+            r"结果\猫.CSV",
             "--json",
             "--data-dir",
             r"D:\数据",
@@ -71,6 +73,7 @@ fn search_args() {
             until: Some(date(2026, 2, 1)),
             limit: 5,
             include_weak: true,
+            output: Some(PathBuf::from(r"结果\猫.CSV")),
         })
     );
     // 只有图片也可以
@@ -527,4 +530,59 @@ fn not_a_root_lists_folders() {
         "\"D:\\其他\" 不是已索引的文件夹。已索引的文件夹：\n  D:\\资料\n  E:\\照片"
     );
     assert!(not_a_root(Path::new("x"), &[]).contains("还没有已索引的文件夹"));
+}
+
+#[test]
+fn export_formats_and_no_overwrite() {
+    let mut a = hit("账单, \"三月\".pdf", "document");
+    a.match_pct = None;
+    let mut b = hit("猫.jpg", "image");
+    b.cloud = true;
+    let mut c = hit("=1+2.txt", "other");
+    c.path = "=1+2.txt".into();
+    let hits = vec![a, b];
+    let csv = export::render(&hits, "csv");
+    let lines: Vec<_> = csv.split("\r\n").collect();
+    assert_eq!(
+        lines[0],
+        "\u{feff}path,name,kind,size,modified,match,status"
+    );
+    assert!(
+        lines[1].starts_with(
+            r#""D:\资料\账单, ""三月"".pdf","账单, ""三月"".pdf",document,1258291,2026-01-05 "#
+        ),
+        "{}",
+        lines[1]
+    );
+    assert!(lines[1].ends_with(",,local"), "{}", lines[1]);
+    assert!(lines[2].ends_with(",92,cloud"), "{}", lines[2]);
+    let formula = export::render(&[c], "csv");
+    assert!(
+        formula.contains("\r\n'=1+2.txt,'=1+2.txt,other,"),
+        "{formula}"
+    );
+    let v: serde_json::Value = serde_json::from_str(&export::render(&hits, "json")).unwrap();
+    assert_eq!(v[0]["match"], json!(null));
+    assert_eq!(v[1]["kind"], "image");
+    assert_eq!(v[1]["size"], 1_258_291);
+    assert_eq!(v[1]["status"], "cloud");
+    assert_eq!(
+        export::render(&hits, "txt"),
+        "D:\\资料\\账单, \"三月\".pdf\r\nD:\\资料\\猫.jpg\r\n"
+    );
+    assert_eq!(export::ext(Path::new("a.JSON")), Some("json"));
+    assert_eq!(export::ext(Path::new("a.xlsx")), None);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("结果.TXT");
+    export::save(&path, &hits).unwrap();
+    assert!(matches!(
+        export::save(&path, &hits),
+        Err(export::ExportError::Exists)
+    ));
+    assert!(matches!(
+        export::save(&dir.path().join("x.md"), &hits),
+        Err(export::ExportError::Format)
+    ));
+    assert!(args("search", &["猫", "--output", "a.xlsx"]).is_err());
 }

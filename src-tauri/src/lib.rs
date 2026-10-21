@@ -2,6 +2,8 @@
 //! 以及由代码创建主窗口（WebView2 数据目录随数据目录走、按系统主题设背景色避免白闪、拒绝新窗口）、关闭兜底和核心进程的连接与守护。
 //! 关闭主窗口只销毁窗口，界面进程留在托盘（`tray`），从托盘再打开时重新创建；只有托盘的“退出”等入口会退出进程。
 //! 用户在设置中选了关闭窗口时退出的，由前端在关闭时调用 `exit_app`（同托盘的“退出”），设置存在前端的本地存储
+#[cfg(desktop)]
+mod agent;
 #[cfg(target_os = "android")]
 mod android;
 // 前台服务的启停判定，其他平台上只为测试编译
@@ -194,6 +196,18 @@ pub fn run() {
             config::import_config,
             config::apply_config,
             releases::fetch_releases,
+            #[cfg(desktop)]
+            agent::agent_info,
+            #[cfg(desktop)]
+            agent::mcp_add,
+            #[cfg(desktop)]
+            agent::mcp_remove,
+            #[cfg(desktop)]
+            agent::skill_install,
+            #[cfg(desktop)]
+            agent::skill_remove,
+            #[cfg(desktop)]
+            agent::open_skill_dir,
             #[cfg(desktop)]
             update::update_ready,
             #[cfg(desktop)]

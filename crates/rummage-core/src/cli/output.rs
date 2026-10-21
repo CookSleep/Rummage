@@ -286,6 +286,54 @@ pub fn search_json(r: &Results) -> String {
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportOut<'a> {
+    protocol: u32,
+    path: &'a Path,
+    count: usize,
+    partial: bool,
+    semantic_unavailable: bool,
+    unavailable: Option<SemanticUnavailable>,
+    weak_omitted: usize,
+}
+
+/// `--output` 保存后输出的说明，提示与结果文本相同
+pub fn export_text(r: &Results, path: &Path, json: bool) -> String {
+    if json {
+        return ascii_json(&ExportOut {
+            protocol: PROTOCOL_VERSION,
+            path,
+            count: r.hits.len(),
+            partial: r.partial,
+            semantic_unavailable: r.semantic_unavailable,
+            unavailable: r.unavailable,
+            weak_omitted: r.weak_omitted,
+        });
+    }
+    let mut out = String::new();
+    if r.semantic_unavailable {
+        let _ = writeln!(out, "{}", unavailable_text(r.unavailable, r.image));
+    }
+    if r.partial {
+        let _ = writeln!(out, "索引尚未完成，结果可能不完整。");
+    }
+    let _ = write!(
+        out,
+        "已将 {} 个结果保存到 \"{}\"。",
+        r.hits.len(),
+        path.display()
+    );
+    if r.weak_omitted > 0 {
+        let _ = write!(
+            out,
+            "\n另有至少 {} 个匹配度较低的结果没有保存，加 --include-weak 一并保存。",
+            r.weak_omitted
+        );
+    }
+    out
+}
+
 /// `--folder` 不是已索引的文件夹时的错误，列出全部已索引的文件夹
 pub fn not_a_root(folder: &Path, roots: &[RootInfo]) -> String {
     if roots.is_empty() {

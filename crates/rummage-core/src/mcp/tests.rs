@@ -477,3 +477,21 @@ fn args() {
     assert!(parse(os(&["--data-dir"])).is_err());
     assert!(parse(os(&["--verbose"])).is_err());
 }
+
+#[test]
+fn export_path_must_be_absolute_with_known_extension() {
+    let export = |v: Value| {
+        serde_json::from_value::<ExportParams>(v)
+            .map_err(|err| err.to_string())
+            .and_then(check_export)
+    };
+    for v in ["results.csv", r"C:\x\results.xlsx", ""] {
+        let err = export(json!({"query": "猫", "path": v})).unwrap_err();
+        assert!(err.contains("path must be"), "{err}");
+    }
+    assert!(export(json!({"query": "猫"})).is_err());
+    assert!(export(json!({"path": r"C:\x\a.csv"})).is_err());
+    let s = export(json!({"query": "猫", "path": r"C:\x\猫.Json"})).unwrap();
+    assert_eq!(s.export.as_deref(), Some(r"C:\x\猫.Json"));
+    assert_eq!(request_limit(&s), MAX_TOTAL);
+}

@@ -10,6 +10,7 @@ use rummage_proto::{
 };
 
 use super::params::Page;
+use crate::cli::kind_name;
 use crate::cli::output::{format_date, format_size};
 use crate::manage::{clock, progress_pct};
 
@@ -25,13 +26,6 @@ pub fn block_text(text: &str) -> String {
             c => c,
         })
         .collect()
-}
-
-fn kind_name(kind: &str) -> &str {
-    match kind {
-        "document" | "image" | "audio" | "video" => kind,
-        _ => "other",
-    }
 }
 
 fn range(v: &serde_json::Value, start: &str, end: &str, one: &str, many: &str) -> Option<String> {
@@ -254,6 +248,27 @@ pub fn search_text(p: &Page, n: &Notes) -> String {
         let _ = write!(
             out,
             "\nMore results may exist: call search_files again with offset={next}."
+        );
+    }
+    out
+}
+
+/// `save_search_results` 保存后的说明：保存了多少条，以及与结果文本相同的提示
+pub fn export_text(count: usize, path: &str, weak: usize, n: &Notes) -> String {
+    let mut out = String::new();
+    if n.semantic_unavailable {
+        let _ = writeln!(out, "{}", unavailable_text(n.unavailable, n.image));
+    }
+    let partial = if n.partial {
+        " (index still building; results may be incomplete)"
+    } else {
+        ""
+    };
+    let _ = write!(out, "Saved {count} results to {path}{partial}.");
+    if weak > 0 {
+        let _ = write!(
+            out,
+            "\nAt least {weak} lower-match results were left out (set include_weak=true to include them)."
         );
     }
     out

@@ -41,6 +41,16 @@ section('Maple Mono NF CN 字体', [
   '',
   read('third-party-licenses/MapleMono-LICENSE.txt'),
 ].join('\n'))
+section('Lobe Icons（设置中 AI 工具的品牌图标）', [
+  '项目地址：https://github.com/lobehub/lobe-icons',
+  '',
+  read('third-party-licenses/LobeIcons-LICENSE.txt'),
+].join('\n'))
+section('Devicon（设置中 VS Code 的图标）', [
+  '项目地址：https://github.com/devicons/devicon',
+  '',
+  read('third-party-licenses/Devicon-LICENSE.txt'),
+].join('\n'))
 section('Pillow（图像缩放算法的移植）', read('third-party-licenses/Pillow-LICENSE.txt'))
 section('libwebp（静态链接，用于编码缩略图）', read('third-party-licenses/libwebp-LICENSE.txt'))
 
