@@ -4,7 +4,7 @@
 // SPDX 表达式中只要有一种选法全是宽松许可就算通过（如 “MIT OR GPL-2.0”）；只给出许可文件（license-file）的包
 // 无法自动判断，列出来提醒人工确认，不算失败。LGPL 组件（ffmpeg）以独立可执行文件分发，不在这两类依赖中，
 // 许可说明在 third-party-licenses/FFmpeg-NOTICE.txt：这里核对其中写的版本、随附的 exe 与 DLL 与 scripts/fetch-ffmpeg.ps1 钉定的一致
-import { execFileSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
 const COPYLEFT = /^(A|L)?GPL/i
@@ -103,7 +103,7 @@ for (const id of crates) {
   check('Rust', p.name, p.version, p.license, p.license_file)
 }
 // 前端：生产依赖，同名同版本只算一次
-const tree = JSON.parse(execFileSync('npm', ['ls', '--omit=dev', '--all', '--json', '--long'], { encoding: 'utf8', shell: true, maxBuffer: 256 * 1024 * 1024 }))
+const tree = JSON.parse(execSync('npm ls --omit=dev --all --json --long', { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }))
 const npmSeen = new Set()
 const walk = (deps) => {
   for (const [name, d] of Object.entries(deps ?? {})) {

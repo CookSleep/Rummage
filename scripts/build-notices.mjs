@@ -6,7 +6,7 @@
 // LiteRT NPU 分发库的许可与第三方声明取自 Google Maven 的 litert-npu-runtime-{qualcomm,mediatek,google-tensor}:2.3.0（三者的 LICENSE 相同）。
 // 高通的 QNN 运行库由用户的设备从 Maven Central 下载，不随程序分发，不在此列。
 // 需要 cargo-about：cargo install cargo-about --version 0.9.2 --locked --features cli
-import { execFileSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -90,7 +90,7 @@ section(`Rust 依赖（共 ${rustSeen.size} 个包）`, rust.join('\n\n'))
 // 前端：生产依赖，同名同版本只列一次；许可原文取包目录中的全部许可文件（如 LICENSE-MIT 与 LICENSE-APACHE-2.0），不含 .spdx。
 // 包中没有许可文件时取 third-party-licenses/npm/<包名>.txt（@ 去掉，/ 换成 __），两处都没有则生成失败。
 const missing = []
-const tree = JSON.parse(execFileSync('npm', ['ls', '--omit=dev', '--all', '--json', '--long'], { encoding: 'utf8', shell: true, maxBuffer: 256 * 1024 * 1024 }))
+const tree = JSON.parse(execSync('npm ls --omit=dev --all --json --long', { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }))
 const npm = new Map()
 const walk = (deps) => {
   for (const [name, d] of Object.entries(deps ?? {})) {
