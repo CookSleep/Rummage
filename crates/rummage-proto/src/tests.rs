@@ -343,6 +343,7 @@ fn response_and_event_round_trip() {
     let status = IndexStatus {
         state: IndexState::Running,
         paused: None,
+        slow: false,
         total: 3,
         done: 1,
         failed: 1,
@@ -430,6 +431,7 @@ fn response_and_event_round_trip() {
     ] {
         round_trip(Event::IndexProgress(IndexStatus {
             paused: Some(paused),
+            slow: false,
             ..status.clone()
         }));
     }

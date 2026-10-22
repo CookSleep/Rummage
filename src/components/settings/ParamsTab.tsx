@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ParamDef, ParamGroup, ParamValue, ParamValues } from '../../types'
 import { useIndexStatus } from '../../hooks/useIndexStatus'
 import { useParamChanges } from '../../hooks/useParamChanges'
@@ -35,6 +35,8 @@ interface Props {
   setParam: (key: string, value: ParamValue) => Promise<string | null>
   /** 打开“设备”页 */
   onDevice: () => void
+  /** 打开时滚动到的参数 */
+  focus?: string
 }
 
 /**
@@ -43,8 +45,16 @@ interface Props {
  * 文件类型开关在“文件夹”页；“搜索”页下方是搜索历史，“高级”页下方是诊断，各自的参数在那里显示；
  * Android 的“资源”页顶部是“后台运行”（电池优化白名单）
  */
-export default function ParamsTab({ group, defs, values, setParam, onDevice }: Props) {
+export default function ParamsTab({ group, defs, values, setParam, onDevice, focus }: Props) {
   const [recheck, setRecheck] = useState(false)
+  const focusRef = useRef<HTMLDivElement>(null)
+  // 参数定义与值都到了才有这一行，只在打开时滚动一次
+  const focused = useRef(false)
+  useEffect(() => {
+    if (focused.current || !focusRef.current) return
+    focused.current = true
+    focusRef.current.scrollIntoView({ block: 'center' })
+  })
   const { errors, epoch, pending, request, confirm, cancel } = useParamChanges(values, setParam, (key) => key === SELFTEST_KEY && setRecheck(true))
   // 本页有影响索引的参数时，在顶部说明按新设置重建的情况
   const indexStatus = useIndexStatus(true)
@@ -90,7 +100,7 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice }: P
         <section key={sec.title} className="space-y-4">
           <h4 className={SECTION_TITLE}>{sec.title}</h4>
           {sec.defs.map((d) => (
-            <div key={`${d.key}-${epoch}`}>
+            <div key={`${d.key}-${epoch}`} ref={d.key === focus ? focusRef : undefined}>
               <ParamField def={d} value={values[d.key] ?? d.default} error={errors[d.key]} onChange={(v) => request([[d, v]])} />
               {d.key === SELFTEST_KEY && recheck && (
                 <div className={`mt-2 ${NOTICE_BOX}`}>

@@ -23,7 +23,7 @@ import ParamsTab from './ParamsTab'
 import Toggle from './Toggle'
 import { NOTICE_BOX, ROW_DESC, ROW_LABEL, SECTION_NOTICE, SECTION_TITLE } from './styles'
 
-type TabId = 'folders' | 'search' | 'index' | 'resource' | 'device' | 'models' | 'network' | 'appearance' | 'data' | 'advanced' | 'agent' | 'about'
+export type TabId = 'folders' | 'search' | 'index' | 'resource' | 'device' | 'models' | 'network' | 'appearance' | 'data' | 'advanced' | 'agent' | 'about'
 
 const ALL_TABS: { id: TabId; label: string; icon: ComponentType<SVGProps<SVGSVGElement>>; group?: ParamGroup }[] = [
   { id: 'folders', label: '文件夹', icon: FolderIcon },
@@ -58,6 +58,10 @@ interface Props {
   onSetupRetry: () => void
   appearance: Appearance
   onAppearance: (next: Appearance) => Promise<void>
+  /** 打开时显示的页，默认“文件夹” */
+  initialTab?: TabId
+  /** 打开时滚动到的参数，须在 `initialTab` 页中；切换页后不再滚动 */
+  initialParam?: string
 }
 
 /**
@@ -65,8 +69,9 @@ interface Props {
  * 各页分别记住滚动位置。参数值来自 `get_params`，之后跟随 `ParamsChanged` 事件；参数页由参数表生成（`param_defs`）。
  * 顶部显示核心记下的通知（数据库已从备份恢复），用户点“知道了”后清除。后台服务重新连上后重新读取。Esc 或点遮罩关闭
  */
-export default function SettingsModal({ onClose, coreStatus, setup, setupError, onSetup, onSetupRetry, appearance, onAppearance }: Props) {
-  const [tab, setTab] = useState<TabId>('folders')
+export default function SettingsModal({ onClose, coreStatus, setup, setupError, onSetup, onSetupRetry, appearance, onAppearance, initialTab = 'folders', initialParam }: Props) {
+  const [tab, setTab] = useState<TabId>(initialTab)
+  const [focus, setFocus] = useState(initialParam)
   const [defs, setDefs] = useState<ParamDef[]>([])
   const [values, setValues] = useState<ParamValues | null>(null)
   const [loadError, setLoadError] = useState('')
@@ -77,6 +82,7 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
   const autoCheck = useReleaseUpdates((s) => s.autoCheck)
   const onModelsAct = useCallback(() => setModelsActed(true), [])
   const scrollRef = useRef<HTMLDivElement>(null)
+  const navRef = useRef<HTMLElement>(null)
   const scrollTops = useRef<Partial<Record<TabId, number>>>({})
 
   const load = useCallback(() => {
@@ -133,6 +139,15 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollTops.current[tab] ?? 0
   }, [tab])
+
+  // 窄窗口下分页横向滚动，打开时把当前页的按钮滚到中间；靠近两端居中不了时由浏览器限制在滚动范围内，停在最近的位置。
+  // 用 offsetLeft（nav 为定位元素）而不用 getBoundingClientRect：打开动画带缩放
+  useLayoutEffect(() => {
+    const nav = navRef.current
+    const el = nav?.querySelector<HTMLElement>('[aria-current="page"]')
+    if (!nav || !el) return
+    nav.scrollLeft = el.offsetLeft + el.offsetWidth / 2 - nav.clientWidth / 2
+  }, [])
 
   /** 返回参数已保存、但需要告诉用户的提示 */
   const setParam = useCallback(async (key: string, value: ParamValue) => {
@@ -194,7 +209,7 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
     if (tab === 'models' && setup) return <ModelsTab setup={setup} acted={modelsActed} onAct={onModelsAct} />
     if (loadError) return <LoadError message={loadError} onRetry={load} />
     if (!values) return null
-    if (group) return <ParamsTab group={group} defs={defs} values={values} setParam={setParam} onDevice={() => setTab('device')} />
+    if (group) return <ParamsTab group={group} defs={defs} values={values} setParam={setParam} onDevice={() => setTab('device')} focus={focus} />
     return <FoldersTab values={values} setParam={setParam} setup={setup} onModels={() => setTab('models')} />
   }
 
@@ -240,12 +255,16 @@ export default function SettingsModal({ onClose, coreStatus, setup, setupError, 
 
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           <div className="flex w-full shrink-0 flex-col border-b border-gray-100 bg-gray-50/50 dark:border-white/[0.08] dark:bg-white/[0.02] sm:w-48 sm:border-b-0 sm:border-r">
-            <nav className="flex flex-1 space-x-1 overflow-x-auto p-3 sm:flex-col sm:space-x-0 sm:space-y-1 sm:overflow-y-auto">
+            <nav ref={navRef} className="relative flex flex-1 space-x-1 overflow-x-auto p-3 sm:flex-col sm:space-x-0 sm:space-y-1 sm:overflow-y-auto">
               {TABS.map((t) => (
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setTab(t.id)}
+                  aria-current={tab === t.id ? 'page' : undefined}
+                  onClick={() => {
+                    setTab(t.id)
+                    setFocus(undefined)
+                  }}
                   className={`flex flex-shrink-0 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm transition-colors ${tab === t.id ? 'bg-white font-medium text-blue-600 shadow-sm dark:bg-white/[0.08] dark:text-blue-400' : 'text-gray-600 hover:bg-gray-100/80 dark:text-gray-400 dark:hover:bg-white/[0.04]'}`}
                 >
                   <t.icon className="h-4 w-4" />

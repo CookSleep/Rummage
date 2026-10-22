@@ -424,9 +424,11 @@ impl Shared {
         } else {
             IndexState::Idle
         };
+        let paused = self.reported(paused);
         let mut s = IndexStatus {
             state,
-            paused: self.reported(paused),
+            paused,
+            slow: paused.is_none() && self.slow.load(Ordering::Relaxed),
             error,
             total: 0,
             done: 0,
@@ -666,18 +668,21 @@ impl Pipeline {
         }
     }
 
-    /// 打开或关闭降温；关闭后调度线程不再等完剩下的休息时间
-    pub fn set_slow(&self, slow: bool) {
-        if self.shared.slow.swap(slow, Ordering::Relaxed) != slow {
-            log::info!(
-                "{}",
-                if slow {
-                    "手机发热，放慢建立索引"
-                } else {
-                    "结束降温"
-                }
-            );
+    /// 打开或关闭降温，返回是否有变化；不广播，由调用方在设置完暂停原因后广播，界面不会看到两者不一致的中间状态。
+    /// 关闭后调度线程不再等完剩下的休息时间
+    pub fn set_slow(&self, slow: bool) -> bool {
+        if self.shared.slow.swap(slow, Ordering::Relaxed) == slow {
+            return false;
         }
+        log::info!(
+            "{}",
+            if slow {
+                "手机发热，放慢建立索引"
+            } else {
+                "结束降温"
+            }
+        );
+        true
     }
 
     /// 参数 `engine_idle_min` 修改后交给当前的推理引擎，立即生效

@@ -20,6 +20,15 @@ const PAUSE_TEXT: Record<PauseReason['type'], string> = {
   fullscreen: '有全屏程序在运行，已暂停',
 }
 
+/** 可在“设置 → 资源”中调整的自动暂停原因与对应的参数 */
+const ADJUST_PARAM: Partial<Record<PauseReason['type'], string>> = {
+  disk_low: 'min_free_disk_gb',
+  hot: 'pause_when_hot',
+  battery: 'pause_on_battery',
+  screen_on: 'pause_when_screen_on',
+  fullscreen: 'pause_on_fullscreen',
+}
+
 /** 与托盘菜单（src-tauri/src/tray.rs）的选项一致 */
 const PAUSE_OPTIONS: { label: string; value: PauseFor }[] = [
   { label: '暂停 1 小时', value: 'hour' },
@@ -81,7 +90,7 @@ export function indexHint(s: IndexStatus, now = new Date(), base = 0, device: { 
     if (s.pending === 0) return `索引已暂停${resume}`
     return `索引已暂停：已处理 ${r.done} / ${r.total}${resume}，完成前，尚未处理的文件只能按文件名搜索`
   }
-  const paused = s.paused ? `（${PAUSE_TEXT[s.paused.type]}）` : ''
+  const paused = s.paused ? `（${PAUSE_TEXT[s.paused.type]}）` : s.slow ? '（手机发热，已放慢）' : ''
   const eta = s.etaS != null ? `，预计还需${formatDuration(s.etaS)}` : ''
   const used = s.paused ? null : device
   const by = used ? `用「${used.name}」` : ''
@@ -99,13 +108,15 @@ interface Props {
   base: number
   /** 点击“N 个文件失败”；失败文件弹窗也由搜索页管理，提示换位置时不关掉 */
   onFailed: () => void
+  /** 点击“调整”：自动暂停或发热放慢时打开“设置 → 资源”，并滚动到参数 `key` */
+  onAdjust: (key: string) => void
   /** 放在窗口底部时，暂停菜单向上展开 */
   up?: boolean
   /** 见 `indexHint` */
   device?: { name: string; why: string } | null
 }
 
-export default function IndexHint({ status, base, onFailed, up = false, device = null }: Props) {
+export default function IndexHint({ status, base, onFailed, onAdjust, up = false, device = null }: Props) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -121,6 +132,8 @@ export default function IndexHint({ status, base, onFailed, up = false, device =
   const manual = status.paused?.type === 'manual'
   // 缺模型、内容识别无法启动：需要用户处理，用提示框（与设置页的提示相同）
   const warn = status.state === 'no_model' || status.state === 'no_mmproj' || status.state === 'error'
+  // 提示中写了暂停或放慢的原因时才有“调整”
+  const adjust = !text || warn ? undefined : status.paused ? ADJUST_PARAM[status.paused.type] : status.slow ? 'slow_when_hot' : undefined
 
   // 暂停状态以核心为准，成功后由 core-event 中的 IndexProgress 更新
   const run = (cmd: string, args?: Record<string, unknown>) => {
@@ -159,6 +172,15 @@ export default function IndexHint({ status, base, onFailed, up = false, device =
           </div>
         )}
         {text && !warn && <p className="min-w-0 flex-1 text-xs text-gray-400 dark:text-gray-500">{text}</p>}
+        {adjust && (
+          <button
+            type="button"
+            onClick={() => onAdjust(adjust)}
+            className="flex-shrink-0 text-xs text-blue-500 underline underline-offset-2 transition hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+          >
+            调整
+          </button>
+        )}
         {failed > 0 && (
           <button
             type="button"

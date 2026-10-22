@@ -364,6 +364,7 @@ fn status_sample() -> IndexStatus {
     IndexStatus {
         state: IndexState::Running,
         paused: Some(PauseReason::Battery),
+        slow: false,
         total: 400,
         done: 97,
         failed: 3,
@@ -450,6 +451,7 @@ fn status_output() {
     let idle = IndexStatus {
         state: IndexState::Idle,
         paused: None,
+        slow: false,
         total: 0,
         done: 0,
         failed: 0,

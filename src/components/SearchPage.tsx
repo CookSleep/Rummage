@@ -26,7 +26,7 @@ import FilterBar from './FilterBar'
 import DetailPanel, { PANEL_OVERLAY_BELOW, PANEL_WIDTH } from './DetailPanel'
 import ResultGrid from './ResultGrid'
 import SearchBox from './SearchBox'
-import SettingsModal from './settings/SettingsModal'
+import SettingsModal, { type TabId } from './settings/SettingsModal'
 import { ChevronRightIcon, PanelExpandIcon, SettingsIcon, WarningIcon } from './icons'
 import { NOTICE_BOX } from './settings/styles'
 import { HoverTip } from './Tip'
@@ -91,7 +91,9 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
   const [wide, setWide] = useState(() => window.innerWidth >= PANEL_OVERLAY_BELOW)
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)
   const [dragging, setDragging] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // 打开时为显示的页与要滚动到的参数
+  const [settings, setSettings] = useState<{ tab: TabId; param?: string } | null>(null)
+  const settingsOpen = settings !== null
   const latestRelease = useReleaseUpdates((s) => s.releases[0])
   const hasUpdate = useReleaseUpdates((s) => shouldShowUpdate(s.releases[0], __APP_VERSION__, s.ignoredVersion))
   const inputRef = useRef<HTMLInputElement>(null)
@@ -427,7 +429,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
       )}
       <button
         type="button"
-        onClick={() => setSettingsOpen(true)}
+        onClick={() => setSettings({ tab: 'folders' })}
         aria-label="设置"
         className="rounded-full p-2 text-gray-500 transition duration-200 hover:bg-black/5 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200"
       >
@@ -460,7 +462,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
           <div className="relative">
             {((query && indexStatus && (indexHint(indexStatus) || indexStatus.failed > 0)) || (results?.semanticUnavailable && query && allHits.length > 0)) && (
               <div className={`flex flex-col gap-1.5 ${query ? 'mb-2' : 'absolute inset-x-0 bottom-full mb-2'}`}>
-                {query && <IndexHint status={indexStatus} base={baseRef.current ?? 0} onFailed={() => setFailedOpen(true)} device={usedDevice} />}
+                {query && <IndexHint status={indexStatus} base={baseRef.current ?? 0} onFailed={() => setFailedOpen(true)} onAdjust={(param) => setSettings({ tab: 'resource', param })} device={usedDevice} />}
                 {results?.semanticUnavailable && query && allHits.length > 0 && (
                   <div className={NOTICE_BOX}>
                     <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
@@ -499,7 +501,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
       {!query && (
         <div className="fixed inset-x-0 bottom-0 z-10 px-4 pb-[calc(1.25rem+var(--safe-bottom))] pt-2 sm:px-14">
           <div className="mx-auto w-full max-w-2xl">
-            <IndexHint status={indexStatus} base={baseRef.current ?? 0} onFailed={() => setFailedOpen(true)} up device={usedDevice} />
+            <IndexHint status={indexStatus} base={baseRef.current ?? 0} onFailed={() => setFailedOpen(true)} onAdjust={(param) => setSettings({ tab: 'resource', param })} up device={usedDevice} />
           </div>
         </div>
       )}
@@ -588,9 +590,11 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
 
       {failedOpen && <FailedFilesDialog onClose={() => setFailedOpen(false)} />}
 
-      {settingsOpen && (
+      {settings && (
         <SettingsModal
-          onClose={() => setSettingsOpen(false)}
+          initialTab={settings.tab}
+          initialParam={settings.param}
+          onClose={() => setSettings(null)}
           coreStatus={coreStatus}
           setup={setup}
           setupError={setupError}

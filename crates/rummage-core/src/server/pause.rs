@@ -54,8 +54,11 @@ impl State {
             let (reason, slow) = self.pause_reason(&mut manual);
             let paused = reason.is_some();
             if let Some(p) = self.pipeline.get() {
+                let slowed = p.set_slow(slow);
                 p.set_paused(reason);
-                p.set_slow(slow);
+                if slowed {
+                    p.broadcast();
+                }
             }
             paused
         };

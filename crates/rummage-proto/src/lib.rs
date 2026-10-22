@@ -649,6 +649,8 @@ pub struct IndexStatus {
     pub state: IndexState,
     /// 暂停领取新作业的原因；为空表示没有暂停。暂停时处理中的作业照常完成
     pub paused: Option<PauseReason>,
+    /// 手机发热，按 50% 占空比放慢领取作业（`slow_when_hot`）；暂停时为 `false`
+    pub slow: bool,
     pub total: u64,
     pub done: u64,
     pub failed: u64,

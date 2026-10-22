@@ -32,6 +32,7 @@ mod tests {
         IndexStatus {
             state: rummage_proto::IndexState::Running,
             paused: None,
+            slow: false,
             total: 5000,
             done: 1200,
             failed: 34,

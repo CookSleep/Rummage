@@ -119,6 +119,7 @@ fn slow_waits_for_inflight_jobs() {
     wait_entered(&e);
     let p = e.pipeline.as_ref().unwrap();
     p.set_slow(true);
+    assert!(e.status().slow);
     // 调度线程交出手头的作业后停在降温等待中，处理中的作业没完成就不再领取
     thread::sleep(Duration::from_millis(500));
     let claimed = e.count("SELECT COUNT(*) FROM jobs WHERE stage <> 'pending'");

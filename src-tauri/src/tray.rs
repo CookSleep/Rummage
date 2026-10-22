@@ -332,6 +332,7 @@ mod tests {
         IndexStatus {
             state,
             paused,
+            slow: false,
             total: 5000,
             done: 1200,
             failed: 34,

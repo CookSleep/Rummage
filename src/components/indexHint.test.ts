@@ -4,7 +4,7 @@ import { indexHint, nextBase } from './IndexHint'
 
 describe('indexHint', () => {
   const base: IndexStatus = {
-    state: 'running', paused: null, total: 70, done: 60, failed: 6, pending: 4, byKind: {}, backend: 'CPU', error: null, etaS: null, rebuild: null,
+    state: 'running', paused: null, slow: false, total: 70, done: 60, failed: 6, pending: 4, byKind: {}, backend: 'CPU', error: null, etaS: null, rebuild: null,
   }
 
   it('有剩余时间时附在进度后面，没有时不显示', () => {
@@ -53,11 +53,15 @@ describe('indexHint', () => {
     expect(indexHint(base, new Date(), 0, { name: 'RTX 3070', why: '「RTX 4080 SUPER」出现问题' })).toBe('正在用「RTX 3070」建立索引（「RTX 4080 SUPER」出现问题）：已处理 66 / 70，完成前，尚未处理的文件只能按文件名搜索')
     expect(indexHint(paused, new Date(), 0, { name: 'CPU', why: '显卡检测未通过' })).toBe('正在建立索引：已处理 66 / 70（未接电源，已暂停），完成前，尚未处理的文件只能按文件名搜索')
   })
+
+  it('发热放慢时写明原因', () => {
+    expect(indexHint({ ...base, slow: true })).toBe('正在建立索引：已处理 66 / 70（手机发热，已放慢），完成前，尚未处理的文件只能按文件名搜索')
+  })
 })
 
 describe('nextBase', () => {
   const s: IndexStatus = {
-    state: 'running', paused: null, total: 100, done: 50, failed: 10, pending: 40, byKind: {}, backend: 'CPU', error: null, etaS: null, rebuild: null,
+    state: 'running', paused: null, slow: false, total: 100, done: 50, failed: 10, pending: 40, byKind: {}, backend: 'CPU', error: null, etaS: null, rebuild: null,
   }
 
   it('本轮开始时从已处理数算起，处理完清掉', () => {

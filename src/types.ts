@@ -153,6 +153,8 @@ export interface IndexCounts {
 export interface IndexStatus extends IndexCounts {
   state: IndexState
   paused: PauseReason | null
+  /** 手机发热，放慢建立索引；暂停时为 `false` */
+  slow: boolean
   byKind: Record<string, IndexCounts>
   backend: string | null
   /** `state` 为 `error` 时的原因；为 `no_model` 时是只有 NPU 模型、NPU 却用不了的说明，缺少模型时为空 */

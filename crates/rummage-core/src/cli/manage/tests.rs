@@ -163,6 +163,7 @@ fn folders_output() {
     let index = IndexStatus {
         state: IndexState::Running,
         paused: Some(PauseReason::Battery),
+        slow: false,
         total: 200,
         done: 150,
         failed: 10,

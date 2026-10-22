@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ParamDef, RootInfo } from '../../types'
 
@@ -25,7 +26,7 @@ const DEFS = [
   { ...def('thermal_slow_headroom', '开始放慢的发热程度', 'android'), kind: { Named: { options: [[70, '稍热'], [80, '较热'], [90, '很热']], unit: '' } }, default: 80 } as ParamDef,
 ]
 
-async function open(params: Record<string, unknown> = {}, roots: RootInfo[] = []) {
+async function open(params: Record<string, unknown> = {}, roots: RootInfo[] = [], at: Pick<ComponentProps<typeof SettingsModal>, 'initialTab' | 'initialParam'> = {}) {
   const calls = mockCore({
     param_defs: () => DEFS,
     get_params: () => params,
@@ -47,6 +48,7 @@ async function open(params: Record<string, unknown> = {}, roots: RootInfo[] = []
       onSetupRetry={vi.fn()}
       appearance={APPEARANCE}
       onAppearance={vi.fn()}
+      {...at}
     />,
   )
   await flush()
@@ -56,6 +58,7 @@ async function open(params: Record<string, unknown> = {}, roots: RootInfo[] = []
 const tab = (label: string) => click([...document.querySelectorAll<HTMLElement>('nav button')].find((b) => b.textContent === label)!)
 
 describe('Android 上的设置', () => {
+
   it('参数页只显示 Android 与各平台通用的参数，资源页顶部是“后台运行”', async () => {
     await open()
     await tab('资源')
@@ -121,6 +124,33 @@ describe('Android 上的设置', () => {
     expect(text()).toContain('只能选择通过检测的 GPU 或 NPU')
     expect(text()).toContain('它比 GPU 与 NPU 快')
     expect(text()).not.toContain('显卡驱动')
+  })
+
+  it('打开到“资源”页时滚动到指定的参数，切换页后再回来不再滚动', async () => {
+    const scrolled: string[] = []
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.textContent ?? '')
+    }
+    await open({}, [], { initialTab: 'resource', initialParam: 'pause_when_screen_on' })
+    expect(text()).toContain('后台运行')
+    expect(scrolled).toHaveLength(1)
+    expect(scrolled[0]).toContain('亮屏时暂停')
+    await tab('外观')
+    await tab('资源')
+    expect(scrolled).toHaveLength(1)
+    delete (Element.prototype as Partial<Element>).scrollIntoView
+  })
+
+  it('窄窗口下打开时把当前页的分页按钮滚到中间', async () => {
+    // jsdom 没有布局：分页栏宽 320，“资源”按钮在 300 到 380 之间
+    vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.textContent === '资源' ? 300 : 0
+    })
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(80)
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(320)
+    await open({}, [], { initialTab: 'resource' })
+    expect(document.querySelector('nav')!.scrollLeft).toBe(180)
+    expect(document.querySelector('nav [aria-current="page"]')!.textContent).toBe('资源')
   })
 
   it('高级页的诊断中没有“日志目录”', async () => {
