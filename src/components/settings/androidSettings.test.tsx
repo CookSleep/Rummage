@@ -17,12 +17,18 @@ function def(key: string, label: string, platform = ''): ParamDef {
   return { key, group: 'Resource', section: '自动暂停', kind: 'Bool', default: true, affectsIndex: false, indexKinds: [], label, help: '', basis: '', platform }
 }
 
-const DEFS = [def('pause_on_battery', '未接电源时暂停'), def('pause_when_screen_on', '亮屏时暂停', 'android'), def('pause_on_fullscreen', '全屏时暂停', 'windows')]
+const DEFS = [
+  def('pause_on_battery', '未接电源时暂停'),
+  def('pause_when_screen_on', '亮屏时暂停', 'android'),
+  def('pause_on_fullscreen', '全屏时暂停', 'windows'),
+  def('slow_when_hot', '发热时放慢', 'android'),
+  { ...def('thermal_slow_headroom', '开始放慢的发热程度', 'android'), kind: { Named: { options: [[70, '稍热'], [80, '较热'], [90, '很热']], unit: '' } }, default: 80 } as ParamDef,
+]
 
-async function open() {
+async function open(params: Record<string, unknown> = {}) {
   const calls = mockCore({
     param_defs: () => DEFS,
-    get_params: () => ({}),
+    get_params: () => params,
     get_notices: () => [],
     list_roots: () => [],
     battery_unrestricted: () => true,
@@ -57,6 +63,19 @@ describe('Android 上的设置', () => {
     expect(text()).not.toContain('全屏时暂停')
     expect(text()).toContain('后台运行')
     expect(text()).toContain('控制建立索引时占用的手机资源')
+  })
+
+  it('开启“发热时放慢”时显示放慢的发热程度', async () => {
+    await open({ slow_when_hot: true, thermal_slow_headroom: 80 })
+    await tab('资源')
+    expect(text()).toContain('开始放慢的发热程度')
+  })
+
+  it('关闭“发热时放慢”时不显示放慢的发热程度', async () => {
+    await open({ slow_when_hot: false, thermal_slow_headroom: 80 })
+    await tab('资源')
+    expect(text()).toContain('发热时放慢')
+    expect(text()).not.toContain('开始放慢的发热程度')
   })
 
   it('“系统的后台管控”打开本应用的系统应用信息页', async () => {

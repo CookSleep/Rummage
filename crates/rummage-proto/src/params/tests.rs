@@ -136,7 +136,12 @@ fn error_message_is_sentence() {
 
 #[test]
 fn platform_only_params() {
-    for key in ["pause_when_screen_on", "thermal_slow_headroom"] {
+    for key in [
+        "pause_when_screen_on",
+        "pause_when_hot",
+        "slow_when_hot",
+        "thermal_slow_headroom",
+    ] {
         let d = def(key).unwrap();
         assert_eq!(d.platform, "android");
         assert_eq!(d.shown(), cfg!(target_os = "android"), "{key}");

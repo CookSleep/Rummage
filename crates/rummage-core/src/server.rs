@@ -573,6 +573,10 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
             let pause = [
                 "pause_on_battery",
                 "pause_on_fullscreen",
+                "pause_when_screen_on",
+                "pause_when_hot",
+                "slow_when_hot",
+                "thermal_slow_headroom",
                 "min_free_disk_gb",
             ]
             .contains(&key.as_str());

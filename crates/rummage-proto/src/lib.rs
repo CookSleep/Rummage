@@ -627,7 +627,7 @@ pub enum PauseReason {
     DiskLow { free_gb: f64 },
     /// Android 前台服务今日的后台运行额度已用完（`BackgroundQuota`），应用回到前台后解除
     Quota,
-    /// Android 手机过热：热状态达到 `SEVERE` 或以上，或预测的温度余量达到 1.0
+    /// Android 手机过热：热状态达到 `SEVERE` 或以上，或预测的温度余量达到 1.0，且开启了 `pause_when_hot`
     Hot,
     /// 使用电池供电（未充电），且开启了 `pause_on_battery`
     Battery,

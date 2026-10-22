@@ -279,6 +279,12 @@ mod tests {
         assert_eq!(status(&state).paused, Some(PauseReason::Fullscreen));
         set("pause_on_fullscreen", ParamValue::Bool(false));
         assert_eq!(status(&state).paused, None);
+        sensed.lock().unwrap().thermal = resource::THERMAL_SEVERE;
+        state.refresh_pause();
+        assert_eq!(status(&state).paused, Some(PauseReason::Hot));
+        set("pause_when_hot", ParamValue::Bool(false));
+        assert_eq!(status(&state).paused, None);
+        sensed.lock().unwrap().thermal = 0;
 
         sensed.lock().unwrap().free_gb = Some(1.5);
         state.refresh_pause();

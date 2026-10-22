@@ -15,6 +15,8 @@ import { HEADER_BUTTON, NOTICE_BOX, ROW_DESC, SECTION_TITLE } from './styles'
 
 /** 视频识别方式为“自定义”（0）时才生效、才显示的几项 */
 const VIDEO_CUSTOM_KEYS = ['video_window_s', 'video_overlap_s', 'video_frames', 'video_audio']
+/** 打开“发热时放慢”时才生效、才显示 */
+const SLOW_LEVEL_KEY = 'thermal_slow_headroom'
 /** 自检门槛改了以后要重新检测设备才生效，不自动检测 */
 const SELFTEST_KEY = 'selftest_min_cosine'
 
@@ -48,8 +50,10 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice }: P
   const indexStatus = useIndexStatus(true)
   const rebuild = defs.some((d) => d.group === group && d.affectsIndex) ? indexStatus?.rebuild : null
   const custom = values.video_preset === 0
+  const slow = values.slow_when_hot !== false
   // 只在某个平台显示的参数（`platform`）在其他平台上不显示
-  const list = defs.filter((d) => d.group === group && d.section && (!d.platform || d.platform === (isAndroid ? 'android' : 'windows')) && (custom || !VIDEO_CUSTOM_KEYS.includes(d.key)))
+  const all = defs.filter((d) => d.group === group && d.section && (!d.platform || d.platform === (isAndroid ? 'android' : 'windows')))
+  const list = all.filter((d) => (custom || !VIDEO_CUSTOM_KEYS.includes(d.key)) && (slow || d.key !== SLOW_LEVEL_KEY))
   // 参数表保证同一小标题的参数相邻
   const sections: { title: string; defs: ParamDef[] }[] = []
   for (const d of list) {
@@ -59,7 +63,8 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice }: P
   }
   const desc = GROUP_DESC[group]
 
-  const changed = list.filter((d) => values[d.key] !== d.default)
+  // 暂时隐藏的参数也一起恢复
+  const changed = all.filter((d) => values[d.key] !== d.default)
 
   return (
     <div className="space-y-8">

@@ -1,9 +1,9 @@
 //! 资源占用控制中与平台无关的部分：由检测到的系统状态、手动暂停和参数判定建索引是否暂停、是否降温。
 //! - 自动暂停：数据目录所在卷的剩余空间低于 `min_free_disk_gb`；Android 前台服务今日的后台额度已用完（`Quota`，由界面经
-//!   `BackgroundQuota` 告知，不持久化）；手机过热（热状态达到 `SEVERE` 或温度余量达到 1.0，始终生效）；未充电
+//!   `BackgroundQuota` 告知，不持久化）；手机过热（热状态达到 `SEVERE` 或温度余量达到 1.0，`pause_when_hot`）；未充电
 //!   （`pause_on_battery`）；Android 亮屏（`pause_when_screen_on`）；任一显示器上有全屏程序（`pause_on_fullscreen`）。
 //!   检测由平台模块的 `sense` 完成，查询失败的项按“不暂停”处理；Windows 上热状态、亮屏两项始终为默认值。
-//! - 降温（`slow`）：温度余量达到 `thermal_slow_headroom` 或热状态为 `MODERATE` 及以上时，流水线按 50% 占空比领取作业
+//! - 降温（`slow`，`slow_when_hot`）：温度余量达到 `thermal_slow_headroom`（百分数）或热状态为 `MODERATE` 及以上时，流水线按 50% 占空比领取作业
 //!   （`pipeline::schedule`）。降温不是暂停，不报暂停原因。
 //! - 手动暂停：存在索引数据库 `meta` 表的 `manual_pause` 中（`{"until": Unix 毫秒或 null}`），核心重启后仍然有效；
 //!   到期由调用方清除。
@@ -97,7 +97,9 @@ pub(crate) fn reason(
     if quota {
         return Some(PauseReason::Quota);
     }
-    if s.thermal >= THERMAL_SEVERE || s.headroom.is_some_and(|h| h >= 1.0) {
+    if (s.thermal >= THERMAL_SEVERE || s.headroom.is_some_and(|h| h >= 1.0))
+        && params::flag(values, "pause_when_hot")
+    {
         return Some(PauseReason::Hot);
     }
     if s.battery && params::flag(values, "pause_on_battery") {
@@ -114,9 +116,12 @@ pub(crate) fn reason(
 
 /// 是否降温（见模块说明）
 pub(crate) fn slow(s: &Sensed, values: &BTreeMap<String, ParamValue>) -> bool {
+    if !params::flag(values, "slow_when_hot") {
+        return false;
+    }
     s.thermal >= THERMAL_MODERATE
         || s.headroom
-            .is_some_and(|h| h >= params::float(values, "thermal_slow_headroom"))
+            .is_some_and(|h| h * 100.0 >= params::int(values, "thermal_slow_headroom") as f64)
 }
 
 #[cfg(test)]
@@ -197,13 +202,15 @@ mod tests {
         values.insert("pause_on_battery".into(), ParamValue::Bool(false));
         values.insert("pause_on_fullscreen".into(), ParamValue::Bool(false));
         values.insert("pause_when_screen_on".into(), ParamValue::Bool(false));
+        values.insert("pause_when_hot".into(), ParamValue::Bool(false));
         values.insert("min_free_disk_gb".into(), ParamValue::Int(10));
         let s = Sensed {
             fullscreen: true,
             battery: true,
             screen_on: true,
+            thermal: THERMAL_SEVERE,
+            headroom: Some(1.2),
             free_gb: Some(20.0),
-            ..Sensed::default()
         };
         assert_eq!(reason(None, false, &s, &values), None);
         let s = Sensed {
@@ -225,7 +232,7 @@ mod tests {
             ..Sensed::default()
         };
         assert!(slow(&s, &values));
-        values.insert("thermal_slow_headroom".into(), ParamValue::Float(0.9));
+        values.insert("thermal_slow_headroom".into(), ParamValue::Int(90));
         assert!(!slow(&s, &values));
         let s = Sensed {
             thermal: THERMAL_MODERATE,
@@ -235,6 +242,13 @@ mod tests {
         // 热状态 LIGHT 不降温
         let s = Sensed {
             thermal: 1,
+            ..Sensed::default()
+        };
+        assert!(!slow(&s, &values));
+        values.insert("slow_when_hot".into(), ParamValue::Bool(false));
+        let s = Sensed {
+            thermal: THERMAL_SEVERE,
+            headroom: Some(1.2),
             ..Sensed::default()
         };
         assert!(!slow(&s, &values));
