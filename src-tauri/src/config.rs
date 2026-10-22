@@ -3,7 +3,7 @@
 //!   （`android::storage`）。
 //! - 导入分两步：`import_config` 由 Rust 侧弹出选择框并读取所选文件（前端不能传路径），校验后记下待导入的内容，
 //!   返回会改变的参数，界面据此决定是否先确认重建索引；`apply_config` 再保存参数、添加文件夹，
-//!   都走核心原有的 `SetParam`、`AddRoot`，校验与添加后的扫描照旧。参数先于文件夹保存，新文件夹的首次扫描就按导入的文件类型。
+//!   都走核心原有的 `SetParam`、`AddRoot`（不跳过 `.nomedia` 的文件夹随后再发 `SetRootExcludes`），校验与添加后的扫描照旧。参数先于文件夹保存，新文件夹的首次扫描就按导入的文件类型。
 //! - 文件夹：不存在的、无法访问的（Android 上没有“所有文件访问”权限时一律算无法访问）丢弃，已添加的跳过，只新增不删除。
 //!   检查时先读属性，网盘占位文件夹不打开，交给核心按原有规则拒绝。
 use std::collections::BTreeMap;
@@ -13,7 +13,7 @@ use std::sync::Mutex;
 
 use rummage_index::FsError;
 use rummage_proto::config::{self, ConfigFolder, Imported};
-use rummage_proto::{ApiError, ParamValue, Reply, Request};
+use rummage_proto::{ApiError, ParamValue, Reply, Request, RootInfo};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 
@@ -124,11 +124,9 @@ async fn current_params<R: Runtime>(
     }
 }
 
-async fn root_paths<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<Vec<(String, Vec<String>)>, ApiError> {
+async fn roots<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<RootInfo>, ApiError> {
     match core::request(app, Request::ListRoots).await? {
-        Reply::Roots { roots } => Ok(roots.into_iter().map(|r| (r.path, r.excludes)).collect()),
+        Reply::Roots { roots } => Ok(roots),
         other => Err(unexpected(&other)),
     }
 }
@@ -137,10 +135,14 @@ async fn root_paths<R: Runtime>(
 #[tauri::command]
 pub async fn export_config<R: Runtime>(app: AppHandle<R>) -> Result<bool, ApiError> {
     let values = current_params(&app).await?;
-    let folders = root_paths(&app)
+    let folders = roots(&app)
         .await?
         .into_iter()
-        .map(|(path, excludes)| ConfigFolder { path, excludes })
+        .map(|r| ConfigFolder {
+            path: r.path,
+            excludes: r.excludes,
+            skip_nomedia: r.skip_nomedia,
+        })
         .collect();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -302,7 +304,7 @@ pub async fn apply_config<R: Runtime>(app: AppHandle<R>) -> Result<Outcome, ApiE
             Err(err) => return Err(err),
         }
     }
-    let existing: Vec<String> = root_paths(&app).await?.into_iter().map(|r| r.0).collect();
+    let existing: Vec<String> = roots(&app).await?.into_iter().map(|r| r.path).collect();
     #[cfg(target_os = "android")]
     let granted = crate::android::storage::files_granted(&app).await;
     #[cfg(not(target_os = "android"))]
@@ -324,7 +326,24 @@ pub async fn apply_config<R: Runtime>(app: AppHandle<R>) -> Result<Outcome, ApiE
             excludes: f.excludes,
         };
         match core::request(&app, body).await {
-            Ok(Reply::Root { .. }) => out.added += 1,
+            Ok(Reply::Root { root }) => {
+                out.added += 1;
+                // 添加时总是跳过；不跳过的随后另存，按新设置重新扫描
+                if !f.skip_nomedia {
+                    let body = Request::SetRootExcludes {
+                        id: root.id,
+                        excludes: root.excludes,
+                        skip_nomedia: Some(false),
+                    };
+                    if let Err(err) = core::done(&app, body).await {
+                        log::warn!(
+                            "导入配置时没能保存 {} 的 .nomedia 设置：{}",
+                            f.path,
+                            err.message
+                        );
+                    }
+                }
+            }
             Ok(other) => return Err(unexpected(&other)),
             Err(err) if err.code == ApiError::BAD_REQUEST => {
                 log::warn!("导入配置时没能添加文件夹 {}：{}", f.path, err.message);
@@ -346,6 +365,7 @@ mod tests {
         ConfigFolder {
             path: path.display().to_string(),
             excludes: vec!["*.tmp".into()],
+            skip_nomedia: true,
         }
     }
 
@@ -367,6 +387,7 @@ mod tests {
             ConfigFolder {
                 path: "相对路径".into(),
                 excludes: vec![],
+                skip_nomedia: true,
             },
         ];
         // a 已添加，大小写不同也算同一个

@@ -5,7 +5,9 @@ import { errorMessage } from '../../lib/errors'
 import { useSaveParam } from '../../hooks/useSaveParam'
 import { KIND_PARAMS, type Kinds, kindsOf, needsMmproj } from '../../lib/kinds'
 import { isAndroid } from '../../lib/platform'
-import { WarningIcon } from '../icons'
+import { InfoIcon, WarningIcon } from '../icons'
+import Checkbox from '../Checkbox'
+import Tip from '../Tip'
 import FoldersStep from '../onboarding/FoldersStep'
 import KindsStep from '../onboarding/KindsStep'
 import { ERROR_TEXT, SMALL_BUTTON, SMALL_PRIMARY_BUTTON } from '../onboarding/styles'
@@ -17,13 +19,14 @@ const EXCLUDE_PLACEHOLDER = ['每行一条，写法同 .gitignore，例如：', 
 /** 一个文件夹的排除规则编辑区，展开在文件夹行下方；保存后核心重新扫描这个文件夹 */
 function Excludes({ root, onClose, onSaved }: { root: RootInfo; onClose: () => void; onSaved: () => void }) {
   const [text, setText] = useState(root.excludes.join('\n'))
+  const [skipNomedia, setSkipNomedia] = useState(root.skipNomedia)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const save = () => {
     setSaving(true)
     setError('')
-    invoke('set_root_excludes', { id: root.id, excludes: text.split('\n') })
+    invoke('set_root_excludes', { id: root.id, excludes: text.split('\n'), skipNomedia: isAndroid ? skipNomedia : null })
       .then(() => {
         onClose()
         onSaved()
@@ -56,6 +59,16 @@ function Excludes({ root, onClose, onSaved }: { root: RootInfo; onClose: () => v
         aria-label="排除规则"
         className="w-full resize-y rounded-xl border border-transparent bg-white px-3 py-2 font-mono text-xs text-gray-700 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-blue-300 dark:bg-white/[0.06] dark:text-gray-200 dark:shadow-none dark:focus:border-blue-500/50"
       />
+      {/* `.nomedia` 是 Android 的约定 */}
+      {isAndroid && (
+        <div className="flex items-center gap-1.5">
+          {/* 说明图标放在勾选框的 label 外，点它不切换 */}
+          <Checkbox checked={skipNomedia} onChange={setSkipNomedia} label="跳过含 .nomedia 的文件夹" />
+          <Tip label="应用不希望在相册中显示的文件，如缩略图、缓存" className="text-gray-400 dark:text-gray-500">
+            <InfoIcon className="h-4 w-4" />
+          </Tip>
+        </div>
+      )}
       {error && <p data-selectable-text className={ERROR_TEXT}>{error}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className={SMALL_BUTTON}>

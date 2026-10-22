@@ -18,8 +18,14 @@ pub async fn set_root_excludes<R: Runtime>(
     app: AppHandle<R>,
     id: i64,
     excludes: Vec<String>,
+    skip_nomedia: Option<bool>,
 ) -> Result<(), ApiError> {
-    core::done(&app, Request::SetRootExcludes { id, excludes }).await
+    let body = Request::SetRootExcludes {
+        id,
+        excludes,
+        skip_nomedia,
+    };
+    core::done(&app, body).await
 }
 
 #[tauri::command]

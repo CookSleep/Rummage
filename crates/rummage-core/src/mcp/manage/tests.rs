@@ -146,12 +146,14 @@ fn folders_output() {
         missing: false,
         files: 12,
         excludes: vec!["*.tmp".into()],
+        skip_nomedia: true,
         scanning: false,
     };
     let disk = RootInfo {
         id: 2,
         path: r"C:\".into(),
         excludes: Vec::new(),
+        skip_nomedia: true,
         ..root.clone()
     };
     assert_eq!(

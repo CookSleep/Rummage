@@ -510,6 +510,7 @@ pub(super) async fn run(s: &mut Session, cmd: Cmd, json: bool) -> Result<Outcome
                 let body = Request::SetRootExcludes {
                     id: root.id,
                     excludes,
+                    skip_nomedia: None,
                 };
                 s.request(body).await?;
                 root = root_of(s, Path::new(&root.path)).await?;

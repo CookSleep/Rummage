@@ -408,6 +408,7 @@ fn roots() -> Vec<RootInfo> {
             missing: false,
             files: 1234,
             excludes: Vec::new(),
+            skip_nomedia: true,
             scanning: false,
         },
         RootInfo {
@@ -417,6 +418,7 @@ fn roots() -> Vec<RootInfo> {
             missing: false,
             files: 50,
             excludes: Vec::new(),
+            skip_nomedia: true,
             scanning: false,
         },
     ]

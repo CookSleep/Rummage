@@ -153,6 +153,7 @@ fn root(path: &str, files: i64, excludes: &[&str]) -> RootInfo {
         missing: false,
         files,
         excludes: excludes.iter().map(|s| s.to_string()).collect(),
+        skip_nomedia: true,
         scanning: false,
     }
 }

@@ -80,10 +80,11 @@ pub async fn request_storage_access<R: Runtime>(app: AppHandle<R>) -> Result<boo
         })
 }
 
+/// 预填排除以 `.` 开头的文件与文件夹（相册缩略图、应用缓存、回收站），用户删掉这条规则就会索引它们
 async fn add<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<AddedRoot, ApiError> {
     let body = Request::AddRoot {
         path: path.to_string_lossy().into_owned(),
-        excludes: Vec::new(),
+        excludes: vec![".*".into()],
     };
     match core::request(app, body).await? {
         Reply::Root { root } => Ok(AddedRoot::new(root)),

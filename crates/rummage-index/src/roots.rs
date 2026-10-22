@@ -3,11 +3,12 @@
 //!   `\\?\` 前缀）并做卷检查，会访问磁盘，调用方在数据库锁之外执行；`Db::add_root` 再检查不在数据目录之内、
 //!   不与已有根目录互相包含，然后写入。每一步的拒绝原因都是给用户看的中文整句。
 //! - 根目录包含数据目录是允许的，扫描时跳过数据目录。
-//! - 根目录设置 `settings_json` 当前为 `{"exclude": [glob, …]}`（用户排除规则），`settings_version` 为 1。
+//! - 根目录设置 `settings_json` 当前为 `{"exclude": [glob, …], "skip_nomedia": bool}`（用户排除规则；是否跳过含 `.nomedia`
+//!   的子文件夹，没有这一项时为真），`settings_version` 为 1。
 //!   `set_root_excludes` 保存前逐条检查写法（与扫描时的编译方式相同），去掉空行与重复项，作路径分隔符的 `\` 换成 `/`
 //!   （Windows 用户习惯这样写路径；`\` 后跟通配符等特殊字符时是转义，原样保留，见 `scan::exclude`）；完整路径（盘符或 `\\`
 //!   开头）中的 `\` 一律是分隔符，本文件夹之下的去掉前缀后按相对规则处理，其他位置的报错；最后去掉末尾的 `/`，开头的 `/` 只在规则不再含 `/` 时保留（表示只匹配根目录下的路径）。
-//!   只改 `exclude`，保留设置中的其他键。
+//!   只改 `exclude` 与给出的 `skip_nomedia`，保留设置中的其他键。
 //! - 移除时级联删除其下全部文件、片段、向量和作业；`clear_index_batch` 分批对全部根目录做同样的删除，但保留根目录本身。
 use std::path::{Path, PathBuf};
 
@@ -59,6 +60,8 @@ pub struct Root {
     pub files: i64,
     /// 用户排除规则；设置不是合法 JSON 时为空（扫描同样忽略）
     pub excludes: Vec<String>,
+    /// 跳过含 `.nomedia` 的子文件夹（只在 Android 上起作用）
+    pub skip_nomedia: bool,
 }
 
 /// 设置中的排除规则；格式不对时为空
@@ -73,6 +76,14 @@ fn excludes_of(settings: &str) -> Vec<String> {
             })
         })
         .unwrap_or_default()
+}
+
+/// 设置中的 `skip_nomedia`；没有这一项或格式不对时为真
+pub(crate) fn skip_nomedia_of(settings: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(settings)
+        .ok()
+        .and_then(|v| v["skip_nomedia"].as_bool())
+        .unwrap_or(true)
 }
 
 /// 忽略大小写比较用的路径
@@ -138,8 +149,13 @@ impl Db {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// 保存根目录的用户排除规则（见模块文档），返回整理后保存的规则；调用方随后重新扫描该根目录
-    pub fn set_root_excludes(&self, id: i64, rules: &[String]) -> Result<Vec<String>, RootError> {
+    /// 保存根目录的用户排除规则（见模块文档），`skip_nomedia` 为空时不改；返回整理后保存的规则。调用方随后重新扫描该根目录
+    pub fn set_root_excludes(
+        &self,
+        id: i64,
+        rules: &[String],
+        skip_nomedia: Option<bool>,
+    ) -> Result<Vec<String>, RootError> {
         let row: Option<(String, String)> = self
             .conn
             .query_row(
@@ -198,6 +214,9 @@ impl Db {
             .filter(serde_json::Value::is_object)
             .unwrap_or_else(|| serde_json::json!({}));
         value["exclude"] = serde_json::json!(clean);
+        if let Some(skip) = skip_nomedia {
+            value["skip_nomedia"] = serde_json::json!(skip);
+        }
         self.conn
             .execute(
                 "UPDATE roots SET settings_json = ?2 WHERE id = ?1",
@@ -347,6 +366,7 @@ impl Db {
                         missing: row.get(5)?,
                         files: row.get(3)?,
                         excludes: excludes_of(&row.get::<_, String>(4)?),
+                        skip_nomedia: skip_nomedia_of(&row.get::<_, String>(4)?),
                     })
                 })?
                 .collect()
@@ -453,7 +473,7 @@ mod tests {
         let docs = tempfile::tempdir().unwrap();
         let db = Db::open(data.path()).unwrap();
         let id = add(&db, docs.path()).unwrap();
-        db.set_root_excludes(id, &["*.tmp".into()]).unwrap();
+        db.set_root_excludes(id, &["*.tmp".into()], None).unwrap();
         db.set_param("result_limit", &serde_json::json!(50))
             .unwrap();
         db.add_history("柯基", 10).unwrap();
@@ -511,7 +531,7 @@ mod tests {
             )
             .unwrap();
         let rules = [" node_modules ", "", "照片\\raw", "*.tmp", "*.tmp"].map(String::from);
-        db.set_root_excludes(id, &rules).unwrap();
+        db.set_root_excludes(id, &rules, None).unwrap();
         assert_eq!(
             db.list_roots().unwrap()[0].excludes,
             ["node_modules", "照片/raw", "*.tmp"]
@@ -528,6 +548,12 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&settings).unwrap()["x"],
             1
         );
+        // 跳过 .nomedia 默认为真；为空时不改
+        assert!(db.list_roots().unwrap()[0].skip_nomedia);
+        db.set_root_excludes(id, &rules, Some(false)).unwrap();
+        assert!(!db.list_roots().unwrap()[0].skip_nomedia);
+        db.set_root_excludes(id, &rules, None).unwrap();
+        assert!(!db.list_roots().unwrap()[0].skip_nomedia);
 
         // 本文件夹之下的完整路径转成相对路径（大小写不同也算），末尾的 / 去掉，开头的 / 只在规则不再含 / 时保留，
         // 文件夹本身转成空规则后去掉；
@@ -541,13 +567,13 @@ mod tests {
             format!(r"{root}\[草稿]\{{a,b}}.txt"),
             format!(r"{root}\*.BAK"),
         ];
-        db.set_root_excludes(id, &rules).unwrap();
+        db.set_root_excludes(id, &rules, None).unwrap();
         assert_eq!(
             db.list_roots().unwrap()[0].excludes,
             ["照片/RAW", "/node_modules", "[草稿]/{a,b}.txt", "/*.BAK"]
         );
         for bad in [r"C:\其他", "//server/share/a", r"\\server\share\a"] {
-            let err = db.set_root_excludes(id, &[bad.into()]).unwrap_err();
+            let err = db.set_root_excludes(id, &[bad.into()], None).unwrap_err();
             assert!(matches!(err, RootError::AbsoluteExclude(_)), "{err}");
             assert!(
                 err.to_string().starts_with(&format!("排除规则 \"{bad}\"")),
@@ -562,7 +588,7 @@ mod tests {
             r"/报告\[1\].txt",
         ]
         .map(String::from);
-        db.set_root_excludes(id, &rules).unwrap();
+        db.set_root_excludes(id, &rules, None).unwrap();
         let saved = db.list_roots().unwrap()[0].excludes.clone();
         assert_eq!(
             saved,
@@ -572,13 +598,13 @@ mod tests {
                 r"a\\b/c\*"
             ]
         );
-        db.set_root_excludes(id, &saved).unwrap();
+        db.set_root_excludes(id, &saved, None).unwrap();
         assert_eq!(db.list_roots().unwrap()[0].excludes, saved);
         let rules = [" node_modules ", r"照片\raw", "*.tmp"].map(String::from);
-        db.set_root_excludes(id, &rules).unwrap();
+        db.set_root_excludes(id, &rules, None).unwrap();
 
         let err = db
-            .set_root_excludes(id, &["ok".into(), "[".into()])
+            .set_root_excludes(id, &["ok".into(), "[".into()], None)
             .unwrap_err();
         assert!(
             matches!(err, RootError::BadExclude(ref r) if r == "["),
@@ -587,7 +613,7 @@ mod tests {
         // 写法不对时整组不保存
         assert_eq!(db.list_roots().unwrap()[0].excludes.len(), 3);
         assert!(matches!(
-            db.set_root_excludes(id + 1, &[]),
+            db.set_root_excludes(id + 1, &[], None),
             Err(RootError::NotFound)
         ));
         // 设置损坏时列表为空，保存时从空对象开始
@@ -598,7 +624,7 @@ mod tests {
             )
             .unwrap();
         assert!(db.list_roots().unwrap()[0].excludes.is_empty());
-        db.set_root_excludes(id, &["a".into()]).unwrap();
+        db.set_root_excludes(id, &["a".into()], None).unwrap();
         assert_eq!(db.list_roots().unwrap()[0].excludes, ["a"]);
     }
 

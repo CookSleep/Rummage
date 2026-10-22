@@ -36,6 +36,13 @@ pub struct ConfigFolder {
     /// 这个文件夹的用户排除规则（同 `Request::SetRootExcludes`）
     #[serde(default)]
     pub excludes: Vec<String>,
+    /// 同 `RootInfo::skip_nomedia`
+    #[serde(default = "yes")]
+    pub skip_nomedia: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// 校验过的配置：参数已逐项校验，`dropped` 为丢弃的参数数（未知的键、不合法的值、其他平台的参数）
@@ -174,6 +181,7 @@ mod tests {
         let folders = vec![ConfigFolder {
             path: r"D:\照片".into(),
             excludes: vec!["*.tmp".into()],
+            skip_nomedia: false,
         }];
         let cfg = export(&values, folders.clone(), "windows", "0.1.0", 1);
         assert_eq!(cfg.params["chunk_tokens"], ParamValue::Int(256));
@@ -278,6 +286,7 @@ mod tests {
             vec![ConfigFolder {
                 path: r"D:\文档".into(),
                 excludes: vec![],
+                skip_nomedia: true,
             }]
         );
     }

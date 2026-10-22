@@ -514,6 +514,7 @@ impl Server {
             let body = Request::SetRootExcludes {
                 id: root.id,
                 excludes,
+                skip_nomedia: None,
             };
             self.call(body).await?;
             root = self.root(&root.path).await?;

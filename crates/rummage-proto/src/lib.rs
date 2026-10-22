@@ -263,10 +263,13 @@ pub enum Request {
     },
     /// 预估索引规模，回复 `Reply::Estimate`
     Estimate,
-    /// 保存根目录的用户排除规则（glob），成功后重新扫描该根目录；有写法不正确的规则时回 `bad_request`
+    /// 保存根目录的用户排除规则（glob），成功后重新扫描该根目录；有写法不正确的规则时回 `bad_request`。
+    /// `skip_nomedia` 同时保存 `RootInfo::skip_nomedia`，为空时不改
     SetRootExcludes {
         id: i64,
         excludes: Vec<String>,
+        #[serde(default)]
+        skip_nomedia: Option<bool>,
     },
     /// 外观设置，回复 `Reply::Appearance`；没有保存过时为默认值
     GetAppearance,
@@ -568,6 +571,8 @@ pub struct RootInfo {
     pub files: i64,
     /// 用户排除规则（glob）
     pub excludes: Vec<String>,
+    /// 跳过含 `.nomedia` 文件的子文件夹（只在 Android 上起作用），默认为真
+    pub skip_nomedia: bool,
     /// 还在统计文件数（添加后、启动对账或清空索引后首次扫完之前），`files` 不完整
     pub scanning: bool,
 }

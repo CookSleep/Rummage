@@ -145,6 +145,7 @@ fn request_round_trip() {
         Request::SetRootExcludes {
             id: 2,
             excludes: vec!["node_modules".into(), "照片/**/*.tmp".into()],
+            skip_nomedia: Some(false),
         },
         Request::GetAppearance,
         Request::SetAppearance {
@@ -205,6 +206,7 @@ fn response_and_event_round_trip() {
                 missing: false,
                 files: 42,
                 excludes: vec!["*.tmp".into()],
+                skip_nomedia: true,
                 scanning: true,
             }],
         }),

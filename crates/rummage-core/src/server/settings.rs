@@ -18,9 +18,13 @@ const MAX_FONT_NAME: usize = 100;
 /// 设置页的请求（`Request::SetRootExcludes` 等，见 `rummage_proto::Request`）
 pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiError> {
     match body {
-        Request::SetRootExcludes { id, excludes } => {
+        Request::SetRootExcludes {
+            id,
+            excludes,
+            skip_nomedia,
+        } => {
             db(state)?
-                .set_root_excludes(id, &excludes)
+                .set_root_excludes(id, &excludes, skip_nomedia)
                 .map_err(root_error)?;
             state.queue_scan(ScanJob::Root(id));
             let _ = state.events.send(Event::RootsChanged);
@@ -172,6 +176,7 @@ mod tests {
         let body = Request::SetRootExcludes {
             id,
             excludes: vec!["*.tmp".into(), "{".into()],
+            skip_nomedia: None,
         };
         let err = respond(&state, body).unwrap_err();
         assert_eq!(err.code, ApiError::BAD_REQUEST);
@@ -179,13 +184,16 @@ mod tests {
         let body = Request::SetRootExcludes {
             id,
             excludes: vec!["node_modules".into()],
+            skip_nomedia: Some(false),
         };
         assert_eq!(respond(&state, body), Ok(Reply::Done));
         let roots = db(&state).unwrap().list_roots().unwrap();
         assert_eq!(roots[0].excludes, ["node_modules"]);
+        assert!(!roots[0].skip_nomedia);
         let body = Request::SetRootExcludes {
             id: id + 1,
             excludes: Vec::new(),
+            skip_nomedia: None,
         };
         assert_eq!(
             respond(&state, body).unwrap_err().code,

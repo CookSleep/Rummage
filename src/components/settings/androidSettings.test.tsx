@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from 'vitest'
-import type { ParamDef } from '../../types'
+import type { ParamDef, RootInfo } from '../../types'
 
 // `isAndroid` 在 src/lib/platform.ts 加载时求值，要在导入被测模块之前改掉 User-Agent
 vi.hoisted(() => {
   Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 17) AppleWebKit/537.36', configurable: true })
 })
 
-import { click, device, flush, mockCore, render, selftest, setupStatus, text } from '../../test/tauri'
+import { button, click, device, flush, mockCore, render, selftest, setupStatus, text } from '../../test/tauri'
 import SettingsModal from './SettingsModal'
 
 const APPEARANCE = { uiFont: 'builtin', uiFontName: '', monoFont: 'builtin', monoFontName: '' } as const
@@ -25,12 +25,13 @@ const DEFS = [
   { ...def('thermal_slow_headroom', '开始放慢的发热程度', 'android'), kind: { Named: { options: [[70, '稍热'], [80, '较热'], [90, '很热']], unit: '' } }, default: 80 } as ParamDef,
 ]
 
-async function open(params: Record<string, unknown> = {}) {
+async function open(params: Record<string, unknown> = {}, roots: RootInfo[] = []) {
   const calls = mockCore({
     param_defs: () => DEFS,
     get_params: () => params,
     get_notices: () => [],
-    list_roots: () => [],
+    list_roots: () => roots,
+    set_root_excludes: () => null,
     battery_unrestricted: () => true,
     storage_access: () => true,
     storage_info: () => ({ dataDir: '/data/user/0/com.cooksleep.rummage/files', db: 1, thumbs: 1, models: 1, logs: 1, other: 1 }),
@@ -76,6 +77,20 @@ describe('Android 上的设置', () => {
     await tab('资源')
     expect(text()).toContain('发热时放慢')
     expect(text()).not.toContain('开始放慢的发热程度')
+  })
+
+  it('排除规则下方可以取消勾选“跳过含 .nomedia 的文件夹”，与规则一起保存', async () => {
+    const root = { id: 1, path: '/storage/emulated/0/Pictures', offline: false, missing: false, files: 3, excludes: ['.*'], skipNomedia: true, scanning: false }
+    const calls = await open({}, [root])
+    await click(button('排除 1 条'))
+    const label = [...document.querySelectorAll<HTMLElement>('label')].find((el) => el.textContent === '跳过含 .nomedia 的文件夹')!
+    const box = label.querySelector('input')!
+    expect(box.checked).toBe(true)
+    // 点文字也能切换
+    await click(label.querySelector('span:last-child')!)
+    expect(box.checked).toBe(false)
+    await click(button('保存'))
+    expect(calls.filter((c) => c.cmd === 'set_root_excludes').map((c) => c.args)).toEqual([{ id: 1, excludes: ['.*'], skipNomedia: false }])
   })
 
   it('“系统的后台管控”打开本应用的系统应用信息页', async () => {

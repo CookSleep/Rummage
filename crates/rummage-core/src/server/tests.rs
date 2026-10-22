@@ -584,6 +584,7 @@ fn excludes_rescan_root() {
     let body = Request::SetRootExcludes {
         id,
         excludes: vec!["*.tmp2".into()],
+        skip_nomedia: None,
     };
     assert_eq!(respond(body, &state), Ok(Reply::Done));
     // 新排除的文件在重新扫描时删除

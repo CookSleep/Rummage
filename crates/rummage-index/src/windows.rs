@@ -41,11 +41,6 @@ pub fn attrs(meta: &Metadata) -> u32 {
     meta.file_attributes()
 }
 
-/// 隐藏只看属性（`attrs`），不看名称
-pub fn hidden_name(_name: &str) -> bool {
-    false
-}
-
 /// `.nomedia` 是 Android 的约定
 pub fn no_media(_dir: &Path) -> bool {
     false

@@ -272,6 +272,7 @@ fn root_info(r: Root, state: &State) -> RootInfo {
         missing: r.missing,
         files: r.files,
         excludes: r.excludes,
+        skip_nomedia: r.skip_nomedia,
     }
 }
 
@@ -667,7 +668,7 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
                 let db = db(state)?;
                 let id = db.add_root(&root).map_err(root_error)?;
                 // 排除规则要按根目录的路径解析，只能在添加之后保存；写法不对时撤回添加，扫描还没开始
-                let excludes = match db.set_root_excludes(id, &excludes) {
+                let excludes = match db.set_root_excludes(id, &excludes, None) {
                     Ok(excludes) => excludes,
                     Err(err) => {
                         if let Err(err) = db.remove_root(id) {
@@ -683,6 +684,7 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
                     missing: false,
                     files: 0,
                     excludes,
+                    skip_nomedia: true,
                 }
             };
             // 先开始监听：首次扫描可能很久，期间的变化攒到扫描结束后局部对账

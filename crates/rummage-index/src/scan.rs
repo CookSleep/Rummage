@@ -47,7 +47,7 @@ use crate::fsx::{
     self, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_RECALL_ON_OPEN,
     FILE_ATTRIBUTE_SYSTEM,
 };
-use crate::roots::{OFFLINE_DEVICE, OFFLINE_MISSING};
+use crate::roots::{OFFLINE_DEVICE, OFFLINE_MISSING, skip_nomedia_of};
 use crate::{lock, platform};
 
 mod exclude;
@@ -533,6 +533,7 @@ fn walk(
     }
 
     let globs = user_globs(&settings);
+    let skip_nomedia = skip_nomedia_of(&settings);
     let doc_limit = limits.max_doc_mb.saturating_mul(1024 * 1024);
     let image_limit = limits.max_image_mb.saturating_mul(1024 * 1024);
     let audio_limit_ms = limits.max_audio_min.saturating_mul(60_000);
@@ -634,11 +635,10 @@ fn walk(
                     continue;
                 }
                 let skip = EXCLUDED_DIRS.iter().any(|d| d.eq_ignore_ascii_case(&name))
-                    || platform::hidden_name(&name)
                     || (has_project && BUILD_DIRS.iter().any(|d| d.eq_ignore_ascii_case(&name)))
                     || fsx::shown(&path).to_lowercase() == data_dir
                     || globs.is_match(&name, &glob_path)
-                    || platform::no_media(&path);
+                    || (skip_nomedia && platform::no_media(&path));
                 if skip {
                     stats.excluded += 1;
                 } else {
@@ -648,7 +648,6 @@ fn walk(
             }
             let lower = name.to_lowercase();
             if attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0
-                || platform::hidden_name(&name)
                 || name.starts_with("~$")
                 || TEMP_SUFFIXES.iter().any(|s| lower.ends_with(s))
                 || meta.len() == 0

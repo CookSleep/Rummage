@@ -10,7 +10,7 @@ import EstimateStep from './EstimateStep'
 import FoldersStep from './FoldersStep'
 import Onboarding from './Onboarding'
 
-const ROOT: RootInfo = { id: 1, path: 'D:\\照片', offline: false, missing: false, files: 5, excludes: [], scanning: false }
+const ROOT: RootInfo = { id: 1, path: 'D:\\照片', offline: false, missing: false, files: 5, excludes: [], skipNomedia: true, scanning: false }
 /** 添加按钮连同其下一直显示的提示 */
 const ADD = '添加文件夹只添加需要搜索的文件夹，不建议添加整个磁盘'
 const KINDS = { documents: true, images: true, audio: false, video: false }

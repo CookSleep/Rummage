@@ -394,6 +394,7 @@ fn status_output() {
             missing: false,
             files: 1234,
             excludes: Vec::new(),
+            skip_nomedia: true,
             scanning: false,
         },
         RootInfo {
@@ -403,6 +404,7 @@ fn status_output() {
             missing: false,
             files: 5,
             excludes: Vec::new(),
+            skip_nomedia: true,
             scanning: false,
         },
     ];

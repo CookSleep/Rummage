@@ -1,6 +1,7 @@
 //! 非 Windows 平台（Android）的实现：没有网盘占位属性，所有位置都视为本地固定盘上的受支持卷；
-//! 没有文件 ID，改名与移动靠 `quick_hash` 识别；以 `.` 开头的文件与文件夹是隐藏的（如 `.thumbnails`、应用缓存、
-//! 相册回收站的 `.trashed-*`）；含 `.nomedia` 文件的文件夹（系统媒体库同样跳过，多为应用缓存与聊天图片）不进入。
+//! 没有文件 ID，改名与移动靠 `quick_hash` 识别；没有隐藏属性，以 `.` 开头的文件与文件夹（如 `.thumbnails`、应用缓存、
+//! 相册回收站的 `.trashed-*`）由添加文件夹时预填的排除规则 `.*` 排除；含 `.nomedia` 文件的文件夹（系统媒体库同样跳过，
+//! 多为应用缓存与聊天图片）按根目录设置跳过。
 use std::fs::{File, Metadata};
 use std::io;
 use std::path::Path;
@@ -11,10 +12,6 @@ pub const DRIVE_REMOTE: u32 = 4;
 
 pub fn attrs(_meta: &Metadata) -> u32 {
     0
-}
-
-pub fn hidden_name(name: &str) -> bool {
-    name.starts_with('.')
 }
 
 pub fn no_media(dir: &Path) -> bool {

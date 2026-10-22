@@ -294,6 +294,8 @@ export interface RootInfo {
   files: number
   /** 用户排除规则（glob） */
   excludes: string[]
+  /** 跳过含 `.nomedia` 的子文件夹（只在 Android 上起作用） */
+  skipNomedia: boolean
   /** 还在统计文件数，`files` 不完整 */
   scanning: boolean
 }
@@ -552,6 +554,7 @@ export interface DbStatus {
 export interface ConfigFolder {
   path: string
   excludes: string[]
+  skip_nomedia: boolean
 }
 
 /** 导出的配置文件，对应 Rust `rummage_proto::config::ConfigFile`；由 Rust 侧读写，字段名与文件中一致 */
