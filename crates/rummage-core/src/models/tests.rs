@@ -493,6 +493,34 @@ fn removes_file_and_parts() {
     assert!(!remove(dir.path(), fa, "图片与音视频模型").unwrap());
 }
 
+#[test]
+fn removes_only_caches_of_that_model() {
+    let dir = crate::test_dir();
+    for name in [
+        "m.litertlm_1_2.vision_encoder.xnnpack_cache",
+        "m.litertlm.text_encoder_1_2_mldrift_program_cache.bin",
+        "m_SM8550.litertlm_1_2.vision_adapter.xnnpack_cache",
+        "m.litertlm2",
+    ] {
+        fs::write(dir.path().join(name), b"x").unwrap();
+    }
+    remove_caches(dir.path(), "m.litertlm");
+    let mut left: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            "m.litertlm2",
+            "m_SM8550.litertlm_1_2.vision_adapter.xnnpack_cache"
+        ]
+    );
+    // 目录不存在时什么也不做
+    remove_caches(&dir.path().join("none"), "m.litertlm");
+}
+
 /// 文件被其他程序以不允许删除的方式打开时提示稍后重试，不删除其他文件
 #[cfg(windows)]
 #[test]

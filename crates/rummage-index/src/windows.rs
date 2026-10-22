@@ -41,6 +41,16 @@ pub fn attrs(meta: &Metadata) -> u32 {
     meta.file_attributes()
 }
 
+/// 隐藏只看属性（`attrs`），不看名称
+pub fn hidden_name(_name: &str) -> bool {
+    false
+}
+
+/// `.nomedia` 是 Android 的约定
+pub fn no_media(_dir: &Path) -> bool {
+    false
+}
+
 pub fn file_attributes(path: &Path) -> io::Result<u32> {
     let name = wide(path);
     // SAFETY: name 是以 0 结尾的 UTF-16 字符串，调用期间一直有效

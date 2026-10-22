@@ -634,9 +634,11 @@ fn walk(
                     continue;
                 }
                 let skip = EXCLUDED_DIRS.iter().any(|d| d.eq_ignore_ascii_case(&name))
+                    || platform::hidden_name(&name)
                     || (has_project && BUILD_DIRS.iter().any(|d| d.eq_ignore_ascii_case(&name)))
                     || fsx::shown(&path).to_lowercase() == data_dir
-                    || globs.is_match(&name, &glob_path);
+                    || globs.is_match(&name, &glob_path)
+                    || platform::no_media(&path);
                 if skip {
                     stats.excluded += 1;
                 } else {
@@ -646,6 +648,7 @@ fn walk(
             }
             let lower = name.to_lowercase();
             if attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0
+                || platform::hidden_name(&name)
                 || name.starts_with("~$")
                 || TEMP_SUFFIXES.iter().any(|s| lower.ends_with(s))
                 || meta.len() == 0

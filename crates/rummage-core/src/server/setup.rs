@@ -454,6 +454,7 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
             let main = row.main().clone();
             let qnn: Vec<(&'static ModelFile, PathBuf)> =
                 row.qnn.iter().map(|(e, p)| (&e.file, p.clone())).collect();
+            let cache = cfg.litert.as_ref().map(|l| l.cache_dir.clone());
             let s = state.clone();
             // 删除主模型后流水线取不到引擎，状态为 `no_model`，不再识别新内容（`pipeline::engine`）
             start_task(state, ModelTaskKind::Delete, move |_, progress| {
@@ -472,6 +473,9 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
                     .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
                 let installed = models::remove(&dir, main.0.file, label)?;
                 set_verified(&s, main.0.file.name, None);
+                if let Some(cache) = &cache {
+                    models::remove_caches(cache, main.0.file.name);
+                }
                 for (f, path) in &qnn {
                     let dir = path
                         .parent()

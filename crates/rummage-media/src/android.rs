@@ -10,7 +10,8 @@
 //! - 缩略图：用 `setTargetSize` 让解码器直接按缩略图宽度缩小（JPEG 等可以在解码时缩小，比原尺寸解码再缩放快得多），
 //!   `setCrop` 只解缩略图保留的顶部；像素数超过上限的不解。缩放时只能输出预乘 alpha，按预乘的公式合成白底。
 //! - 音频：只取第一条音轨，请求 MediaCodec 输出 float 的交错 PCM；解码器不理会请求时也接受 8、16、24、32 位整数，
-//!   都转成 f32（整数按满量程归一化，与 ffmpeg 相同）。下混与重采样见 `audio::resample`，输出采样率中途变化时换一个重采样器。
+//!   都转成 f32（整数按满量程归一化，与 ffmpeg 相同）。WAV 等未压缩的音轨（`audio/raw`）不请求：系统的原样输出解码器
+//!   照搬输入的整数采样，输出格式却报告为请求的 float（Android 16 实测），按它读出的全是乱码。下混与重采样见 `audio::resample`，输出采样率中途变化时换一个重采样器。
 //!   元数据的 `container` 是文件的 MIME 类型（如 `audio/mpeg`），与电脑上 ffprobe 的格式名不同，不做映射。
 //!   `subfile` 地址（文档中不压缩存放的音频）用 `setDataSourceFd` 的偏移与长度直接读。
 //!   时限只在解码循环的间隙检查，读取本身卡住时无法中途结束（ffmpeg 子进程可以）。
@@ -40,6 +41,8 @@ const PCM_8BIT: i32 = 3;
 const PCM_FLOAT: i32 = 4;
 const PCM_24BIT_PACKED: i32 = 21;
 const PCM_32BIT: i32 = 22;
+/// 未压缩的 PCM 音轨
+const RAW_MIME: &str = "audio/raw";
 /// 不接受的输出格式：声道数与采样率的上限
 const MAX_CHANNELS: i32 = 8;
 const MAX_RATE: i32 = 768_000;
@@ -264,6 +267,8 @@ enum Key {
     ColorStandard,
     ColorRange,
     ColorTransfer,
+    ColorFormat,
+    Crop,
 }
 
 fn key(k: Key) -> *const c_char {
@@ -284,6 +289,8 @@ fn key(k: Key) -> *const c_char {
             Key::ColorStandard => sys::AMEDIAFORMAT_KEY_COLOR_STANDARD,
             Key::ColorRange => sys::AMEDIAFORMAT_KEY_COLOR_RANGE,
             Key::ColorTransfer => sys::AMEDIAFORMAT_KEY_COLOR_TRANSFER,
+            Key::ColorFormat => sys::AMEDIAFORMAT_KEY_COLOR_FORMAT,
+            Key::Crop => sys::AMEDIAFORMAT_KEY_DISPLAY_CROP,
         }
     }
 }
@@ -584,41 +591,47 @@ impl Pcm {
     }
 }
 
-/// 送一个输入缓冲区给解码器；没有更多数据时送结束标志，返回 `true`
+/// 把数据送进解码器所有空闲的输入缓冲区，不等待；没有更多数据时送结束标志，返回 `true`。
+/// 等待放在取输出时：解码器要等输出被取走才腾出输入缓冲区，在这里等会一直等到超时（SM8550 上
+/// 一段 150 秒的视频因此多花约 18 秒）
 fn feed(codec: &Codec, src: &Source, path: &Path, what: &'static str) -> Result<bool, MediaError> {
-    // SAFETY: 编解码器已启动。
-    let idx = unsafe { sys::AMediaCodec_dequeueInputBuffer(codec.0, DEQUEUE_US) };
-    let Ok(idx) = usize::try_from(idx) else {
-        return Ok(false);
-    };
-    let mut cap = 0;
-    // SAFETY: 下标来自 dequeueInputBuffer；返回的缓冲区可写 `cap` 字节，归还前有效。
-    let buf = unsafe { sys::AMediaCodec_getInputBuffer(codec.0, idx, &mut cap) };
-    if buf.is_null() {
-        return Err(decode_err(path, what, "getInputBuffer 返回空指针"));
-    }
-    // SAFETY: 提取器有效、已选中轨道；缓冲区可写 `cap` 字节，没有更多数据时返回负数。
-    let n = unsafe { sys::AMediaExtractor_readSampleData(src.ex, buf, cap) };
-    let (n, time, flags, done) = match usize::try_from(n) {
-        Ok(n) => {
-            // SAFETY: 提取器有效。
-            let t = unsafe { sys::AMediaExtractor_getSampleTime(src.ex) };
-            // SAFETY: 同上。
-            unsafe { sys::AMediaExtractor_advance(src.ex) };
-            (n, t.max(0) as u64, 0, false)
+    loop {
+        // SAFETY: 编解码器已启动。
+        let idx = unsafe { sys::AMediaCodec_dequeueInputBuffer(codec.0, 0) };
+        let Ok(idx) = usize::try_from(idx) else {
+            return Ok(false);
+        };
+        let mut cap = 0;
+        // SAFETY: 下标来自 dequeueInputBuffer；返回的缓冲区可写 `cap` 字节，归还前有效。
+        let buf = unsafe { sys::AMediaCodec_getInputBuffer(codec.0, idx, &mut cap) };
+        if buf.is_null() {
+            return Err(decode_err(path, what, "getInputBuffer 返回空指针"));
         }
-        Err(_) => (0, 0, sys::AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM, true),
-    };
-    // SAFETY: 归还刚取得的输入缓冲区，长度不超过读出的字节数。
-    let status = unsafe { sys::AMediaCodec_queueInputBuffer(codec.0, idx, 0, n, time, flags) };
-    if status != sys::media_status_t::AMEDIA_OK {
-        return Err(decode_err(
-            path,
-            what,
-            format!("queueInputBuffer 返回 {}", status.0),
-        ));
+        // SAFETY: 提取器有效、已选中轨道；缓冲区可写 `cap` 字节，没有更多数据时返回负数。
+        let n = unsafe { sys::AMediaExtractor_readSampleData(src.ex, buf, cap) };
+        let (n, time, flags, done) = match usize::try_from(n) {
+            Ok(n) => {
+                // SAFETY: 提取器有效。
+                let t = unsafe { sys::AMediaExtractor_getSampleTime(src.ex) };
+                // SAFETY: 同上。
+                unsafe { sys::AMediaExtractor_advance(src.ex) };
+                (n, t.max(0) as u64, 0, false)
+            }
+            Err(_) => (0, 0, sys::AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM, true),
+        };
+        // SAFETY: 归还刚取得的输入缓冲区，长度不超过读出的字节数。
+        let status = unsafe { sys::AMediaCodec_queueInputBuffer(codec.0, idx, 0, n, time, flags) };
+        if status != sys::media_status_t::AMEDIA_OK {
+            return Err(decode_err(
+                path,
+                what,
+                format!("queueInputBuffer 返回 {}", status.0),
+            ));
+        }
+        if done {
+            return Ok(true);
+        }
     }
-    Ok(done)
 }
 
 /// 解码为 16 kHz 单声道 f32 采样，语义同 `audio::decode`
@@ -631,8 +644,10 @@ pub(crate) fn audio_decode(
     let deadline = Instant::now() + timeout;
     let src = audio_source(path)?;
     let codec = src.decoder(path, AUDIO)?;
-    // SAFETY: 格式有效，归 `src` 所有（音轨格式的副本），键见 `key`。
-    unsafe { sys::AMediaFormat_setInt32(src.format.0, key(Key::PcmEncoding), PCM_FLOAT) };
+    if src.mime != RAW_MIME {
+        // SAFETY: 格式有效，归 `src` 所有（音轨格式的副本），键见 `key`。
+        unsafe { sys::AMediaFormat_setInt32(src.format.0, key(Key::PcmEncoding), PCM_FLOAT) };
+    }
     // 音频不输出到 surface
     codec
         .start(&src.format, ptr::null_mut())
@@ -659,10 +674,8 @@ pub(crate) fn audio_decode(
             presentationTimeUs: 0,
             flags: 0,
         };
-        // 还在送入数据时不等输出：输入缓冲区都被占用时 `feed` 已经等过
-        let wait = if input_done { DEQUEUE_US } else { 0 };
         // SAFETY: 编解码器已启动，输出参数指向局部变量。
-        let idx = unsafe { sys::AMediaCodec_dequeueOutputBuffer(codec.0, &mut info, wait) };
+        let idx = unsafe { sys::AMediaCodec_dequeueOutputBuffer(codec.0, &mut info, DEQUEUE_US) };
         let Ok(idx) = usize::try_from(idx) else {
             match idx as i32 {
                 sys::AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED => {

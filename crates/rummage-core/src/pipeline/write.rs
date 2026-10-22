@@ -21,14 +21,15 @@ const FLUSH_FILES: usize = 32;
 const FLUSH_EVERY: Duration = Duration::from_millis(500);
 /// 两次进度广播的最小间隔
 const PROGRESS_EVERY: Duration = Duration::from_millis(500);
-// 估算剩余时间的滑动窗口。属于实现细节，不进参数表：窗口太短时数字跳动，太长时跟不上速度变化（如从文本换到图片）
+// 估算剩余时间的滑动窗口。属于实现细节，不进参数表：窗口太短时数字跳动，太长时跟不上速度变化（如从文本换到图片）。
+// 手机上长图与普通图混在一起时每分钟完成的文件数相差几倍，60 秒的窗口下一分钟内的估计常相差 2 倍以上，5 分钟时约 1.2 倍
 /// 只看这么久以内完成的作业
-const ETA_WINDOW: Duration = Duration::from_secs(60);
+const ETA_WINDOW: Duration = Duration::from_secs(300);
 /// 最多记这么多条
-const ETA_MAX: usize = 200;
+const ETA_MAX: usize = 1000;
 /// 窗口内少于这么多条时不给出估计
 const ETA_MIN: usize = 10;
-/// 窗口跨度不足这么久时不给出估计；已记满 `ETA_MAX` 条时不看跨度（处理得很快时 200 条可能不到 10 秒）
+/// 窗口跨度不足这么久时不给出估计；已记满 `ETA_MAX` 条时不看跨度（处理得很快时 1000 条可能不到 10 秒）
 const ETA_MIN_SPAN: Duration = Duration::from_secs(10);
 
 /// 最近完成的作业的时刻，从早到晚
@@ -308,34 +309,34 @@ mod tests {
     fn eta_when_full_despite_short_span() {
         let t0 = Instant::now();
         let mut r = Recent::default();
-        // 4 秒内完成 400 个：只留最近 200 个（2～4 秒），跨度不足 10 秒也给出估计
-        for i in 0..400 {
-            r.push(t0 + Duration::from_millis(i * 10));
+        // 8 秒内完成 2000 个：只留最近 1000 个（4～8 秒），跨度不足 10 秒也给出估计
+        for i in 0..2000 {
+            r.push(t0 + Duration::from_millis(i * 4));
         }
         assert_eq!(r.0.len(), ETA_MAX);
-        // 200 个用了 2 秒（从第 200 个的 2 秒到现在的 4 秒），剩 1000 个需 10 秒
-        assert_eq!(r.eta(t0 + secs(4), 1000), Some(10));
-        // 不满 200 条时仍要求跨度
+        // 1000 个用了 4 秒（从第 1000 个的 4 秒到现在的 8 秒），剩 2500 个需 10 秒
+        assert_eq!(r.eta(t0 + secs(8), 2500), Some(10));
+        // 不满 1000 条时仍要求跨度
         r.0.pop_front();
-        assert_eq!(r.eta(t0 + secs(4), 1000), None);
+        assert_eq!(r.eta(t0 + secs(8), 2500), None);
     }
 
     #[test]
     fn old_records_slide_out() {
         let t0 = Instant::now();
         let mut r = Recent::default();
-        // 前 10 条在开头，后 10 条在 70～88 秒
+        // 前 10 条在开头，后 10 条在 310～328 秒
         for i in 0..10 {
             r.push(t0 + secs(i));
         }
         for i in 0..10 {
-            r.push(t0 + secs(70 + i * 2));
+            r.push(t0 + secs(310 + i * 2));
         }
-        // 第 90 秒时开头的 10 条已超过 60 秒，只按后 10 条算：20 秒 10 条
-        assert_eq!(r.eta(t0 + secs(90), 10), Some(20));
+        // 第 330 秒时开头的 10 条已超过 300 秒，只按后 10 条算：20 秒 10 条
+        assert_eq!(r.eta(t0 + secs(330), 10), Some(20));
         assert_eq!(r.0.len(), 10);
         // 全部滑出后不给出估计
-        assert_eq!(r.eta(t0 + secs(200), 10), None);
+        assert_eq!(r.eta(t0 + secs(700), 10), None);
         assert!(r.0.is_empty());
     }
 

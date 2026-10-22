@@ -15,7 +15,7 @@
 //! - 导入：按大小找出对应的模型文件，边复制到 `<文件名>.import.part`（不碰下载用的 `.part`）边计算哈希，
 //!   与已知哈希一致才改名；不认识的文件报错。
 //! - 校验（`verify`）：对已安装的文件完整核对大小与 SHA-256，结果由调用方记下。
-//! - 删除（`remove`）：删除模型文件与下载、导入留下的临时文件。调用方先让推理进程退出；Windows 上文件仍被其他程序
+//! - 删除（`remove`）：删除模型文件与下载、导入留下的临时文件；LiteRT 为它生成的缓存另由 `remove_caches` 删除。调用方先让推理进程退出；Windows 上文件仍被其他程序
 //!   打开时删不掉，提示稍后重试，不做强制删除。
 //! - 给用户看的错误都是带处理建议的中文整句，英文的系统与网络错误只写进日志。
 //! - 读取文件内容前都先检查网盘占位文件属性（`rummage_index::ensure_local`）。
@@ -810,6 +810,24 @@ pub fn remove(dir: &Path, file: &ModelFile, label: &str) -> Result<bool, Error> 
         }
     }
     Ok(installed)
+}
+
+/// 删除 LiteRT 在 `dir` 中为模型文件 `name` 生成的权重与程序缓存（`<name>.…`、`<name>_…`）。缓存名带模型文件的修改时间
+/// 与大小，重新下载的模型不会再用旧缓存；删不掉的只记录警告
+pub fn remove_caches(dir: &Path, name: &str) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file = entry.file_name();
+        let is_cache = file
+            .to_string_lossy()
+            .strip_prefix(name)
+            .is_some_and(|rest| rest.starts_with(['.', '_']));
+        if is_cache && let Err(err) = fs::remove_file(entry.path()) {
+            log::warn!("无法删除模型缓存 {}：{err}", entry.path().display());
+        }
+    }
 }
 
 /// 复制文件并计算 SHA-256；取消或出错时删除写了一半的目标
