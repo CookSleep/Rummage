@@ -88,6 +88,41 @@ describe('SearchPage', () => {
     other.remove()
   })
 
+  it('描述为空时在其中按退格清除找相似的标记，回到原来的文字搜索', async () => {
+    const input = await search('报告', results({ hits: [{ ...hit(1), kind: 'image', name: '1.jpg' }, hit(2)] }))
+    // 选中第一个结果，用详情栏中的按钮找相似
+    input.focus()
+    press(input, 'ArrowDown')
+    act(() => {
+      document.querySelector<HTMLButtonElement>('button[aria-label="找相似"]')!.click()
+    })
+    await flush()
+    expect(document.querySelector('input[role="combobox"]')).toBeNull()
+    expect(text()).toContain('相似：1.jpg')
+    // 焦点不在描述框中时不清除
+    const note = document.querySelector<HTMLInputElement>('input[aria-label="加一句描述"]')!
+    note.blur()
+    expect(press(document.body, 'Backspace').defaultPrevented).toBe(false)
+    note.focus()
+    expect(press(note, 'Backspace').defaultPrevented).toBe(true)
+    await flush()
+    expect(document.querySelector<HTMLInputElement>('input[role="combobox"]')!.value).toBe('报告')
+  })
+
+  it('不能加描述的找相似标记，焦点不在输入框中时按退格清除', async () => {
+    const input = await search('报告', results({ hits: [hit(1), hit(2)] }))
+    input.focus()
+    press(input, 'ArrowDown')
+    act(() => {
+      document.querySelector<HTMLButtonElement>('button[aria-label="找相似"]')!.click()
+    })
+    await flush()
+    expect(text()).toContain('相似：1.txt')
+    expect(press(document.body, 'Backspace').defaultPrevented).toBe(true)
+    await flush()
+    expect(document.querySelector<HTMLInputElement>('input[role="combobox"]')!.value).toBe('报告')
+  })
+
   it('没有结果时，一句话的不可用原因去掉句末句号', async () => {
     await search('报告', results({ semanticUnavailable: true, unavailable: 'engine' }))
     expect(text()).toContain('内容识别无法使用，只显示文件名或正文中含有搜索词的结果')

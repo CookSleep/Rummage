@@ -1,5 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type RefObject } from 'react'
 import type { ImageQuery, SimilarQuery } from '../types'
+import { queryImageUrl } from '../lib/media'
 import { isAndroid } from '../lib/platform'
 import { ClockIcon, CloseIcon, ImageIcon, SearchIcon, SimilarIcon, SpinnerIcon } from './icons'
 import { HoverTip } from './Tip'
@@ -33,6 +34,9 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
   const [active, setActive] = useState(-1)
   const open = history.length > 0
   const describable = image !== null || similar?.describable === true
+  const preview = image ? queryImageUrl(image.token) : similar?.preview ?? null
+  // 取不到预览图（格式不支持、文件已删除等）时只显示文件名
+  const [failed, setFailed] = useState<string | null>(null)
 
   useEffect(() => {
     setActive((a) => Math.min(a, history.length - 1))
@@ -84,7 +88,18 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
           {similar ? <SimilarIcon kind={similar.kind} className="h-4 w-4 flex-shrink-0 text-blue-500" /> : <ImageIcon className="h-4 w-4 flex-shrink-0 text-blue-500" />}
           <span className={`truncate text-gray-700 dark:text-gray-200 ${describable ? 'max-w-[50%] flex-shrink-0' : ''}`}>
             {similar ? `相似：${similar.name}` : `以图搜图：${image?.name}`}
-            <HoverTip label={similar?.name ?? image?.name ?? ''} wrap />
+            <HoverTip
+              wrap
+              longPress
+              label={(
+                <>
+                  {preview && preview !== failed && (
+                    <img src={preview} alt="" onError={() => setFailed(preview)} className="mb-2 block h-36 w-56 rounded-md bg-black/20 object-contain" />
+                  )}
+                  {similar?.name ?? image?.name}
+                </>
+              )}
+            />
           </span>
           {describable && (
             <input

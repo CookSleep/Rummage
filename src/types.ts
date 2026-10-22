@@ -223,6 +223,8 @@ export interface SimilarQuery extends SimilarTo {
   kind: string
   /** 普通图片（不是长图切片）：可以加文字描述，由核心重新读取这张图片与文字合成一条查询 */
   describable: boolean
+  /** 标记悬停时预览的画面，同结果卡片；没有画面的种类、占位文件和离线设备上的文件为空 */
+  preview: string | null
 }
 
 /** 筛选条件，对应 Rust `src-tauri/src/search.rs` 的 `SearchFilter`；为空的列表表示不限 */

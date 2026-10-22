@@ -525,6 +525,39 @@ async fn cached_image<R: Runtime>(app: &AppHandle<R>, body: Request) -> Result<V
     }
 }
 
+async fn max_image_bytes<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
+    match core::request(app, Request::GetParams).await {
+        Ok(Reply::Params { values }) => Ok(params::max_image_bytes(&values)),
+        Ok(other) => Err(unexpected(&other).message),
+        Err(err) => Err(err.message),
+    }
+}
+
+/// 以图搜图的查询图片，用于搜索框标记的悬停预览；WebView 不能直接显示的格式和超过图片大小上限的不提供
+async fn query_image<R: Runtime>(
+    app: &AppHandle<R>,
+    token: u64,
+) -> Result<(&'static str, Vec<u8>), String> {
+    let path = app
+        .state::<ImageTokens>()
+        .path(token)
+        .ok_or("这张图片已失效。")?;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mime = web_mime(&ext).ok_or("无法预览这种格式的图片。")?;
+    let size = tokio::fs::metadata(&path)
+        .await
+        .map_err(|err| format!("无法读取大小：{err}"))?
+        .len();
+    if size > max_image_bytes(app).await? {
+        return Err("图片太大，不预览。".into());
+    }
+    Ok((mime, read(path.to_string_lossy().into_owned(), true).await?))
+}
+
 async fn original<R: Runtime>(
     app: &AppHandle<R>,
     file_id: i64,
@@ -541,12 +574,7 @@ async fn original<R: Runtime>(
         return thumb().await;
     };
     // 超过图片大小上限的也用缩略图，不把整个大文件经界面送进 WebView
-    let values = match core::request(app, Request::GetParams).await {
-        Ok(Reply::Params { values }) => values,
-        Ok(other) => return Err(unexpected(&other).message),
-        Err(err) => return Err(err.message),
-    };
-    if info.size.max(0) as u64 > params::max_image_bytes(&values) {
+    if info.size.max(0) as u64 > max_image_bytes(app).await? {
         return thumb().await;
     }
     if info.missing {
@@ -568,9 +596,11 @@ enum Route {
     Frame(i64, u64),
     /// 片段 ID
     Crop(i64),
+    /// 以图搜图的令牌
+    Query(u64),
 }
 
-/// 拆出 `/thumb/<文件 ID>`、`/image/<文件 ID>`、`/play/<文件 ID>`、`/frame/<文件 ID>/<毫秒>`、`/crop/<片段 ID>`
+/// 拆出 `/thumb/<文件 ID>`、`/image/<文件 ID>`、`/play/<文件 ID>`、`/frame/<文件 ID>/<毫秒>`、`/crop/<片段 ID>`、`/query/<令牌>`
 fn route(path: &str) -> Option<Route> {
     let mut parts = path.strip_prefix('/')?.split('/');
     let name = parts.next()?;
@@ -584,6 +614,7 @@ fn route(path: &str) -> Option<Route> {
         ("image", None) => Route::Image(id),
         ("play", None) => Route::Play(id),
         ("crop", None) => Route::Crop(id),
+        ("query", None) => Route::Query(u64::try_from(id).ok()?),
         ("frame", Some(ms)) => Route::Frame(id, ms.parse().ok()?),
         _ => return None,
     })
@@ -609,6 +640,10 @@ pub async fn media<R: Runtime>(
             .map(forever),
         // 原图的地址只有文件 ID，内容可能变化，不缓存
         Some(Route::Image(id)) => original(&app, id)
+            .await
+            .map(|(mime, b)| (mime, "no-store", b)),
+        // 令牌对应的路径不变，但图片可能被改过
+        Some(Route::Query(token)) => query_image(&app, token)
             .await
             .map(|(mime, b)| (mime, "no-store", b)),
         Some(Route::Play(id)) => return play(&app, id, range).await,
@@ -706,7 +741,9 @@ mod tests {
         assert_eq!(route("/play/4"), Some(Route::Play(4)));
         assert_eq!(route("/frame/5/192500"), Some(Route::Frame(5, 192_500)));
         assert_eq!(route("/crop/6"), Some(Route::Crop(6)));
+        assert_eq!(route("/query/7"), Some(Route::Query(7)));
         for path in [
+            "/query/-1",
             "/frame/5",
             "/frame/5/-1",
             "/frame/5/1/2",

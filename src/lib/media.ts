@@ -1,4 +1,5 @@
 import type { SearchHit } from '../types'
+import { hasThumb } from './masonry'
 
 // `media` 自定义协议的地址（src-tauri/src/search.rs）：只按索引中的文件或片段 ID 取缩略图、预览图和音视频。
 // Windows 与 Android 的 WebView 把自定义协议映射为 http://<协议>.localhost，与 Tauri 的 convertFileSrc 相同
@@ -19,6 +20,11 @@ export function frameUrl(hit: Versioned, ms: number) {
 /** 长图命中那一段的裁剪图，区域由核心按片段 ID 从索引中查出；文档内嵌的图片与视频同样走这里，由核心从文档中取出 */
 export function cropUrl(hit: Versioned, segmentId: number) {
   return `${BASE}/crop/${segmentId}?v=${hit.mtime}-${hit.size}`
+}
+
+/** 以图搜图的查询图片，搜索框标记的悬停预览用；WebView 不能直接显示的格式和过大的图片取不到 */
+export function queryImageUrl(token: number) {
+  return `${BASE}/query/${token}`
 }
 
 /** 预览用的原图，不缓存 */
@@ -104,6 +110,20 @@ export function timeRange(locatorJson: string) {
 export function hitFrameMs(hit: SearchHit) {
   const r = hit.kind === 'video' && hit.segments[0] ? timeRange(hit.segments[0].locatorJson) : null
   return r ? Math.round((r.start + r.end) / 2) : null
+}
+
+/** 卡片显示的命中处的画面：长图命中的那一段、文档内嵌的图片与视频、视频命中的时刻；没有时为空，用缩略图 */
+export function hitImageUrl(hit: SearchHit) {
+  const region = hitRegion(hit) ?? hitEmbed(hit)
+  const frameMs = hitFrameMs(hit)
+  return region ? cropUrl(hit, region.segmentId) : frameMs !== null ? frameUrl(hit, frameMs) : null
+}
+
+/** 卡片上的画面（命中处的画面，没有时为缩略图）；没有画面的种类、占位文件和离线设备上的文件为空 */
+export function hitPreviewUrl(hit: SearchHit) {
+  const src = hitImageUrl(hit)
+  if (hit.cloud || hit.offline || !(src || hasThumb(hit.kind))) return null
+  return src ?? thumbUrl(hit)
 }
 
 /** 打开到的命中位置：音视频为最佳命中时间段的起点，PDF 为最佳命中片段的起始页；没有时为空 */

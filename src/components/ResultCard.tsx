@@ -3,7 +3,7 @@ import type { SearchHit } from '../types'
 import type { CardBox } from '../lib/masonry'
 import { CAPTION_HEIGHT, hasThumb } from '../lib/masonry'
 import { abbreviateDir, kindLabel, locatorText, matchPercent, matchText } from '../lib/format'
-import { cropUrl, frameUrl, hitEmbed, hitFrameMs, hitRegion, thumbUrl } from '../lib/media'
+import { hitEmbed, hitImageUrl, hitRegion, thumbUrl } from '../lib/media'
 import { CloudIcon, KindIcon, SimilarIcon, UnplugIcon } from './icons'
 import { HoverTip } from './Tip'
 
@@ -69,8 +69,7 @@ export default memo(function ResultCard({ hit, box, index, selected, onSelect, o
   const match = matchText(hit)
   const loc = hit.kind !== 'image' && hit.segments[0] ? locatorText(hit.segments[0].locatorJson) : ''
   const region = hitRegion(hit) ?? hitEmbed(hit)
-  const frameMs = hitFrameMs(hit)
-  const hitSrc = region ? cropUrl(hit, region.segmentId) : frameMs !== null ? frameUrl(hit, frameMs) : null
+  const hitSrc = hitImageUrl(hit)
   // 同一文件在新搜索中命中另一段时，重新尝试命中处的图
   const [lastSrc, setLastSrc] = useState(hitSrc)
   if (hitSrc !== lastSrc) {

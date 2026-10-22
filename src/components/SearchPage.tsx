@@ -13,7 +13,7 @@ import { indexDevice } from '../lib/device'
 import { DEFAULT_FILTERS } from '../lib/filter'
 import { lowRelevanceText, trimPeriod, unavailableText } from '../lib/format'
 import { moveSelection, type Direction, type Masonry } from '../lib/masonry'
-import { hitPosition, hitRegion } from '../lib/media'
+import { hitPosition, hitPreviewUrl, hitRegion } from '../lib/media'
 import { isAndroid, isTauri } from '../lib/platform'
 import { shouldShowUpdate } from '../lib/releaseUpdates'
 import { revealFile } from '../lib/reveal'
@@ -241,7 +241,8 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
     if (!hit) return
     const seg = hit.segments[0]
     const describable = hit.kind === 'image' && !hit.cloud && !hit.offline && !hitRegion(hit)
-    setSimilar({ fileId: hit.fileId, segmentId: seg?.segmentId ?? null, name: hit.name, kind: hit.kind, describable })
+    const preview = hitPreviewUrl(hit)
+    setSimilar({ fileId: hit.fileId, segmentId: seg?.segmentId ?? null, name: hit.name, kind: hit.kind, describable, preview })
     setImage(null)
     setNote('')
     setOverlayOpen(false)
@@ -340,6 +341,15 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
       if (!inInput && (el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && el.type !== 'checkbox'))) return
       // 焦点在按钮、筛选条的复选框和下拉框上时 Enter 和空格交给它们自己
       const onButton = el instanceof HTMLButtonElement || (el instanceof HTMLInputElement && !inInput) || el?.getAttribute('role') === 'button'
+      // 退格清除以图搜图、找相似的标记：能加描述的在描述为空时、在描述框中按，按住退格删完描述时不连带清除；
+      // 不能加描述的没有输入框，焦点在哪里都可以
+      const describable = image !== null || similar?.describable === true
+      if (e.key === 'Backspace' && (image || similar) && (!describable || (inInput && !note))) {
+        if (e.repeat) return
+        e.preventDefault()
+        clear()
+        return
+      }
       if (e.key === 'Escape') {
         e.preventDefault()
         if (historyShown && history.length) setHistoryOpen(false)

@@ -28,7 +28,7 @@ const LONG_PRESS_MS = 500
  * wrap 用于长路径，气泡可换行；hide 用于菜单展开等时暂不显示；longPress 时触屏长按也显示，
  * 长按松手后不再触发该元素的点击
  */
-export function HoverTip({ label, wrap, hide, longPress }: { label: string; wrap?: boolean; hide?: boolean; longPress?: boolean }) {
+export function HoverTip({ label, wrap, hide, longPress }: { label: ReactNode; wrap?: boolean; hide?: boolean; longPress?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
 
