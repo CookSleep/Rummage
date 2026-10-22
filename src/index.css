@@ -66,41 +66,36 @@ img {
   }
 }
 
-/* 细滚动条只用于鼠标：触摸屏（手机）用系统的悬浮滚动条，不占宽度、不滚动时隐藏 */
+/* 细滚动条只用于鼠标：触摸屏（手机）用系统的悬浮滚动条，不占宽度、不滚动时隐藏。
+   不设 scrollbar-width / scrollbar-color：设了之后 Chromium 不认 ::-webkit-scrollbar-*，改画带箭头的系统滚动条 */
 @media (pointer: fine) {
   :root {
     /* 内容变长出现滚动条时不挤动布局 */
     scrollbar-gutter: stable;
   }
 
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
-  }
-
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
   ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   ::-webkit-scrollbar-track { background: transparent; }
+
+  /* 窗口的滚动条让出标题栏 */
+  :root[data-titlebar]::-webkit-scrollbar-track { margin-top: var(--safe-top); }
+
+  /* 自己滚动的整页（搜索页）：滚动条同样让出标题栏 */
+  .page-scroll { scrollbar-gutter: stable; }
+  .page-scroll::-webkit-scrollbar-track { margin-top: var(--safe-top); }
+}
+
+/* 页面自己滚动时，窗口不再滚动，也不留滚动条的位置 */
+:root:has(.page-scroll) {
+  overflow-y: hidden;
+  scrollbar-gutter: auto;
 }
 
 @media (pointer: fine) and (prefers-color-scheme: dark) {
-  * {
-    scrollbar-color: #3f3f46 transparent;
-  }
-
   ::-webkit-scrollbar-thumb { background: #3f3f46; }
   ::-webkit-scrollbar-thumb:hover { background: #52525b; }
-}
-
-/* 窗口的滚动条让出标题栏：设了 scrollbar-width 或 scrollbar-color 时 Chromium 不认 ::-webkit-scrollbar-*，轨道留不出上边距 */
-@media (pointer: fine) {
-  :root[data-titlebar] {
-    scrollbar-width: auto;
-    scrollbar-color: auto;
-  }
-
-  :root[data-titlebar]::-webkit-scrollbar-track { margin-top: var(--safe-top); }
 }
 
 /* 弹窗外层的留白（同 p-4），再让出安全区 */

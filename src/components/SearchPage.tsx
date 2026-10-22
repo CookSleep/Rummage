@@ -14,7 +14,7 @@ import { DEFAULT_FILTERS } from '../lib/filter'
 import { lowRelevanceText, trimPeriod, unavailableText } from '../lib/format'
 import { moveSelection, type Direction, type Masonry } from '../lib/masonry'
 import { hitPosition, hitPreviewUrl, hitRegion } from '../lib/media'
-import { isAndroid, isTauri } from '../lib/platform'
+import { isAndroid, isTauri, TITLEBAR_HEIGHT } from '../lib/platform'
 import { shouldShowUpdate } from '../lib/releaseUpdates'
 import { revealFile } from '../lib/reveal'
 import { readLocal, writeLocal } from '../lib/storage'
@@ -91,6 +91,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
   const hasUpdate = useReleaseUpdates((s) => shouldShowUpdate(s.releases[0], __APP_VERSION__, s.ignoredVersion))
   const inputRef = useRef<HTMLInputElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
   const headerRef = useRef<HTMLElement>(null)
   const layoutRef = useRef<Masonry | null>(null)
   const usedDevice = indexDevice(setup?.selftest)
@@ -150,8 +151,8 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
     const top = grid.getBoundingClientRect().top + box.y
     const header = (headerRef.current?.offsetHeight ?? 0) + 8
     const bottom = window.innerHeight - 8
-    if (top < header) window.scrollBy({ top: top - header })
-    else if (top + box.height > bottom) window.scrollBy({ top: top + box.height - bottom })
+    if (top < header) mainRef.current?.scrollBy({ top: top - header })
+    else if (top + box.height > bottom) mainRef.current?.scrollBy({ top: top + box.height - bottom })
   }, [])
 
   // 同一组结果的布局变化（详情栏收起或展开、窗口缩放）后，选中的卡片可能移出视野，滚回来；新结果的布局不滚动
@@ -241,7 +242,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
     setImage(null)
     setNote('')
     setOverlayOpen(false)
-    window.scrollTo({ top: 0 })
+    mainRef.current?.scrollTo({ top: 0 })
   }, [])
 
   const pickImage = () => {
@@ -433,7 +434,12 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
   )
 
   return (
-    <main className="min-h-screen" style={panelShown && wide ? { paddingRight: PANEL_WIDTH } : undefined}>
+    // 页面自己滚动，不用窗口的滚动条：常驻的详情栏让出宽度后，滚动条在详情栏左侧
+    <main ref={mainRef} className="page-scroll h-dvh overflow-y-auto" style={panelShown && wide ? { marginRight: PANEL_WIDTH } : undefined}>
+      {/* 电脑上滚动条那一列在标题栏中的一段铺上搜索栏的底色，与两侧连成一片；手机的状态栏是沉浸式的，不铺 */}
+      {TITLEBAR_HEIGHT > 0 && (
+        <div aria-hidden className="pointer-events-none fixed top-0 z-20 h-[var(--safe-top)] w-2 bg-gray-50/85 dark:bg-gray-950/85" style={{ right: panelShown && wide ? PANEL_WIDTH : 0 }} />
+      )}
       {/* 首页像搜索引擎：项目名在上、搜索框居中；开始搜索后搜索框移到顶部 */}
       <header
         ref={headerRef}
@@ -445,6 +451,17 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
         <div className={`absolute top-[calc(1.25rem+var(--safe-top))] ${query ? 'max-sm:hidden' : ''} ${wide && hasResults && collapsed ? 'right-14' : 'right-3'}`}>
           {settingsControls}
         </div>
+        {wide && hasResults && collapsed && (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label="展开详情栏"
+            className="absolute right-3 top-[calc(1.25rem+var(--safe-top))] rounded-full border border-gray-200/60 bg-white/90 p-2 text-gray-500 shadow-sm backdrop-blur-xl transition duration-200 hover:text-gray-700 dark:border-white/[0.08] dark:bg-gray-900/90 dark:text-gray-400 dark:hover:text-gray-200"
+          >
+            <PanelExpandIcon className="h-4 w-4" />
+            <HoverTip label="展开详情栏（空格）" />
+          </button>
+        )}
         <div className="mx-auto w-full max-w-2xl">
           {!query && (
             <h1 className="mb-9 flex justify-center text-gray-800 dark:text-gray-100">
@@ -561,18 +578,6 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
           onSimilar={() => selected !== null && findSimilar(selected)}
           onShare={isAndroid ? () => selectedHit && run('share_file', selectedHit) : undefined}
         />
-      )}
-
-      {wide && hasResults && collapsed && (
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label="展开详情栏"
-          className="fixed right-3 top-[calc(1.25rem+var(--safe-top))] z-20 rounded-full border border-gray-200/60 bg-white/90 p-2 text-gray-500 shadow-sm backdrop-blur-xl transition duration-200 hover:text-gray-700 dark:border-white/[0.08] dark:bg-gray-900/90 dark:text-gray-400 dark:hover:text-gray-200"
-        >
-          <PanelExpandIcon className="h-4 w-4" />
-          <HoverTip label="展开详情栏（空格）" />
-        </button>
       )}
 
       {dragging && (

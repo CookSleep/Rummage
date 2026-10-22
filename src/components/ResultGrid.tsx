@@ -28,7 +28,7 @@ interface Props {
 const BAND_HEIGHT = 40
 
 /**
- * 虚拟化的瀑布流：随窗口滚动，只渲染视口及上下各一屏内的卡片，容器高度由布局算出。
+ * 虚拟化的瀑布流：随所在的滚动容器滚动，只渲染视口及上下各一屏内的卡片，容器高度由布局算出。
  * 列数随容器宽度变化，卡片位置不依赖缩略图加载
  */
 export default function ResultGrid({ hits, selected, onSelect, onOpen, onSimilar, gridRef, onLayout, connected, band }: Props) {
@@ -52,11 +52,12 @@ export default function ResultGrid({ hits, selected, onSelect, onOpen, onSimilar
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(grid)
-    window.addEventListener('scroll', update, { passive: true })
+    // scroll 事件不冒泡，在捕获阶段接住外层滚动容器的滚动
+    window.addEventListener('scroll', update, { capture: true, passive: true })
     window.addEventListener('resize', update)
     return () => {
       ro.disconnect()
-      window.removeEventListener('scroll', update)
+      window.removeEventListener('scroll', update, { capture: true })
       window.removeEventListener('resize', update)
     }
   }, [gridRef])

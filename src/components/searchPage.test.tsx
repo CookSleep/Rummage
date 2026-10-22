@@ -41,8 +41,9 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   })
-  // 选中结果时滚到可见处，jsdom 没有实现
-  vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+  // 选中结果时滚到可见处、找相似时回到顶部，jsdom 没有实现
+  Element.prototype.scrollBy = () => {}
+  Element.prototype.scrollTo = () => {}
 })
 
 /** 渲染搜索页并在搜索框中输入 `value`，等防抖后的搜索返回 */

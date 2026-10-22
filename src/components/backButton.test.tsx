@@ -45,7 +45,7 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   })
-  vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+  Element.prototype.scrollBy = () => {}
   // 手机宽度：详情栏为覆盖整个窗口的详情页
   vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(375)
 })
