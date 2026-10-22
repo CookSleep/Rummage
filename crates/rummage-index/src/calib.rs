@@ -9,7 +9,8 @@
 //! - `similar` 的背景：同一“空间 × 模态”随机抽取的向量中取至多 200 条作查询，与抽样的向量两两打分（不含自身），
 //!   不需要推理，也不联网。搜索时只在本次查询自身的分数分布算不出来（该空间向量太少）时才用它（`VIndex::coarse`）。
 //! - 何时重算（`update`）：某个“空间 × 模态”还没有分布、向量数与上次计算时相差超过 20%，或查询来源（文本空间、查询表）变了。
-//!   向量少于 `MIN_VECTORS` 时不计算。新分布算出前旧分布一直有效；还没有分布的模态，其中的结果没有 z，不判定门槛（`search` 模块说明）。
+//!   向量少于下限时不计算：`similar` 为 `MIN_VECTORS`；`text` 的样本是通用查询表乘以全部向量，下限低得多
+//!   （`TEXT_MIN_VECTORS`），只有几段录音或几份文档的模态也有分布，其中无关的结果照样能按门槛折叠。新分布算出前旧分布一直有效；还没有分布的模态，其中的结果没有 z，不判定门槛（`search` 模块说明）。
 //! - 读出的分布须是有限值且标准差为正，否则当作没有分布。
 //! - 抽样从内存向量索引取片段 id，再按主键读 f16 向量；锁的顺序与检索相同（先内存索引、后数据库），推理与统计时不持有锁。
 use std::collections::HashMap;
@@ -33,6 +34,8 @@ const SIMILAR_QUERIES: usize = 200;
 const RECOMPUTE_CHANGE: f64 = 0.2;
 /// 抽到的向量少于这个数时不计算：样本太少，标准差不可靠，该模态按没有分布处理（已有的旧分布保留）
 pub(crate) const MIN_VECTORS: usize = 20;
+/// `text` 的下限：样本是通用查询表的约 200 条查询乘以全部向量，几个向量就有上千个余弦
+const TEXT_MIN_VECTORS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QueryKind {
@@ -312,14 +315,14 @@ pub fn update(
         let targets: Vec<&(Space, String, usize)> = groups
             .iter()
             .filter(|g| comparable(t.space, &g.0))
-            .filter(|g| g.2 >= MIN_VECTORS && stale(prev.get(&key(kind, g)), &source, g.2))
+            .filter(|g| g.2 >= TEXT_MIN_VECTORS && stale(prev.get(&key(kind, g)), &source, g.2))
             .collect();
         if !targets.is_empty() {
             let qv = query_vectors(db, t.space, t.embed)?;
             for g in targets {
                 let ids = lock(index).sample(&g.0.id, &g.1, SAMPLE, rng);
                 let vecs = read_vectors(&lock(db), &g.0.id, &ids)?;
-                if vecs.len() < MIN_VECTORS {
+                if vecs.len() < TEXT_MIN_VECTORS {
                     continue;
                 }
                 if let Some(s) = stat(&qv, &vecs, false) {
@@ -467,7 +470,7 @@ mod tests {
         let r = f.root("D:\\资料");
         let t = text_space();
         let img = space("i", true);
-        // 向量不够 `MIN_VECTORS` 时不计算
+        // 向量不够时不计算：文字查询的下限是 `TEXT_MIN_VECTORS`，similar 是 `MIN_VECTORS`
         let add_docs = |range: std::ops::Range<usize>| {
             for i in range {
                 let doc = f.file(r, &format!("{i}.md"), "document", 0);
@@ -476,7 +479,7 @@ mod tests {
                 f.segment(pic, "image", &at(0.1 + 0.005 * i as f32, i + 1), &img);
             }
         };
-        add_docs(0..MIN_VECTORS - 1);
+        add_docs(0..TEXT_MIN_VECTORS - 1);
         let index = f.index();
         let calls = std::cell::Cell::new(0);
         let mut embed = |_: &str| {
@@ -493,15 +496,23 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        add_docs(MIN_VECTORS - 1..MIN_VECTORS);
-        // 文字查询：文档、图片各一个；similar：两个空间各一个
-        assert_eq!(run(&mut embed, &mut rng), 4);
+        add_docs(TEXT_MIN_VECTORS - 1..MIN_VECTORS - 1);
+        // 文字查询：文档、图片各一个；similar 还不够
+        assert_eq!(run(&mut embed, &mut rng), 2);
         assert_eq!(calls.get(), queries().len());
+        assert!(
+            load(&f.db.lock().unwrap(), QueryKind::Similar)
+                .unwrap()
+                .is_empty()
+        );
         let text = load(&f.db.lock().unwrap(), QueryKind::Text).unwrap();
         let doc = text[&("t".to_string(), "text".to_string())];
-        assert!((doc.mean - 0.495).abs() < 1e-3, "{doc:?}");
+        assert!((doc.mean - 0.49).abs() < 1e-3, "{doc:?}");
         let pic = text[&("i".to_string(), "image".to_string())];
-        assert!((pic.mean - 0.1475).abs() < 1e-3, "{pic:?}");
+        assert!((pic.mean - 0.145).abs() < 1e-3, "{pic:?}");
+        // similar：两个空间各一个；文字查询的向量数只多了约 5%，不重算
+        add_docs(MIN_VECTORS - 1..MIN_VECTORS);
+        assert_eq!(run(&mut embed, &mut rng), 2);
         assert_eq!(
             load(&f.db.lock().unwrap(), QueryKind::Similar)
                 .unwrap()
