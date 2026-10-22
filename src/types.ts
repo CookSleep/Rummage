@@ -163,6 +163,8 @@ export interface IndexStatus extends IndexCounts {
   etaS: number | null
   /** 按新设置重建的进度；没有要重建的文件时为空。要重建的文件在上面的计数中算作已完成 */
   rebuild: RebuildStatus | null
+  /** 这一轮建立索引的进度，有待处理的文件时才有；托盘与 Android 的进度通知显示同一个值 */
+  round: RoundStatus | null
 }
 
 /** 建立索引失败的文件，对应 Rust `rummage_proto::FailedFile` */
@@ -191,6 +193,12 @@ export interface FailedPage {
   total: number
   /** 其中能重试的 */
   retryable: number
+}
+
+/** 这一轮建立索引的进度：`done` 只增不减，`total` 为 `done` 加上待处理数，对应 Rust `rummage_proto::RoundStatus` */
+export interface RoundStatus {
+  done: number
+  total: number
 }
 
 /** 对应 Rust `rummage_proto::RebuildStatus` */

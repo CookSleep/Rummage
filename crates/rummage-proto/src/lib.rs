@@ -642,7 +642,7 @@ pub enum PauseReason {
     Fullscreen,
 }
 
-/// 索引进度，总是全量计数
+/// 索引进度：`round` 以外的计数总是全量计数
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexStatus {
@@ -665,6 +665,18 @@ pub struct IndexStatus {
     pub eta_s: Option<u64>,
     /// 按新设置重建的进度；没有要重建的文件时为空。要重建的文件在上面的计数中算作已完成（旧索引照常可搜）
     pub rebuild: Option<RebuildStatus>,
+    /// 这一轮建立索引的进度，有能处理的新文件时才有（离线、云端、缺 mmproj 的不算）。界面、托盘与 Android 的进度通知
+    /// 都显示它，彼此一致
+    pub round: Option<RoundStatus>,
+}
+
+/// 这一轮建立索引的进度：`done` 为本轮处理完（完成或失败）的文件数，只增不减；`total` 为 `done` 加上能处理的待处理数，
+/// 中途新增、改动或重试的文件计入，删掉的待处理文件移出，所以比例可能后退。全部处理完后清零
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundStatus {
+    pub done: u64,
+    pub total: u64,
 }
 
 /// 按新设置重建的进度：`total` 为这一批的文件数，新的设置修改加入的文件计入同一批，全部完成后清零

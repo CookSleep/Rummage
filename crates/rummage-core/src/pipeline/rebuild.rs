@@ -75,7 +75,7 @@ impl Shared {
     }
 
     /// 处理哪些媒体种类（图片、音频、视频）：mmproj 可用且对应的参数开启，与 `engine` 的判定相同
-    fn media_on(&self, values: &BTreeMap<String, ParamValue>) -> (bool, bool, bool) {
+    pub(super) fn media_on(&self, values: &BTreeMap<String, ParamValue>) -> (bool, bool, bool) {
         let mmproj = self.mmproj_available(Backend::Cpu);
         let on = |k: &str| mmproj && params::flag(values, k);
         (on("index_images"), on("index_audio"), on("index_video"))

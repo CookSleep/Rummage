@@ -6,12 +6,12 @@ import { click, findButton, render } from '../test/tauri'
 import IndexHint from './IndexHint'
 
 const base: IndexStatus = {
-  state: 'running', paused: null, slow: false, total: 70, done: 60, failed: 0, pending: 10, byKind: {}, backend: 'CPU', error: null, etaS: null, rebuild: null,
+  state: 'running', paused: null, slow: false, total: 70, done: 60, failed: 0, pending: 10, byKind: {}, backend: 'CPU', error: null, etaS: null, rebuild: null, round: { done: 60, total: 70 },
 }
 
 function show(status: IndexStatus) {
   const onAdjust = vi.fn()
-  const { container } = render(<IndexHint status={status} base={0} onFailed={vi.fn()} onAdjust={onAdjust} />)
+  const { container } = render(<IndexHint status={status} onFailed={vi.fn()} onAdjust={onAdjust} />)
   return { onAdjust, adjust: findButton('调整', container) }
 }
 
@@ -46,6 +46,6 @@ describe('IndexHint 的“调整”', () => {
 
   it('缺模型等警告时、没有提示文字时不显示', () => {
     expect(show({ ...base, state: 'no_model', paused: { type: 'screen_on' } }).adjust).toBeNull()
-    expect(show({ ...base, pending: 0, slow: true }).adjust).toBeNull()
+    expect(show({ ...base, pending: 0, round: null, slow: true }).adjust).toBeNull()
   })
 })

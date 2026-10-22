@@ -21,7 +21,7 @@ import { readLocal, writeLocal } from '../lib/storage'
 import { renderMessage } from './ConfirmDialog'
 import CoreStatusNotice from './CoreStatusNotice'
 import FailedFilesDialog from './FailedFilesDialog'
-import IndexHint, { indexHint, nextBase } from './IndexHint'
+import IndexHint, { indexHint } from './IndexHint'
 import FilterBar from './FilterBar'
 import DetailPanel, { PANEL_OVERLAY_BELOW, PANEL_WIDTH } from './DetailPanel'
 import ResultGrid from './ResultGrid'
@@ -58,14 +58,7 @@ interface Props {
 /** 搜索页；右上角进入设置 */
 export default function SearchPage({ coreStatus, setup, setupError, onSetup, onSetupRetry, appearance, onAppearance }: Props) {
   const indexStatus = useIndexStatus(coreStatus === 'running')
-  // 索引提示有查询时在页头、没有时在窗口底部，是两个组件；本轮基数和失败文件弹窗放在这里，切换查询时不丢。
-  // 本轮开始（有待处理的文件）时记下已处理数，处理完清掉；界面中途打开时从打开那一刻算起
-  const baseRef = useRef<number | null>(null)
-  const failedRef = useRef<number | null>(null)
-  if (indexStatus) {
-    baseRef.current = nextBase(baseRef.current, failedRef.current, indexStatus)
-    failedRef.current = indexStatus.failed
-  }
+  // 索引提示有查询时在页头、没有时在窗口底部，是两个组件；失败文件弹窗放在这里，切换查询时不丢
   const [failedOpen, setFailedOpen] = useState(false)
   const [text, setText] = useState('')
   const [image, setImage] = useState<ImageQuery | null>(null)
@@ -462,7 +455,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
           <div className="relative">
             {((query && indexStatus && (indexHint(indexStatus) || indexStatus.failed > 0)) || (results?.semanticUnavailable && query && allHits.length > 0)) && (
               <div className={`flex flex-col gap-1.5 ${query ? 'mb-2' : 'absolute inset-x-0 bottom-full mb-2'}`}>
-                {query && <IndexHint status={indexStatus} base={baseRef.current ?? 0} onFailed={() => setFailedOpen(true)} onAdjust={(param) => setSettings({ tab: 'resource', param })} device={usedDevice} />}
+                {query && <IndexHint status={indexStatus} onFailed={() => setFailedOpen(true)} onAdjust={(param) => setSettings({ tab: 'resource', param })} device={usedDevice} />}
                 {results?.semanticUnavailable && query && allHits.length > 0 && (
                   <div className={NOTICE_BOX}>
                     <WarningIcon className="mt-px h-4 w-4 flex-shrink-0" />
@@ -501,7 +494,7 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
       {!query && (
         <div className="fixed inset-x-0 bottom-0 z-10 px-4 pb-[calc(1.25rem+var(--safe-bottom))] pt-2 sm:px-14">
           <div className="mx-auto w-full max-w-2xl">
-            <IndexHint status={indexStatus} base={baseRef.current ?? 0} onFailed={() => setFailedOpen(true)} onAdjust={(param) => setSettings({ tab: 'resource', param })} up device={usedDevice} />
+            <IndexHint status={indexStatus} onFailed={() => setFailedOpen(true)} onAdjust={(param) => setSettings({ tab: 'resource', param })} up device={usedDevice} />
           </div>
         </div>
       )}

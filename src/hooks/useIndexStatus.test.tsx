@@ -8,7 +8,7 @@ import { emitEvent, flush, mockCore, render, text } from '../test/tauri'
 import { useIndexStatus } from './useIndexStatus'
 
 const status = (done: number): IndexStatus => ({
-  state: 'running', paused: null, slow: false, total: 10, done, failed: 0, pending: 10 - done, byKind: {}, backend: 'CPU', error: null, etaS: null, rebuild: null,
+  state: 'running', paused: null, slow: false, total: 10, done, failed: 0, pending: 10 - done, byKind: {}, backend: 'CPU', error: null, etaS: null, rebuild: null, round: { done, total: 10 },
 })
 
 function Done() {

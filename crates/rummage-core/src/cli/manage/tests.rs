@@ -181,6 +181,7 @@ fn folders_output() {
         error: None,
         eta_s: None,
         rebuild: None,
+        round: None,
     };
     let mut offline = root(r"E:\移动硬盘", 0, &[]);
     offline.offline = true;

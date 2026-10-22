@@ -25,7 +25,6 @@ mod failures;
 mod image_query;
 mod open_at;
 mod pause;
-mod progress;
 mod releases;
 mod search;
 mod settings;

@@ -3,6 +3,7 @@
 //! 提交前在数据库锁内把按旧参数算出的结果改为放回（`drop_stale`，见 `Pipeline::requeue`）。
 //! 整批提交失败时（事务已回滚，作业仍在处理中）记 error 日志，改为逐个文件单独提交；单个文件仍然失败时只给它计一次
 //! 失败，连失败也写不进去时放回 `pending`、不计失败。每次提交后同步内存向量索引（先取索引锁再取数据库锁）。
+//! 本轮进度：提交时在数据库锁内把由待处理变为完成或失败的作业数累加到 `Shared::round`（`apply`）。
 //! 进度：状态或计数变了之后广播 `IndexProgress`，两次之间至少隔 500 毫秒；所有发送端关闭时写完剩下的结果后退出。
 //! 剩余时间：收到作业的最终结果时记下时刻（`Recent`，只记推理流程中真正处理完的作业），广播时按滑动窗口内的速度估算；
 //! 调度线程停下（暂停、睡眠、空闲等）后再领取作业时清空窗口，不把停下的时间算进速度。
@@ -11,7 +12,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use rummage_index::{Claimed, Outcome};
+use rummage_index::{Claimed, Db, DbError, Outcome};
 
 use super::{Msg, Shared, lock};
 
@@ -66,6 +67,16 @@ impl Recent {
     }
 }
 
+/// 提交一批结果并累加本轮已处理数；`db` 为已取得的数据库锁。返回是否有作业回到了 `pending`
+fn apply(shared: &Shared, db: &Db, batch: &[(Claimed, Outcome)]) -> Result<bool, DbError> {
+    let r = db.apply(batch)?;
+    if r.finished > 0 {
+        let mut round = lock(&shared.round);
+        *round = Some(round.unwrap_or(0) + r.finished);
+    }
+    Ok(r.requeued)
+}
+
 /// 逐个文件提交；返回是否有作业回到了 `pending`
 fn retry_each(shared: &Shared, batch: &[(Claimed, Outcome)]) -> bool {
     let mut ids: Vec<i64> = Vec::new();
@@ -82,7 +93,7 @@ fn retry_each(shared: &Shared, batch: &[(Claimed, Outcome)]) -> bool {
             .cloned()
             .collect();
         let db = lock(&shared.db);
-        let err = match db.apply(&items) {
+        let err = match apply(shared, &db, &items) {
             Ok(r) => {
                 requeued |= r;
                 continue;
@@ -98,11 +109,11 @@ fn retry_each(shared: &Shared, batch: &[(Claimed, Outcome)]) -> bool {
                 .map(<[u8]>::to_vec),
             error: super::prep::reason::DB_REASON.into(),
         };
-        match db.apply(&[(job.clone(), failed)]) {
+        match apply(shared, &db, &[(job.clone(), failed)]) {
             Ok(r) => requeued |= r,
             Err(err) => {
                 log::error!("无法记录 {} 的失败，放回待处理：{err}", job.path.display());
-                match db.apply(&[(job, Outcome::Released)]) {
+                match apply(shared, &db, &[(job, Outcome::Released)]) {
                     Ok(r) => requeued |= r,
                     Err(err) => log::error!("无法放回作业：{err}"),
                 }
@@ -132,7 +143,7 @@ fn flush(shared: &Shared, batch: &mut Vec<(Claimed, Outcome)>, finals: usize) {
     let res = {
         let db = lock(&shared.db);
         drop_stale(&mut lock(&shared.stale), batch);
-        db.apply(batch)
+        apply(shared, &db, batch)
     };
     let requeued = res.unwrap_or_else(|err| {
         log::error!("索引结果整批写入数据库失败，改为逐个文件提交：{err}");

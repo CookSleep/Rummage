@@ -361,6 +361,7 @@ fn response_and_event_round_trip() {
         error: None,
         eta_s: None,
         rebuild: None,
+        round: Some(RoundStatus { done: 1, total: 2 }),
     };
     round_trip(CoreMsg::Response {
         id: 2,
@@ -393,6 +394,7 @@ fn response_and_event_round_trip() {
     assert!(line.contains("\"type\":\"IndexProgress\"") && line.contains("\"byKind\""));
     assert!(line.contains("\"state\":\"no_model\"") && line.contains("\"paused\":null"));
     assert!(line.contains("\"etaS\":null"));
+    assert!(line.contains(r#""round":{"done":1,"total":2}"#), "{line}");
     let line = encode(&Event::IndexProgress(IndexStatus {
         eta_s: Some(125),
         ..status.clone()

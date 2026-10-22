@@ -385,6 +385,50 @@ impl Drop for Env {
     }
 }
 
+/// 本轮进度：已处理数只增不减，中途增删、修改文件只改变总数；处理完后清空
+#[test]
+fn round_progress_follows_changes() {
+    let mut e = env(&[
+        ("old1.txt", "旧的".as_bytes()),
+        ("old2.txt", "旧的二".as_bytes()),
+    ]);
+    e.threads = Some(1);
+    e.start(true, false);
+    assert_eq!(e.wait_idle(0).round, None);
+    // 新一轮：推理阻塞在第一个新文件上，暂停后其余的留在待处理
+    *lock(&e.stub.hold) = true;
+    e.stub.entered.store(0, Ordering::Relaxed);
+    for name in ["n1.txt", "n2.txt", "n3.txt"] {
+        e.put(name, name.as_bytes());
+    }
+    e.scan();
+    wait_entered(&e);
+    let p = e.pipeline.as_ref().unwrap();
+    p.set_paused(Some(PauseReason::Manual { until: None }));
+    release_hold(&e);
+    let s = e.wait_until(|s| s.state == IndexState::Idle && s.done + s.pending == 5);
+    let k = s.done - 2;
+    assert!(k > 0 && k < 3, "{s:?}");
+    let round = |done, total| Some(RoundStatus { done, total });
+    assert_eq!(s.round, round(k, 3));
+    // 删掉本轮之前就建好的文件：进度不变
+    fs::remove_file(e.root.path().join("old1.txt")).unwrap();
+    e.scan();
+    assert_eq!(e.status().round, round(k, 3));
+    // 修改建好的文件、新增文件：总数增加，已处理数不倒退
+    e.put("old2.txt", "旧的二改过了".as_bytes());
+    e.put("n4.txt", b"n4");
+    e.scan();
+    assert_eq!(e.status().round, round(k, 5));
+    // 删掉待处理的文件：总数减少
+    fs::remove_file(e.root.path().join("n4.txt")).unwrap();
+    e.scan();
+    assert_eq!(e.status().round, round(k, 4));
+    // 处理完后清空
+    p.set_paused(None);
+    assert_eq!(e.wait_idle(0).round, None);
+}
+
 #[test]
 fn text_and_image_stored() {
     let corgi = fs::read(CORGI).unwrap();
@@ -519,6 +563,8 @@ fn text_only_without_mmproj() {
     e.start(true, false);
     let s = e.wait_until(|s| s.state == IndexState::NoMmproj && s.pending == 1);
     assert_eq!(s.by_kind["image"].pending, 1);
+    // 处理不了的图片不算进本轮，本轮已结束
+    assert_eq!(s.round, None);
     assert!(e.stored("a.txt"));
     assert_eq!(e.job("b.jpg").unwrap().0, "pending");
 }

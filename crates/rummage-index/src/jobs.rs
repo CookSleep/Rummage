@@ -161,6 +161,15 @@ pub enum Outcome {
     },
 }
 
+/// `Db::apply` 的结果
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Applied {
+    /// 有作业回到了 `pending`
+    pub requeued: bool,
+    /// 由待处理变为已完成或失败的作业数（`job_counts` 的口径）
+    pub finished: u64,
+}
+
 impl Outcome {
     pub fn is_final(&self) -> bool {
         !matches!(self, Outcome::Embedding { .. })
@@ -281,6 +290,15 @@ fn finish(
         params![file_id, now],
     )?;
     Ok(())
+}
+
+/// 作业在 `job_counts` 中算作待处理：既没完成也没失败，且不是重建作业
+fn unfinished(conn: &Connection, file_id: i64) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE file_id = ?1 AND stage NOT IN ('stored', 'failed') AND priority >= ?2)",
+        params![file_id, REBUILD_BELOW],
+        |row| row.get(0),
+    )
 }
 
 /// 写入一个结果；返回作业是否回到了 `pending`
@@ -697,14 +715,18 @@ impl Db {
             .map_err(|err| self.err(err))
     }
 
-    /// 在一个事务中写入一批结果，跳过已不对应当前文件的（见模块文档）；返回是否有作业回到了 `pending`
-    pub fn apply(&self, batch: &[(Claimed, Outcome)]) -> Result<bool, DbError> {
+    /// 在一个事务中写入一批结果，跳过已不对应当前文件的（见模块文档）
+    pub fn apply(&self, batch: &[(Claimed, Outcome)]) -> Result<Applied, DbError> {
         let now = now_ms();
         let res = self.conn.unchecked_transaction().and_then(|tx| {
-            let mut requeued = false;
+            let mut res = Applied::default();
             for (job, out) in batch {
                 if current(&tx, job)? {
-                    requeued |= apply_one(&tx, job, out, now)?;
+                    let was = out.is_final() && unfinished(&tx, job.file_id)?;
+                    res.requeued |= apply_one(&tx, job, out, now)?;
+                    if was && !unfinished(&tx, job.file_id)? {
+                        res.finished += 1;
+                    }
                     if job.volume_file_id.is_some() {
                         tx.execute(
                             "UPDATE files SET volume_file_id = ?2 WHERE id = ?1",
@@ -714,7 +736,7 @@ impl Db {
                 }
             }
             tx.commit()?;
-            Ok(requeued)
+            Ok(res)
         });
         res.map_err(|err| self.err(err))
     }
@@ -734,16 +756,36 @@ impl Db {
     /// 条件与 `claim_job` 一致：所在根目录在线、文件不在云端、`images` / `audio` / `video` 为否时不含该类；
     /// 改动 `claim_job` 的筛选条件时同步修改这里
     pub fn claimable_jobs(&self, images: bool, audio: bool, video: bool) -> Result<u64, DbError> {
+        self.count_claimable(images, audio, video, i64::MIN)
+    }
+
+    /// 同 `claimable_jobs`，但不含重建作业（它们在 `job_counts` 中算作已完成）：本轮进度的待处理数
+    pub fn claimable_new_jobs(
+        &self,
+        images: bool,
+        audio: bool,
+        video: bool,
+    ) -> Result<u64, DbError> {
+        self.count_claimable(images, audio, video, REBUILD_BELOW)
+    }
+
+    fn count_claimable(
+        &self,
+        images: bool,
+        audio: bool,
+        video: bool,
+        min_priority: i64,
+    ) -> Result<u64, DbError> {
         self.conn
             .query_row(
                 &format!(
                     "SELECT COUNT(*) FROM jobs j JOIN files f ON f.id = j.file_id JOIN roots r ON r.id = f.root_id
-                     WHERE j.stage IN {ACTIVE}
+                     WHERE j.priority >= ?4 AND (j.stage IN {ACTIVE}
                         OR (j.stage = 'pending' AND r.offline = 0 AND f.cloud = 0
                             AND (?1 OR f.kind <> 'image') AND (?2 OR f.kind <> 'audio')
-                            AND (?3 OR f.kind <> 'video'))"
+                            AND (?3 OR f.kind <> 'video')))"
                 ),
-                [images, audio, video],
+                params![images, audio, video, min_priority],
                 |row| row.get::<_, i64>(0),
             )
             .map(|n| n as u64)

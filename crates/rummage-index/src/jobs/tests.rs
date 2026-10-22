@@ -190,6 +190,20 @@ fn claimable_matches_claim_job() {
         .unwrap();
     assert_eq!(e.db().claimable_jobs(true, true, true).unwrap(), 1);
     assert!(e.db().claim_job(true, true, true).unwrap().is_none());
+    // 重建作业算进剩余时间，不算进本轮的待处理数
+    e.db()
+        .conn
+        .execute("UPDATE roots SET offline = 0 WHERE id = ?1", [e.id])
+        .unwrap();
+    e.db()
+        .conn
+        .execute(
+            "UPDATE jobs SET priority = ?1 WHERE file_id = (SELECT id FROM files WHERE name = 'a.txt')",
+            [REBUILD_BELOW - 1],
+        )
+        .unwrap();
+    assert_eq!(e.db().claimable_jobs(false, false, false).unwrap(), 3);
+    assert_eq!(e.db().claimable_new_jobs(false, false, false).unwrap(), 2);
 }
 
 #[test]
@@ -292,7 +306,10 @@ fn audio_stored_copied_and_too_long() {
         slice_version: String::new(),
         from: a.file_id,
     };
-    assert!(!e.db().apply(&[(b.clone(), copy)]).unwrap());
+    // 由待处理变为已完成，计入本轮的进度
+    let r = e.db().apply(&[(b.clone(), copy)]).unwrap();
+    assert!(!r.requeued);
+    assert_eq!(r.finished, 1);
     assert_eq!(e.job(&b.name).0, "stored");
     assert_eq!(meta_of(&b.name), meta);
     assert_eq!(
@@ -340,7 +357,7 @@ fn failures_then_blacklist() {
     let e = env(&[("a.txt", b"a")]);
     for i in 1..=3 {
         let job = e.db().claim_job(true, true, true).unwrap().unwrap();
-        let requeued = e
+        let r = e
             .db()
             .apply(&[(
                 job,
@@ -350,7 +367,9 @@ fn failures_then_blacklist() {
                 },
             )])
             .unwrap();
-        assert_eq!(requeued, i < 3);
+        // 重试前回到待处理，不算处理完；第三次失败才算
+        assert_eq!(r.requeued, i < 3);
+        assert_eq!(r.finished, u64::from(i == 3));
     }
     assert_eq!(e.job("a.txt"), ("failed".into(), 3, Some("坏了。".into())));
     assert!(e.db().is_blacklisted(&[9]).unwrap());
@@ -493,7 +512,13 @@ fn copy_from_same_content() {
             slice_version: "sv".into(),
             from: a.file_id,
         };
-        assert!(e.db().apply(&[(b.clone(), wrong)]).unwrap());
+        assert_eq!(
+            e.db().apply(&[(b.clone(), wrong)]).unwrap(),
+            Applied {
+                requeued: true,
+                finished: 0
+            }
+        );
         assert_eq!(e.job(&b.name).0, "pending");
         e.db()
             .conn
@@ -529,7 +554,7 @@ fn copy_from_same_content() {
         .conn
         .execute("UPDATE jobs SET stage = 'preprocessing'", [])
         .unwrap();
-    assert!(e.db().apply(&[(b.clone(), copy)]).unwrap());
+    assert!(e.db().apply(&[(b.clone(), copy)]).unwrap().requeued);
     assert_eq!(e.job(&b.name), ("pending".into(), 0, None));
 }
 
@@ -671,7 +696,13 @@ fn copy_long_image_with_slices() {
 fn released_not_counted() {
     let e = env(&[("a.txt", b"a")]);
     let a = e.db().claim_job(true, true, true).unwrap().unwrap();
-    assert!(e.db().apply(&[(a, Outcome::Released)]).unwrap());
+    assert_eq!(
+        e.db().apply(&[(a, Outcome::Released)]).unwrap(),
+        Applied {
+            requeued: true,
+            finished: 0
+        }
+    );
     assert_eq!(e.job("a.txt"), ("pending".into(), 0, None));
 }
 

@@ -30,7 +30,8 @@ pub use files::{FileRow, IndexInfo, JobRow, SegmentRow};
 pub use fsx::{FsError, IoCause, check_volume, ensure_local, io_cause, io_kind};
 pub use hash::{HashError, content_hash, quick_hash, quick_hash_with_id};
 pub use jobs::{
-    Claimed, ENCRYPTED, JobCounts, MAX_ATTEMPTS, NewSegment, Outcome, PART_MEDIA, PART_TEXT,
+    Applied, Claimed, ENCRYPTED, JobCounts, MAX_ATTEMPTS, NewSegment, Outcome, PART_MEDIA,
+    PART_TEXT,
 };
 pub use rebuild::{MEDIA_EXTS, Wanted};
 pub use roots::{Root, RootError, normalize_root};

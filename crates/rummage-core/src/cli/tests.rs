@@ -397,6 +397,7 @@ fn status_sample() -> IndexStatus {
             total: 5,
             by_kind: BTreeMap::new(),
         }),
+        round: None,
     }
 }
 
@@ -461,6 +462,7 @@ fn status_output() {
         error: None,
         eta_s: None,
         rebuild: None,
+        round: None,
     };
     assert_eq!(
         status_text(&Status {

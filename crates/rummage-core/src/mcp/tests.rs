@@ -386,6 +386,7 @@ fn status_output() {
         error: None,
         eta_s: Some(750),
         rebuild: None,
+        round: None,
     };
     let roots = [
         RootInfo {

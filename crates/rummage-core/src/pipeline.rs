@@ -79,7 +79,8 @@ use rummage_embed::{
 use rummage_index::{Claimed, Db, DbError, Outcome, Space, VIndex};
 use rummage_media::video::WindowOpts;
 use rummage_proto::{
-    AUTO_DEVICE, Event, IndexCounts, IndexState, IndexStatus, ParamValue, PauseReason, params,
+    AUTO_DEVICE, Event, IndexCounts, IndexState, IndexStatus, ParamValue, PauseReason, RoundStatus,
+    params,
 };
 use tokio::sync::broadcast;
 
@@ -314,6 +315,9 @@ struct Shared {
     stale: Mutex<Vec<i64>>,
     /// 这一批要重建的文件数（`rebuild`）
     rebuild_total: Mutex<u64>,
+    /// 本轮已处理（完成或失败）的文件数，写库线程在数据库锁内累加（`write`），没有待处理的文件时清空。
+    /// 先取数据库锁、再取这把锁
+    round: Mutex<Option<u64>>,
     /// 背景分布的计算串行执行（`calib`）
     calib_lock: Mutex<()>,
     /// 停止时置真并唤醒校准线程
@@ -402,7 +406,20 @@ impl Shared {
 
     /// `paused` 为调用方在 `paused` 锁内读出的值
     fn status_with(&self, paused: Option<PauseReason>) -> Result<IndexStatus, DbError> {
-        let counts = lock(&self.db).job_counts()?;
+        // 本轮的待处理数只算能处理的新文件：离线、云端、缺 mmproj 或关闭了识别的媒体文件不算，否则本轮永远不会结束。
+        // 按设置而不是当前引擎判断媒体文件，引擎重建期间本轮不会中断
+        let (images, audio, video) = self.media_on(&lock(&self.params));
+        // 计数与本轮已处理数在数据库锁内一起读出，写库线程的提交不会只体现在其中一个上
+        let (counts, left, done) = {
+            let db = lock(&self.db);
+            let counts = db.job_counts()?;
+            let left = db.claimable_new_jobs(images, audio, video)?;
+            let mut round = lock(&self.round);
+            if left == 0 {
+                *round = None;
+            }
+            (counts, left, round.unwrap_or(0))
+        };
         let error = lock(&self.error).clone();
         let media_pending = ["image", "audio", "video"]
             .iter()
@@ -438,6 +455,7 @@ impl Shared {
             backend: lock(&self.engine).as_ref().map(|e| e.device.clone()),
             eta_s: None,
             rebuild: self.rebuild_status()?,
+            round: None,
         };
         for (kind, c) in counts {
             s.total += c.total;
@@ -453,6 +471,13 @@ impl Shared {
                     pending: c.pending,
                 },
             );
+        }
+        // 已处理数只增不减；总数随时加上新增或改动的文件、减去删掉的待处理文件
+        if left > 0 {
+            s.round = Some(RoundStatus {
+                done,
+                total: done + left,
+            });
         }
         if s.state == IndexState::Running && s.paused.is_none() {
             // 剩余作业只算调度线程能领取的（离线、云端、缺 mmproj 时的图片、音频与视频不算），不用 `pending`
@@ -589,6 +614,7 @@ impl Pipeline {
             recent: Mutex::new(write::Recent::default()),
             stale: Mutex::new(Vec::new()),
             rebuild_total: Mutex::new(0),
+            round: Mutex::new(None),
             calib_lock: Mutex::new(()),
             calib_stop: Mutex::new(false),
             calib_cv: Condvar::new(),

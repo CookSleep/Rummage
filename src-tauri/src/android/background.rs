@@ -8,14 +8,14 @@
 //! - 后台额度（Android 15 起 `mediaProcessing` 每 24 小时共 6 小时，应用回到前台时重新计时）用完时系统回调 `onTimeout`：
 //!   Kotlin 侧先报告 `timeout` 再停止服务，这里向后台服务发送 `BackgroundQuota { exhausted: true }` 暂停领取作业；
 //!   应用回到前台时发送 `exhausted: false` 解除。
-//! - 通知中的数字与界面的索引提示一致（`shown`）：有待处理的文件时只数本轮要建的文件（`progress`），只剩按新设置重建时为重建的进度。
+//! - 通知中的数字与界面的索引提示一致（`shown`）：有待处理的文件时为本轮的进度（`IndexStatus::round`，由后台服务统一计算），
+//!   只剩按新设置重建时为重建的进度。
 //! - 事件与进度在同一个任务中按到达顺序处理，插件调用不会交错。
 //! - 后台运行：电池优化白名单（`request_battery_unrestricted`）；部分系统另有自己的后台管控，前台服务、唤醒锁与白名单都挡不住，
 //!   退到后台几秒后冻结整个应用，只能由用户在应用信息的电量或电池设置中放行（`open_app_settings`）。
 //! - 通知权限（Android 13 起）在完成引导时请求一次（`request_notifications`），被拒绝时服务照常运行，不再追问。
 use rummage_proto::{IndexState, IndexStatus, PauseReason};
 
-use crate::progress;
 #[cfg(target_os = "android")]
 use {
     crate::core,
@@ -35,10 +35,10 @@ pub fn note(p: PauseReason) -> Option<&'static str> {
     }
 }
 
-/// 通知中的已完成数与总数（见模块说明）；`base` 为本轮开始时已处理的文件数（`progress::next_base`）
-pub fn shown(s: &IndexStatus, base: Option<u64>) -> (u64, u64) {
-    if s.pending > 0 {
-        return progress::round(s, base.unwrap_or(0));
+/// 通知中的已完成数与总数（见模块说明）
+pub fn shown(s: &IndexStatus) -> (u64, u64) {
+    if let Some(r) = s.round {
+        return (r.done, r.total);
     }
     if let Some(rb) = &s.rebuild {
         return (rb.done, rb.total);
@@ -71,9 +71,6 @@ struct Service {
     /// 系统拒绝了启动，应用回到前台之前不再尝试
     blocked: bool,
     last: Option<IndexStatus>,
-    /// 本轮开始时已处理的文件数与上一次的失败数（`progress::next_base`）
-    base: Option<u64>,
-    last_failed: Option<u64>,
 }
 
 #[cfg(target_os = "android")]
@@ -93,7 +90,7 @@ async fn sync<R: Runtime>(plugin: &Android<R>, svc: &mut Service) {
     };
     let want = wanted(s);
     let text = s.paused.and_then(note);
-    let (done, total) = shown(s, svc.base);
+    let (done, total) = shown(s);
     if want && !svc.running {
         if svc.blocked {
             return;
@@ -157,11 +154,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
         let mut svc = Service::default();
         while let Some(msg) = rx.recv().await {
             match msg {
-                Msg::Status(s) => {
-                    svc.base = progress::next_base(svc.base, svc.last_failed, &s);
-                    svc.last_failed = Some(s.failed);
-                    svc.last = Some(s);
-                }
+                Msg::Status(s) => svc.last = Some(s),
                 Msg::Plugin(kind) => match kind.as_str() {
                     "resume" => {
                         svc.blocked = false;
@@ -258,6 +251,7 @@ mod tests {
             error: None,
             eta_s: None,
             rebuild: None,
+            round: None,
         }
     }
 
@@ -299,11 +293,12 @@ mod tests {
 
     #[test]
     fn notification_counts_match_index_hint() {
-        // 有待处理的文件：只数本轮（status 中 done = 10 - pending，failed = 0）
-        assert_eq!(
-            shown(&status(IndexState::Running, None, 3), Some(5)),
-            (2, 5)
-        );
+        // 有待处理的文件：显示本轮的进度
+        let indexing = IndexStatus {
+            round: Some(rummage_proto::RoundStatus { done: 2, total: 5 }),
+            ..status(IndexState::Running, None, 3)
+        };
+        assert_eq!(shown(&indexing), (2, 5));
         // 只剩按新设置重建：显示重建的进度
         let rebuilding = IndexStatus {
             rebuild: Some(rummage_proto::RebuildStatus {
@@ -313,6 +308,6 @@ mod tests {
             }),
             ..status(IndexState::Running, None, 0)
         };
-        assert_eq!(shown(&rebuilding, None), (4, 20));
+        assert_eq!(shown(&rebuilding), (4, 20));
     }
 }

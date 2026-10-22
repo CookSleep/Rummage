@@ -12,7 +12,6 @@ use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
 
-use crate::progress::{next_base, round};
 use crate::{core, pause, platform};
 
 const TRAY_ID: &str = "main";
@@ -63,10 +62,6 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .spawn(move || {
             // 上次设置的菜单状态与悬停提示，没有变化时不重复设置
             let mut last: Option<(View, String)> = None;
-            // 本轮开始时已处理的文件数（与界面的索引提示一致），处理完清掉
-            let mut base: Option<u64> = None;
-            // 上一次的失败数，用于发现重试
-            let mut last_failed: Option<u64> = None;
             loop {
                 let (status, from_refresh) = {
                     let mut next = NEXT.lock().expect(LOCK);
@@ -77,21 +72,12 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                         next = WAKE.wait(next).expect(LOCK);
                     }
                 };
-                if let Some(s) = &status {
-                    base = next_base(base, last_failed, s);
-                    last_failed = Some(s.failed);
-                }
                 let view = view(status.as_ref());
                 let prev_view = last.as_ref().map(|p| &p.0);
                 if from_refresh && prev_view.is_some_and(|v| *v != View::Unknown && *v == view) {
                     continue;
                 }
-                apply(
-                    &app,
-                    &mut last,
-                    view,
-                    tooltip(status.as_ref(), base.unwrap_or(0)),
-                );
+                apply(&app, &mut last, view, tooltip(status.as_ref()));
             }
         })?;
     Ok(())
@@ -296,10 +282,11 @@ fn manual_text(until: Option<[u16; 6]>, today: [u16; 6]) -> String {
     format!("已暂停到 {}月{}日 {clock}", t[1], t[2])
 }
 
-/// 与界面的索引提示一样，有待处理的文件时显示本轮的进度；`base` 为本轮开始时已处理的文件数
-fn tooltip(status: Option<&IndexStatus>, base: u64) -> String {
-    let Some(s) = status
-        .filter(|s| s.pending > 0 && matches!(s.state, IndexState::Idle | IndexState::Running))
+/// 与界面的索引提示一样，有待处理的文件时显示本轮的进度（`IndexStatus::round`）
+fn tooltip(status: Option<&IndexStatus>) -> String {
+    let Some((s, r)) = status
+        .filter(|s| matches!(s.state, IndexState::Idle | IndexState::Running))
+        .and_then(|s| s.round.map(|r| (s, r)))
     else {
         return "Rummage".into();
     };
@@ -308,8 +295,11 @@ fn tooltip(status: Option<&IndexStatus>, base: u64) -> String {
     } else {
         "正在建立索引"
     };
-    let (done, total) = round(s, base);
-    format!("Rummage：{what} {} / {}", thousands(done), thousands(total))
+    format!(
+        "Rummage：{what} {} / {}",
+        thousands(r.done),
+        thousands(r.total)
+    )
 }
 
 fn thousands(n: u64) -> String {
@@ -326,6 +316,8 @@ fn thousands(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use rummage_proto::RoundStatus;
+
     use super::*;
 
     fn status(state: IndexState, paused: Option<PauseReason>) -> IndexStatus {
@@ -342,6 +334,10 @@ mod tests {
             error: None,
             eta_s: None,
             rebuild: None,
+            round: Some(RoundStatus {
+                done: 234,
+                total: 4000,
+            }),
         }
     }
 
@@ -355,22 +351,18 @@ mod tests {
 
     #[test]
     fn tooltip_shows_progress_only_while_indexing() {
-        assert_eq!(tooltip(None, 0), "Rummage");
+        assert_eq!(tooltip(None), "Rummage");
         let s = status(IndexState::Running, None);
-        assert_eq!(tooltip(Some(&s), 0), "Rummage：正在建立索引 1,234 / 5,000");
-        // 只数本轮要建的文件
-        assert_eq!(tooltip(Some(&s), 1000), "Rummage：正在建立索引 234 / 4,000");
+        assert_eq!(tooltip(Some(&s)), "Rummage：正在建立索引 234 / 4,000");
         let s = status(IndexState::Running, Some(PauseReason::Battery));
-        assert_eq!(tooltip(Some(&s), 0), "Rummage：索引已暂停 1,234 / 5,000");
-        assert_eq!(
-            tooltip(Some(&status(IndexState::NoModel, None)), 0),
-            "Rummage"
-        );
+        assert_eq!(tooltip(Some(&s)), "Rummage：索引已暂停 234 / 4,000");
+        assert_eq!(tooltip(Some(&status(IndexState::NoModel, None))), "Rummage");
         let done = IndexStatus {
             pending: 0,
+            round: None,
             ..status(IndexState::Idle, None)
         };
-        assert_eq!(tooltip(Some(&done), 0), "Rummage");
+        assert_eq!(tooltip(Some(&done)), "Rummage");
     }
 
     #[test]
