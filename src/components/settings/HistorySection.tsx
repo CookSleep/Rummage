@@ -1,9 +1,9 @@
-import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { ParamDef, ParamValue, ParamValues } from '../../types'
 import { errorMessage } from '../../lib/errors'
-import { useSaveParam } from '../../hooks/useSaveParam'
-import { ERROR_TEXT, SMALL_BUTTON } from '../onboarding/styles'
+import { saveParam } from '../../lib/params'
+import { SMALL_BUTTON } from '../onboarding/styles'
+import { showToast } from '../Toast'
 import ParamField from './ParamField'
 import { ROW_DESC, ROW_LABEL, SECTION_TITLE } from './styles'
 
@@ -18,18 +18,13 @@ interface Props {
 
 /** “搜索”页底部的搜索历史：保存开关、条数上限与清空 */
 export default function HistorySection({ defs, values, setParam }: Props) {
-  const { errors, save } = useSaveParam(setParam)
-  const [status, setStatus] = useState('')
-  const [clearError, setClearError] = useState('')
 
   const clear = () => {
-    setStatus('')
-    setClearError('')
     invoke('clear_history')
-      .then(() => setStatus('已清空搜索历史'))
+      .then(() => showToast('已清空搜索历史', 'success'))
       .catch((err) => {
         console.warn('无法清空搜索历史：', err)
-        setClearError(errorMessage(err, '未能清空搜索历史，请重试。'))
+        showToast(errorMessage(err, '未能清空搜索历史，请重试。'), 'error')
       })
   }
 
@@ -42,7 +37,7 @@ export default function HistorySection({ defs, values, setParam }: Props) {
       {HISTORY_KEYS.map((key) => {
         const def = defs.find((d) => d.key === key)
         if (!def) return null
-        return <ParamField key={key} def={def} value={values[key] ?? def.default} error={errors[key]} onChange={(v) => void save(key, v)} />
+        return <ParamField key={key} def={def} value={values[key] ?? def.default} onChange={(v) => void saveParam(setParam, key, v)} />
       })}
       <div>
         <div className="mb-1 flex items-center justify-between gap-3">
@@ -51,8 +46,6 @@ export default function HistorySection({ defs, values, setParam }: Props) {
             清空
           </button>
         </div>
-        {status && <div data-selectable-text className={ROW_DESC}>{status}</div>}
-        {clearError && <div data-selectable-text className={ERROR_TEXT}>{clearError}</div>}
       </div>
     </section>
   )

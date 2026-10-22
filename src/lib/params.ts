@@ -1,5 +1,19 @@
 import type { ParamDef, ParamValue } from '../types'
+import { errorMessage } from './errors'
 import { KIND_LABELS } from './format'
+import { showToast } from '../components/Toast'
+
+/** 保存参数；已保存但需要告诉用户的提示与保存失败的原因用胶囊通知。返回是否保存成功 */
+export async function saveParam(setParam: (key: string, value: ParamValue) => Promise<string | null>, key: string, value: ParamValue) {
+  try {
+    const warning = await setParam(key, value)
+    if (warning) showToast(warning)
+    return true
+  } catch (err) {
+    showToast(errorMessage(err, '设置未能保存，请重试。'), 'error')
+    return false
+  }
+}
 
 /**
  * 设置项下方的说明。数字在说明后的括号中写允许范围，如“一次搜索最多显示多少个结果（10–500）。”；

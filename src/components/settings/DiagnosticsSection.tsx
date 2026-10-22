@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { ParamDef, ParamValue, ParamValues } from '../../types'
 import { errorMessage } from '../../lib/errors'
+import { saveParam } from '../../lib/params'
 import { isAndroid } from '../../lib/platform'
-import { useSaveParam } from '../../hooks/useSaveParam'
 import { renderMessage } from '../ConfirmDialog'
 import { ResetIcon } from '../icons'
-import { ERROR_TEXT, SMALL_BUTTON } from '../onboarding/styles'
+import { SMALL_BUTTON } from '../onboarding/styles'
 import { HoverTip } from '../Tip'
+import { showToast } from '../Toast'
 import ParamField from './ParamField'
 import Toggle from './Toggle'
 import { ROW_DESC, ROW_LABEL, SECTION_TITLE } from './styles'
@@ -26,32 +27,28 @@ interface Props {
  * 诊断包的保存位置由 Rust 侧的对话框选择，只在本地生成。Android 上日志在应用私有目录中，其他应用打不开，不显示“日志目录”
  */
 export default function DiagnosticsSection({ defs, values, setParam }: Props) {
-  const param = useSaveParam(setParam)
   const [keepPaths, setKeepPaths] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [status, setStatus] = useState('')
-  const [error, setError] = useState('')
   const def = defs.find((d) => d.key === LOG_KEY)
 
   const openLogs = () => {
-    setError('')
     invoke('open_log_dir').catch((err) => {
       console.warn('无法打开日志目录：', err)
-      setError(errorMessage(err, '无法打开日志目录。'))
+      showToast(errorMessage(err, '无法打开日志目录。'), 'error')
     })
   }
 
   const exportPackage = () => {
     setExporting(true)
     setStatus('')
-    setError('')
     invoke<string | null>('export_diagnostics', { keepPaths })
       .then((path) => {
         if (path) setStatus(`已保存到「${path}」`)
       })
       .catch((err) => {
         console.warn('无法导出诊断包：', err)
-        setError(errorMessage(err, '诊断包未能导出，请重试。'))
+        showToast(errorMessage(err, '诊断包未能导出，请重试。'), 'error')
       })
       .finally(() => setExporting(false))
   }
@@ -63,8 +60,7 @@ export default function DiagnosticsSection({ defs, values, setParam }: Props) {
         <ParamField
           def={def}
           value={values[LOG_KEY] ?? def.default}
-          error={param.errors[LOG_KEY]}
-          onChange={(v) => void param.save(LOG_KEY, v)}
+          onChange={(v) => void saveParam(setParam, LOG_KEY, v)}
         />
       )}
       {!isAndroid && (
@@ -107,7 +103,6 @@ export default function DiagnosticsSection({ defs, values, setParam }: Props) {
         </div>
         <div className={ROW_DESC}>把日志、设备检测结果、版本与显卡信息和设置打包成 ZIP，保存在本机，不会上传。不含搜索历史和文件内容。</div>
         {status && <div data-selectable-text className={`mt-1 break-all ${ROW_DESC}`}>{renderMessage(status, 'font-semibold')}</div>}
-        {error && <div data-selectable-text className={`mt-1 ${ERROR_TEXT}`}>{error}</div>}
       </div>
     </section>
   )

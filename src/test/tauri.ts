@@ -78,6 +78,11 @@ export function text(root: ParentNode = document.body) {
   return root.textContent ?? ''
 }
 
+/** 胶囊通知的文字，需要同时渲染 `Toaster` */
+export function toast() {
+  return document.querySelector('[role="status"]')?.textContent ?? ''
+}
+
 /** 按文字或 aria-label 找按钮，找不到时为空 */
 export function findButton(name: string, root: ParentNode = document.body) {
   return [...root.querySelectorAll<HTMLElement>('button, [role="button"]')].find((b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name) ?? null

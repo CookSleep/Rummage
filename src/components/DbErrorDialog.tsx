@@ -5,6 +5,7 @@ import type { DbStatus } from '../types'
 import { errorMessage } from '../lib/errors'
 import { isTauri } from '../lib/platform'
 import ConfirmDialog from './ConfirmDialog'
+import { showToast } from './Toast'
 
 /**
  * “索引数据库无法打开”：核心连上后查一次数据库状态，
@@ -19,7 +20,6 @@ export default function DbErrorDialog({ connected }: { connected: boolean }) {
   const [status, setStatus] = useState<{ error: string; rebuildable: boolean } | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
 
   useEffect(() => {
     if (!isTauri || !connected) return
@@ -32,12 +32,11 @@ export default function DbErrorDialog({ connected }: { connected: boolean }) {
 
   const fail = (fallback: string) => (err: unknown) => {
     console.warn(fallback, err)
-    setError(errorMessage(err, fallback))
+    showToast(errorMessage(err, fallback), 'error')
   }
 
   const rebuild = () => {
     setBusy(true)
-    setError('')
     invoke('reset_index')
       .then(() => {
         setConfirming(false)
@@ -61,20 +60,19 @@ export default function DbErrorDialog({ connected }: { connected: boolean }) {
           role="alertdialog"
           aria-modal="true"
           aria-label="索引数据库无法打开"
-          className="relative z-10 flex w-full max-w-sm animate-confirm-in flex-col rounded-3xl border border-white/50 bg-white/90 p-6 shadow-[0_8px_40px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/90 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] dark:ring-white/10"
+          className="relative z-10 flex max-h-full w-full max-w-sm animate-confirm-in flex-col rounded-3xl border border-white/50 bg-white/90 p-6 shadow-[0_8px_40px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/90 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] dark:ring-white/10"
         >
-          <h3 className="mb-2 text-base font-bold text-gray-800 dark:text-gray-100">索引数据库无法打开</h3>
-          {/* 原因可能以空行分段，同 ConfirmDialog */}
-          <div data-selectable-text className="mb-3 space-y-2 text-pretty text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+          <h3 className="mb-2 shrink-0 text-base font-bold text-gray-800 dark:text-gray-100">索引数据库无法打开</h3>
+          {/* 原因可能以空行分段，过长时在这里滚动，同 ConfirmDialog */}
+          <div data-selectable-text className="-mx-2 mb-3 min-h-0 space-y-2 overflow-y-auto overscroll-contain px-2 text-pretty text-sm leading-relaxed text-gray-500 dark:text-gray-400">
             {status.error.split(/\n{2,}/).map((para, idx) => <p key={idx}>{para}</p>)}
           </div>
-          <p className="mb-6 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+          <p className="mb-6 shrink-0 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
             {status.rebuildable
               ? '清除并重建只删除索引数据库，不会删除你的文件，备份文件会保留；之后需要重新选择要索引的文件夹，已下载的模型仍然保留。'
               : '你的文件和索引都没有被改动。处理好上面的问题后，重新打开 Rummage 即可。'}
           </p>
-          {error && <p data-selectable-text className="-mt-3 mb-4 text-xs text-red-500 dark:text-red-400">{error}</p>}
-          <div className="flex flex-col gap-2">
+          <div className="flex shrink-0 flex-col gap-2">
             {status.rebuildable && (
               <button type="button" disabled={busy} onClick={() => setConfirming(true)} className={`${buttonBase} bg-red-500 font-medium text-white hover:bg-red-600`}>
                 清除并重建

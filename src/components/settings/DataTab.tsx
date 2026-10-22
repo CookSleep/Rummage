@@ -10,10 +10,11 @@ import CoreStatusNotice from '../CoreStatusNotice'
 import { FolderIcon, TrashIcon } from '../icons'
 import LoadError from '../LoadError'
 import { HoverTip } from '../Tip'
-import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_DANGER_BUTTON } from '../onboarding/styles'
+import { CARD, CARD_ROW, ICON_TILE, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_DANGER_BUTTON } from '../onboarding/styles'
 import PathText from '../PathText'
+import { showToast } from '../Toast'
 import ConfigSection from './ConfigSection'
-import { ROW_DESC, SECTION_NOTICE, SECTION_TITLE } from './styles'
+import { SECTION_NOTICE, SECTION_TITLE } from './styles'
 
 /** 占用的各部分，固定顺序；颜色在浅色与深色模式下都取柔和的中间色 */
 const PARTS: { key: keyof Omit<StorageInfo, 'dataDir'>; label: string; color: string }[] = [
@@ -36,10 +37,7 @@ export default function DataTab({ defs, offline, coreStatus }: { defs: ParamDef[
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [loadError, setLoadError] = useState('')
   const [confirmClear, setConfirmClear] = useState(false)
-  const [dirError, setDirError] = useState('')
   const [clearing, setClearing] = useState(false)
-  const [result, setResult] = useState('')
-  const [clearError, setClearError] = useState('')
 
   const load = useCallback(() => {
     invoke<StorageInfo>('storage_info')
@@ -56,26 +54,23 @@ export default function DataTab({ defs, offline, coreStatus }: { defs: ParamDef[
   useEffect(load, [load])
 
   const open = () => {
-    setDirError('')
     invoke('open_data_dir').catch((err) => {
       console.warn('打开数据目录失败：', err)
-      setDirError(errorMessage(err, '无法打开数据目录。'))
+      showToast(errorMessage(err, '无法打开数据目录。'), 'error')
     })
   }
 
   const clearIndex = () => {
     setConfirmClear(false)
     setClearing(true)
-    setResult('')
-    setClearError('')
     invoke('clear_index')
       .then(() => {
-        setResult('已清空索引，正在按现有文件夹重新建立')
+        showToast('已清空索引，正在按现有文件夹重新建立', 'success')
         load()
       })
       .catch((err) => {
         console.warn('清空索引失败：', err)
-        setClearError(errorMessage(err, '清空索引失败，请重试。'))
+        showToast(errorMessage(err, '清空索引失败，请重试。'), 'error')
       })
       .finally(() => setClearing(false))
   }
@@ -116,13 +111,12 @@ export default function DataTab({ defs, offline, coreStatus }: { defs: ParamDef[
                 <button type="button" className={SMALL_BUTTON} disabled={!info} onClick={open}>
                   打开
                 </button>
-                <ChangeDataDirButton label="更改位置" className={SMALL_BUTTON} disabled={!info} onError={setDirError} />
+                <ChangeDataDirButton label="更改位置" className={SMALL_BUTTON} disabled={!info} />
               </span>
             )}
           </div>
         </div>
         {loadError && <LoadError message={loadError} onRetry={load} />}
-        {dirError && <p data-selectable-text className={ERROR_TEXT}>{dirError}</p>}
       </section>
 
       <section className="space-y-3">
@@ -173,8 +167,6 @@ export default function DataTab({ defs, offline, coreStatus }: { defs: ParamDef[
             </div>
           </div>
         )}
-        {result && <p data-selectable-text className={ROW_DESC}>{result}</p>}
-        {clearError && <p data-selectable-text className={ERROR_TEXT}>{clearError}</p>}
       </section>
 
       {confirmClear && (

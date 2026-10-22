@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ConfigImport, ParamDef } from '../../types'
 
-import { button, click, dialog, flush, mockCore, render, section, text, type Handler } from '../../test/tauri'
+import { button, click, dialog, flush, mockCore, render, section, text, toast, type Handler } from '../../test/tauri'
 import Toaster from '../Toast'
 import DataTab from './DataTab'
 
@@ -31,9 +31,6 @@ async function open(handlers: Record<string, Handler>) {
   await flush()
   return calls
 }
-
-/** 胶囊通知的文字 */
-const toast = () => document.querySelector('[role="status"]')?.textContent ?? ''
 
 describe('DataTab 配置', () => {
   it('显示说明与两个按钮', async () => {
@@ -63,7 +60,7 @@ describe('DataTab 配置', () => {
       },
     })
     await click(button('导出配置'))
-    expect(text(section('配置'))).toContain('配置未能保存，请确认所选位置可以写入后重试。')
+    expect(toast()).toBe('配置未能保存，请确认所选位置可以写入后重试')
   })
 
   it('没有丢弃时提示“配置已导入”', async () => {
@@ -110,6 +107,6 @@ describe('DataTab 配置', () => {
       },
     })
     await click(button('导入配置'))
-    expect(text(section('配置'))).toContain('这个配置文件来自更新版本的 Rummage，请先更新 Rummage 再导入。')
+    expect(toast()).toBe('这个配置文件来自更新版本的 Rummage，请先更新 Rummage 再导入')
   })
 })

@@ -7,7 +7,7 @@ import ConfirmDialog from '../ConfirmDialog'
 import { isAndroid } from '../../lib/platform'
 import { ImportRow, type ModelInfo, ModelRow, modelInfos, modelLabel, PausedProgress, PauseResumeButton, rowFile, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from '../onboarding/ModelDownload'
 import { showToast } from '../Toast'
-import { BUTTON, CARD, ERROR_TEXT, SMALL_BUTTON, SMALL_DANGER_BUTTON, SMALL_PRIMARY_BUTTON } from '../onboarding/styles'
+import { BUTTON, CARD, SMALL_BUTTON, SMALL_DANGER_BUTTON, SMALL_PRIMARY_BUTTON } from '../onboarding/styles'
 import { ROW_DESC, SECTION_TITLE } from './styles'
 
 interface Props {
@@ -28,7 +28,6 @@ interface Props {
  */
 export default function ModelsTab({ setup, acted, onAct }: Props) {
   const [source, setSource] = useState<SourceChoice>({ type: 'official', url: '' })
-  const [error, setError] = useState('')
   // 要删除的模型
   const [confirmDelete, setConfirmDelete] = useState<ModelInfo | null>(null)
   // 在这一页看到过进行中的校验，结束时显示结果；没有看到 running 的（如请求失败）不显示
@@ -60,11 +59,10 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
   const blocked = running || setup.selftest.running
 
   const call = (cmd: string, args?: Record<string, unknown>) => {
-    setError('')
     onAct()
     return invoke(cmd, args).catch((err) => {
       console.warn(`${cmd} 失败：`, err)
-      setError(errorMessage(err, '操作失败，请重试。'))
+      showToast(errorMessage(err, '操作失败，请重试。'), 'error')
     })
   }
 
@@ -172,7 +170,6 @@ export default function ModelsTab({ setup, acted, onAct }: Props) {
           </p>
         )}
         {setup.selftest.running && <p className={ROW_DESC}>设备检测正在进行，完成后才能下载、导入或删除模型</p>}
-        {error && <p data-selectable-text className={ERROR_TEXT}>{error}</p>}
       </section>
 
       <section className="space-y-3">

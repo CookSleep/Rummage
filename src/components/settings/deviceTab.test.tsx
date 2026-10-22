@@ -3,7 +3,8 @@
 import { describe, expect, it } from 'vitest'
 import type { BlockedGpu } from '../../types'
 
-import { button, click, device, dialog, findButton, mockCore, render, section, selftest, setupStatus, text } from '../../test/tauri'
+import { button, click, device, dialog, findButton, mockCore, render, section, selftest, setupStatus, text, toast } from '../../test/tauri'
+import Toaster from '../Toast'
 import DeviceTab from './DeviceTab'
 
 const BLOCKED: BlockedGpu = { id: 'gpu-4080', name: 'RTX 4080 SUPER', pciId: '0000:02:00.0', reason: '显卡驱动多次超时，已屏蔽这块显卡。' }
@@ -51,24 +52,34 @@ describe('DeviceTab', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
 
-  it('解除屏蔽失败时在分区下方显示原因', async () => {
+  it('解除屏蔽失败时用胶囊通知说明原因', async () => {
     mockCore({
       unblock_gpu: () => {
         throw { code: 'db', message: '无法解除屏蔽：索引数据库不可用。' }
       },
     })
-    render(<DeviceTab setup={withGpu()} values={null} />)
+    render(
+      <>
+        <Toaster />
+        <DeviceTab setup={withGpu()} values={null} />
+      </>,
+    )
     await click(button('解除屏蔽', section('检测结果')))
     await click(button('解除屏蔽', dialog()))
-    expect(text(section('检测结果'))).toContain('无法解除屏蔽：索引数据库不可用。')
+    expect(toast()).toBe('无法解除屏蔽：索引数据库不可用')
   })
 
-  it('解除后没能当场重新检测时，在检测结果下方说明', async () => {
+  it('解除后没能当场重新检测时，弹窗说明', async () => {
     mockCore({ unblock_gpu: () => '已解除屏蔽。正在建立索引，完成当前文件后开始检测。' })
-    render(<DeviceTab setup={withGpu()} values={null} />)
+    render(
+      <>
+        <Toaster />
+        <DeviceTab setup={withGpu()} values={null} />
+      </>,
+    )
     await click(button('解除屏蔽', section('检测结果')))
     await click(button('解除屏蔽', dialog()))
-    expect(text(section('检测结果'))).toContain('已解除屏蔽。正在建立索引，完成当前文件后开始检测。')
+    expect(text(dialog())).toContain('已解除屏蔽。正在建立索引，完成当前文件后开始检测。')
   })
 
   it('未通过的显卡可以单独重新检测，删除它的未通过记录', async () => {

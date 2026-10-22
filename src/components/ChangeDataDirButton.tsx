@@ -5,6 +5,7 @@ import { errorMessage } from '../lib/errors'
 import { formatSize } from '../lib/format'
 import ConfirmDialog from './ConfirmDialog'
 import PathBox from './PathBox'
+import { showToast } from './Toast'
 
 type Dialog = { type: 'blocked'; message: string; rows?: [string, string][] } | { type: 'change'; change: DataDirChange }
 
@@ -12,20 +13,17 @@ interface Props {
   label: string
   className: string
   disabled?: boolean
-  /** 出错时的说明；开始选择时以空串清除 */
-  onError: (message: string) => void
 }
 
 /**
  * 更改数据目录的按钮与确认流程，设置“数据”页与引导的预估页共用：
- * 目录由 Rust 侧的对话框选择，不能使用时说明原因；确认后重启，下次启动时迁移并显示进度
+ * 目录由 Rust 侧的对话框选择，不能使用时弹窗说明原因；确认后重启，下次启动时迁移并显示进度，重启失败用胶囊通知
  */
-export default function ChangeDataDirButton({ label, className, disabled, onError }: Props) {
+export default function ChangeDataDirButton({ label, className, disabled }: Props) {
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [restarting, setRestarting] = useState(false)
 
   const pick = () => {
-    onError('')
     invoke<DataDirChange | null>('data_dir_pick')
       .then((change) => {
         if (!change) return
@@ -47,7 +45,7 @@ export default function ChangeDataDirButton({ label, className, disabled, onErro
       console.warn('更改数据目录失败：', err)
       setRestarting(false)
       setDialog(null)
-      onError(errorMessage(err, '更改数据目录失败，请重试。'))
+      showToast(errorMessage(err, '更改数据目录失败，请重试。'), 'error')
     })
   }
 

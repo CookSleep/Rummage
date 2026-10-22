@@ -3,7 +3,8 @@ import { invoke } from '@tauri-apps/api/core'
 import type { CoreStatus } from '../types'
 import { errorMessage } from '../lib/errors'
 import { SpinnerIcon } from './icons'
-import { BUTTON, ERROR_TEXT } from './onboarding/styles'
+import { BUTTON } from './onboarding/styles'
+import { showToast } from './Toast'
 
 interface Props {
   status: CoreStatus
@@ -13,21 +14,19 @@ interface Props {
 
 /**
  * 后台服务不可用时的统一提示，居中的灰字：
- * 无法启动时说明并提供“重试”（`restart_core`，失败原因显示在按钮下方）；
+ * 无法启动时说明并提供“重试”（`restart_core`，失败原因用胶囊通知）；
  * 其余都是正在启动或重新启动（断开后守护会自动拉起，状态为 `restarting`），只显示加载指示。
  * `running` 只出现在启动时“已连上、还没取到引导状态”（App），按正在启动显示
  */
 export default function CoreStatusNotice({ status, className = '' }: Props) {
-  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   const retry = () => {
-    setError('')
     setBusy(true)
     invoke('restart_core')
       .catch((err) => {
         console.warn('无法重新启动后台服务：', err)
-        setError(errorMessage(err, '无法启动后台服务，请重新启动 Rummage。'))
+        showToast(errorMessage(err, '无法启动后台服务，请重新启动 Rummage。'), 'error')
       })
       .finally(() => setBusy(false))
   }
@@ -42,7 +41,6 @@ export default function CoreStatusNotice({ status, className = '' }: Props) {
         <button type="button" className={BUTTON} disabled={busy} onClick={retry}>
           重试
         </button>
-        {error && <p data-selectable-text className={ERROR_TEXT}>{error}</p>}
       </div>
     )
   }

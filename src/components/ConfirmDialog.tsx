@@ -16,7 +16,7 @@ export function renderMessage(message: string, strong = 'font-semibold text-gray
 
 interface Props {
   title: string
-  /** 空行分段，「」与 `**…**` 中的内容加粗 */
+  /** 空行分段，「」与 `**…**` 中的内容加粗；后台服务的消息中用英文引号括起的路径换成「」 */
   message: string
   /** 消息下方的补充内容，如路径框 */
   children?: ReactNode
@@ -51,14 +51,14 @@ export default function ConfirmDialog({ title, message, children, confirmText, d
         className={`relative z-10 flex max-h-full w-full ${children ? 'max-w-md' : 'max-w-sm'} animate-confirm-in flex-col rounded-3xl border border-white/50 bg-white/90 p-6 shadow-[0_8px_40px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/90 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] dark:ring-white/10`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-2 text-base font-bold text-gray-800 dark:text-gray-100">{title}</h3>
-        {/* 空行分段；text-pretty 避免末行只剩一两个字 */}
-        <div data-selectable-text className={`${children ? 'mb-3' : 'mb-6'} space-y-2 whitespace-pre-line text-pretty text-sm leading-relaxed text-gray-500 dark:text-gray-400`}>
-          {message.split(/\n{2,}/).map((para, idx) => <p key={idx}>{renderMessage(para)}</p>)}
+        <h3 className="mb-2 shrink-0 text-base font-bold text-gray-800 dark:text-gray-100">{title}</h3>
+        {/* 空行分段；text-pretty 避免末行只剩一两个字。消息过长时在这里滚动，标题和按钮始终可见 */}
+        <div data-selectable-text className={`${children ? 'mb-3' : 'mb-6'} -mx-2 min-h-0 overflow-y-auto overscroll-contain px-2 space-y-2 whitespace-pre-line text-pretty text-sm leading-relaxed text-gray-500 dark:text-gray-400`}>
+          {message.replace(/"([^"]+)"/g, '「$1」').split(/\n{2,}/).map((para, idx) => <p key={idx}>{renderMessage(para)}</p>)}
         </div>
         {/* 内容过长时只滚动这一区域，标题和按钮始终可见 */}
         {children && <div className="-mx-2 mb-6 max-h-[min(60vh,32rem)] min-h-0 overflow-y-auto overscroll-contain px-2">{children}</div>}
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-2">
           {!hideCancel && (
             <button
               type="button"

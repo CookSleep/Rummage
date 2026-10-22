@@ -4,7 +4,7 @@ import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Estimate, RootInfo } from '../../types'
 
-import { button, click, emitEvent, flush, mockCore, render, selftest, setupStatus, text } from '../../test/tauri'
+import { button, click, dialog, emitEvent, flush, mockCore, render, selftest, setupStatus, text, toast } from '../../test/tauri'
 import Toaster from '../Toast'
 import EstimateStep from './EstimateStep'
 import FoldersStep from './FoldersStep'
@@ -102,6 +102,23 @@ describe('FoldersStep', () => {
     await flush()
     expect(text()).not.toContain('建议只添加需要的文件夹')
   })
+
+  it('不能添加时弹窗说明原因，路径改用「」', async () => {
+    mockCore({
+      list_roots: () => [ROOT],
+      add_root: () => {
+        throw { code: 'bad_request', message: '该文件夹包含已添加的 "D:\\示例"，请先移除它。' }
+      },
+    })
+    render(<FoldersStep />)
+    await flush()
+    await click(button(ADD))
+    expect(text(dialog())).toContain('无法添加文件夹')
+    expect(text(dialog())).toContain('该文件夹包含已添加的 「D:\\示例」，请先移除它。')
+
+    await click(button('知道了'))
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+  })
 })
 
 describe('EstimateStep', () => {
@@ -137,7 +154,12 @@ describe('Onboarding', () => {
       list_roots: () => [ROOT],
       set_param: setParam,
     })
-    render(<Onboarding status={setupStatus({ onboarded: false, step: 1 })} coreStatus="running" onStatus={vi.fn()} onDone={vi.fn()} />)
+    render(
+      <>
+        <Toaster />
+        <Onboarding status={setupStatus({ onboarded: false, step: 1 })} coreStatus="running" onStatus={vi.fn()} onDone={vi.fn()} />
+      </>,
+    )
     await flush()
     return calls
   }
@@ -148,22 +170,21 @@ describe('Onboarding', () => {
     return el
   }
 
-  it('选择视频识别方式时保存 video_preset，返回的提示显示在下方', async () => {
-    const note = '设置已保存，但未能安排重建索引，请稍后再试。'
-    const calls = await atKinds(() => note)
+  it('选择视频识别方式时保存 video_preset，返回的提示用胶囊通知显示', async () => {
+    const calls = await atKinds(() => '设置已保存，但未能安排重建索引，请稍后再试。')
     expect(preset('找物体').getAttribute('aria-checked')).toBe('true')
 
     await click(preset('找动作'))
     expect(calls.filter((c) => c.cmd === 'set_param').map((c) => c.args)).toEqual([{ key: 'video_preset', value: 2 }])
     expect(preset('找动作').getAttribute('aria-checked')).toBe('true')
-    expect(text()).toContain(note)
+    expect(toast()).toBe('设置已保存，但未能安排重建索引，请稍后再试')
   })
 
   it('保存识别方式成功且没有提示时不显示文字', async () => {
     await atKinds(() => null)
     await click(preset('找说话内容'))
     expect(preset('找说话内容').getAttribute('aria-checked')).toBe('true')
-    expect(text()).not.toContain('未能')
+    expect(toast()).toBe('')
   })
 
   it('保存识别方式失败时回到原来的方式并显示原因', async () => {
@@ -173,7 +194,7 @@ describe('Onboarding', () => {
     await click(preset('找动作'))
     expect(preset('找物体').getAttribute('aria-checked')).toBe('true')
     expect(preset('找动作').getAttribute('aria-checked')).toBe('false')
-    expect(text()).toContain('设置未能保存：索引数据库不可用。')
+    expect(toast()).toBe('设置未能保存：索引数据库不可用')
   })
 
   it('文件类型保存失败时开关回到原样并显示原因', async () => {
@@ -183,7 +204,7 @@ describe('Onboarding', () => {
     const video = () => [...document.querySelectorAll('button[aria-pressed]')].find((b) => b.textContent?.startsWith('视频'))
     await click(video() as HTMLElement)
     expect(video()?.getAttribute('aria-pressed')).toBe('true')
-    expect(text()).toContain('设置未能保存：索引数据库不可用。')
+    expect(toast()).toBe('设置未能保存：索引数据库不可用')
   })
 
   it('连续切换类型时，前一项保存失败只回滚那一项', async () => {
@@ -283,10 +304,15 @@ describe('Onboarding 导入配置', () => {
         throw { code: 'bad_request', message: '这是在 Android 上导出的配置，只能导入 Android 版 Rummage。' }
       },
     })
-    render(<Onboarding status={setupStatus({ onboarded: false, step: 0 })} coreStatus="running" onStatus={vi.fn()} onDone={vi.fn()} />)
+    render(
+      <>
+        <Toaster />
+        <Onboarding status={setupStatus({ onboarded: false, step: 0 })} coreStatus="running" onStatus={vi.fn()} onDone={vi.fn()} />
+      </>,
+    )
     await flush()
     await click(button('导入配置'))
-    expect(text()).toContain('这是在 Android 上导出的配置，只能导入 Android 版 Rummage。')
+    expect(text(dialog())).toContain('这是在 Android 上导出的配置，只能导入 Android 版 Rummage。')
     expect(calls.some((c) => c.cmd === 'apply_config')).toBe(false)
   })
 })

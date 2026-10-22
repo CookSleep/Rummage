@@ -4,8 +4,8 @@ import { errorMessage } from '../../lib/errors'
 import { CLOSE_ACTION_KEY, isAndroid } from '../../lib/platform'
 import { readLocal, writeLocal } from '../../lib/storage'
 import CoreStatusNotice from '../CoreStatusNotice'
-import { ERROR_TEXT } from '../onboarding/styles'
 import Select from '../Select'
+import { showToast } from '../Toast'
 import FontSettingField from './FontSettingField'
 import { ROW_DESC, ROW_LABEL, SECTION_NOTICE, SECTION_TITLE } from './styles'
 
@@ -23,14 +23,12 @@ interface Props {
  * 关闭窗口的行为只关乎界面进程，存在本地（`CLOSE_ACTION_KEY`），由关闭处理读取（`installCloseWatch`）；Android 上没有这一项
  */
 export default function AppearanceTab({ appearance, onChange, offline, coreStatus }: Props) {
-  const [error, setError] = useState('')
   const [closeAction, setCloseAction] = useState(() => (readLocal(CLOSE_ACTION_KEY) === 'quit' ? 'quit' : 'tray'))
 
   const change = (next: Appearance) => {
-    setError('')
     onChange(next).catch((err) => {
       console.warn('无法保存外观设置：', err)
-      setError(errorMessage(err, '外观设置未能保存，下次启动可能恢复原样。'))
+      showToast(errorMessage(err, '外观设置未能保存，下次启动可能恢复原样。'), 'error')
     })
   }
 
@@ -56,7 +54,6 @@ export default function AppearanceTab({ appearance, onChange, offline, coreStatu
               name={appearance.monoFontName}
               onChange={(mode, name) => change({ ...appearance, monoFont: mode, monoFontName: name })}
             />
-            {error && <p data-selectable-text className={ERROR_TEXT}>{error}</p>}
           </>
         )}
       </section>

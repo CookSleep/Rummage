@@ -2,9 +2,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { button, click, findButton, mockCore, render, text } from '../test/tauri'
+import { button, click, findButton, mockCore, render, text, toast } from '../test/tauri'
 import CoreStatusNotice from './CoreStatusNotice'
 import LoadError from './LoadError'
+import Toaster from './Toast'
 
 describe('CoreStatusNotice', () => {
   it('启动中显示加载指示与“正在启动后台服务”，没有“重试”', () => {
@@ -36,26 +37,21 @@ describe('CoreStatusNotice', () => {
     expect(text()).not.toContain('无法启动后台服务')
   })
 
-  it('重试失败时在按钮下方显示原因，再次重试时先清掉', async () => {
-    let fail = true
+  it('重试失败时用胶囊通知说明原因', async () => {
     mockCore({
       restart_core: () => {
-        if (fail) throw { code: 'spawn', message: '找不到后台服务程序，请重新安装 Rummage。' }
-        return null
+        throw { code: 'spawn', message: '找不到后台服务程序，请重新安装 Rummage。' }
       },
     })
-    render(<CoreStatusNotice status="failed" />)
+    render(
+      <>
+        <Toaster />
+        <CoreStatusNotice status="failed" />
+      </>,
+    )
 
     await click(button('重试'))
-    const msg = '找不到后台服务程序，请重新安装 Rummage。'
-    expect(text()).toContain(msg)
-    // 原因在按钮之后
-    const btn = button('重试')
-    expect(btn.nextElementSibling?.textContent).toBe(msg)
-
-    fail = false
-    await click(btn)
-    expect(text()).not.toContain(msg)
+    expect(toast()).toBe('找不到后台服务程序，请重新安装 Rummage')
   })
 })
 

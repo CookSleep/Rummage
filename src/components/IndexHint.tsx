@@ -8,6 +8,7 @@ import { renderMessage } from './ConfirmDialog'
 import { PauseIcon, WarningIcon } from './icons'
 import { NOTICE_BOX } from './settings/styles'
 import { HoverTip } from './Tip'
+import { showToast } from './Toast'
 
 const PAUSE_TEXT: Record<PauseReason['type'], string> = {
   manual: '已手动暂停',
@@ -119,7 +120,6 @@ interface Props {
 export default function IndexHint({ status, base, onFailed, onAdjust, up = false, device = null }: Props) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
 
   useClickOutside(menuRef, open, () => setOpen(false))
@@ -139,11 +139,10 @@ export default function IndexHint({ status, base, onFailed, onAdjust, up = false
   const run = (cmd: string, args?: Record<string, unknown>) => {
     setOpen(false)
     setBusy(true)
-    setError('')
     invoke(cmd, args)
       .catch((err) => {
         console.warn('暂停或恢复索引失败：', err)
-        setError(errorMessage(err, '操作失败，请稍后再试。'))
+        showToast(errorMessage(err, '操作失败，请稍后再试。'), 'error')
       })
       .finally(() => setBusy(false))
   }
@@ -192,7 +191,6 @@ export default function IndexHint({ status, base, onFailed, onAdjust, up = false
         )}
         {!running && manual && resume}
       </div>
-      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
       {running && (
         <div className="mt-1.5 flex items-center gap-2">
           <div className="h-1 flex-1 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]">

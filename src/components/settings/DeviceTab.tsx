@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { ParamValues, SelftestStatus, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
@@ -7,6 +6,7 @@ import { CPU_FALLBACK_TEXT, cpuFallbackReason, cpuFaster, cpuName, deviceName, s
 import { ResetIcon, WarningIcon } from '../icons'
 import { renderMessage } from '../ConfirmDialog'
 import { HoverTip } from '../Tip'
+import { showToast } from '../Toast'
 import { anyModelReady } from '../onboarding/ModelDownload'
 import { DeviceIcon, DeviceList, DevicePicker } from '../onboarding/SelftestStep'
 import { CARD, CARD_ROW, ERROR_TEXT } from '../onboarding/styles'
@@ -49,7 +49,6 @@ function effective(st: SelftestStatus): { id?: string; gpu: boolean; name: strin
  * Android 上的设备为 CPU、GPU 与 NPU（LiteRT），规则相同
  */
 export default function DeviceTab({ setup, values }: { setup: SetupStatus; values: ParamValues | null }) {
-  const [error, setError] = useState('')
   const st = setup.selftest
   const cur = effective(st)
   // 黄色提示只说检测未通过、显卡已屏蔽与设备出了问题；正在检测、尚未检测看下方当前设备，结果过期多是自动检测出错或被中止，不提示
@@ -60,10 +59,9 @@ export default function DeviceTab({ setup, values }: { setup: SetupStatus; value
   const modelReady = isAndroid ? anyModelReady(setup) : setup.model.ready
 
   const call = (cmd: string, args?: Record<string, unknown>) => {
-    setError('')
     invoke(cmd, args).catch((err) => {
       console.warn(`${cmd} 失败：`, err)
-      setError(errorMessage(err, '操作失败，请重试。'))
+      showToast(errorMessage(err, '操作失败，请重试。'), 'error')
     })
   }
 
@@ -119,7 +117,6 @@ export default function DeviceTab({ setup, values }: { setup: SetupStatus; value
         {st.error && <p data-selectable-text className={ERROR_TEXT}>{renderMessage(st.error, 'font-semibold')}</p>}
         {!modelReady && <p className={ROW_DESC}>请先下载或导入模型，再检测设备</p>}
         {modelReady && modelBusy && <p className={ROW_DESC}>正在下载、导入或删除模型，完成后才能检测设备</p>}
-        {error && <p data-selectable-text className={ERROR_TEXT}>{error}</p>}
       </section>
 
     </div>

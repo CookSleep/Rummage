@@ -11,7 +11,7 @@ import PathText from '../PathText'
 import { CloseIcon, FilterIcon, FolderIcon, PlusIcon, WarningIcon } from '../icons'
 import { HoverTip } from '../Tip'
 import { showToast } from '../Toast'
-import { CARD, CARD_ROW, CARD_ROW_HOVER, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_ICON_BUTTON, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_PRIMARY_BUTTON } from './styles'
+import { CARD, CARD_ROW, CARD_ROW_HOVER, ICON_TILE, ROW_ACTIONS, ROW_ICON_BUTTON, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON, SMALL_PRIMARY_BUTTON } from './styles'
 
 /** Android 上可一键添加的手机存储中的文件夹，与 src-tauri/src/setup.rs 的 `COMMON_ROOTS` 一致 */
 const COMMON_ROOTS = ['DCIM', 'Pictures', 'Download', 'Documents']
@@ -35,13 +35,14 @@ interface Props {
  * 添加后核心立即统计文件，统计完之前（`scanning`）显示“正在统计文件”，扫描结束（`ScanProgress` 的 `done`）时刷新；命令行或 MCP 增删、修改文件夹（`RootsChanged`）时刷新列表。
  * 设置页的“文件夹”也用它。
  * Android 上读取文件需要“所有文件访问”权限：未授权时在列表上方提示前往授权，并禁用添加；已授权时可一键添加常用文件夹。
- * 本项目不面向全盘索引：添加处一直提示只添加需要的文件夹；添加的是整个磁盘或存储时弹窗建议移除
+ * 本项目不面向全盘索引：添加处一直提示只添加需要的文件夹；添加的是整个磁盘或存储时弹窗建议移除。
+ * 不能添加时弹窗说明原因，移除失败用胶囊通知
  */
 export default function FoldersStep({ onCount, section, editor }: Props) {
   const storage = useStorageAccess()
   const [roots, setRoots] = useState<RootInfo[] | null>(null)
-  // 添加、移除失败的原因
-  const [error, setError] = useState('')
+  // 不能添加的原因
+  const [addError, setAddError] = useState('')
   const [loadError, setLoadError] = useState('')
   const [busy, setBusy] = useState(false)
   // 等待确认移除的文件夹
@@ -92,7 +93,6 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
 
   const add = () => {
     setBusy(true)
-    setError('')
     invoke<AddedRoot | null>('add_root')
       .then((added) => {
         if (!added) return
@@ -101,19 +101,18 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
       })
       .catch((err) => {
         console.warn('无法添加文件夹：', err)
-        setError(errorMessage(err, '无法添加这个文件夹。'))
+        setAddError(errorMessage(err, '无法添加这个文件夹。'))
       })
       .finally(() => setBusy(false))
   }
 
   const addCommon = (name: string) => {
     setBusy(true)
-    setError('')
     invoke('add_common_root', { name })
       .then(load)
       .catch((err) => {
         console.warn('无法添加文件夹：', err)
-        setError(errorMessage(err, '无法添加这个文件夹。'))
+        setAddError(errorMessage(err, '无法添加这个文件夹。'))
       })
       .finally(() => setBusy(false))
   }
@@ -121,12 +120,11 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
   const addedCommon = new Set(roots?.map((r) => STORAGE_CHILD.exec(r.path)?.[1]))
 
   const remove = (id: number) => {
-    setError('')
     invoke('remove_root', { id })
       .then(load)
       .catch((err) => {
         console.warn('无法移除文件夹：', err)
-        setError(errorMessage(err, '无法移除这个文件夹。'))
+        showToast(errorMessage(err, '无法移除这个文件夹。'), 'error')
       })
   }
 
@@ -222,7 +220,16 @@ export default function FoldersStep({ onCount, section, editor }: Props) {
         )}
       </div>
       {loadError && <LoadError message={loadError} onRetry={load} className="mt-2" />}
-      {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
+      {addError && (
+        <ConfirmDialog
+          title="无法添加文件夹"
+          message={addError}
+          confirmText="知道了"
+          hideCancel
+          onConfirm={() => setAddError('')}
+          onCancel={() => setAddError('')}
+        />
+      )}
       {removing && (
         <ConfirmDialog
           title="移除文件夹"

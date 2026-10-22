@@ -15,7 +15,7 @@ import LoadError from '../LoadError'
 import { NOTICE_BOX } from '../settings/styles'
 import { HoverTip } from '../Tip'
 import PathText from '../PathText'
-import { ERROR_TEXT, ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
+import { ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
 
 interface Props {
   kinds: Kinds
@@ -34,7 +34,6 @@ interface Props {
 export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Props) {
   const [est, setEst] = useState<Estimate | null>(null)
   const [error, setError] = useState('')
-  const [dirError, setDirError] = useState('')
   const values = useParamValues(true)
 
   const load = useCallback(() => {
@@ -111,8 +110,7 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
               剩余 {formatSize(est.freeGb * 2 ** 30)}，索引最多约占用 {formatSize(r.disk.high)}。剩余空间低于 {minFreeGb} GB 时，建立索引会自动暂停。
             </p>
             {/* Android 上数据目录是应用私有目录，不能更改 */}
-            {!isAndroid && <ChangeDataDirButton label="更改数据目录" className={`mt-1 ${SMALL_BUTTON}`} onError={setDirError} />}
-            {dirError && <p data-selectable-text className={ERROR_TEXT}>{dirError}</p>}
+            {!isAndroid && <ChangeDataDirButton label="更改数据目录" className={`mt-1 ${SMALL_BUTTON}`} />}
           </div>
         </div>
       )}

@@ -7,7 +7,7 @@ import { useConfigImport } from '../../hooks/useConfigImport'
 import ConfirmDialog from '../ConfirmDialog'
 import CoreStatusNotice from '../CoreStatusNotice'
 import { SlidersIcon } from '../icons'
-import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, SMALL_BUTTON } from '../onboarding/styles'
+import { CARD, CARD_ROW, ICON_TILE, ROW_ACTIONS, SMALL_BUTTON } from '../onboarding/styles'
 import { showToast } from '../Toast'
 import { SECTION_NOTICE, SECTION_TITLE } from './styles'
 
@@ -23,19 +23,17 @@ interface Props {
  */
 export default function ConfigSection({ defs, offline, coreStatus }: Props) {
   const [exporting, setExporting] = useState(false)
-  const [exportError, setExportError] = useState('')
   const imp = useConfigImport(defs)
 
   const exportConfig = () => {
     setExporting(true)
-    setExportError('')
     invoke<boolean>('export_config')
       .then((saved) => {
         if (saved) showToast('配置已导出', 'success')
       })
       .catch((err) => {
         console.warn('无法导出配置：', err)
-        setExportError(errorMessage(err, '配置未能导出，请重试。'))
+        showToast(errorMessage(err, '配置未能导出，请重试。'), 'error')
       })
       .finally(() => setExporting(false))
   }
@@ -64,8 +62,6 @@ export default function ConfigSection({ defs, offline, coreStatus }: Props) {
           </div>
         </div>
       )}
-      {exportError && <p data-selectable-text className={ERROR_TEXT}>{exportError}</p>}
-      {imp.error && <p data-selectable-text className={ERROR_TEXT}>{imp.error}</p>}
       {imp.pending && (
         <ConfirmDialog
           title="重建索引"

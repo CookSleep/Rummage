@@ -6,7 +6,7 @@ import { DownloadIcon } from '../icons'
 import { showToast } from '../Toast'
 import { isAndroid } from '../../lib/platform'
 import { ImportRow, MODELS, ModelRow, modelInfos, modelLabel, PausedProgress, PauseResumeButton, ProxyStatus, requiredModel, rowFile, type SourceChoice, SourcePicker, TaskProgress, taskMessageClass, toSource } from './ModelDownload'
-import { BUTTON, CARD, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
+import { BUTTON, CARD, PRIMARY_BUTTON } from './styles'
 
 /**
  * 第 3 步：下载模型。下载与导入在核心进程中进行，关闭窗口也会继续，进度经事件推来；
@@ -18,7 +18,6 @@ import { BUTTON, CARD, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
  */
 export default function ModelStep({ status, mmproj, onProxy }: { status: SetupStatus; mmproj: boolean; onProxy: (p: ProxySetting) => void }) {
   const [source, setSource] = useState<SourceChoice>({ type: 'official', url: '' })
-  const [error, setError] = useState('')
   // `import_models` 还没返回
   const [picking, setPicking] = useState(false)
   // 进入这一步时已发起过校验；开发模式下 effect 会执行两次
@@ -40,12 +39,11 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
   const paused = files.find((f) => !f.ready && f.partialBytes > 0)
 
   const call = (cmd: string, args?: Record<string, unknown>) => {
-    setError('')
     return invoke(cmd, args).then(
       () => true,
       (err) => {
         console.warn(`${cmd} 失败：`, err)
-        setError(errorMessage(err, '操作失败，请重试。'))
+        showToast(errorMessage(err, '操作失败，请重试。'), 'error')
         return false
       },
     )
@@ -142,7 +140,6 @@ export default function ModelStep({ status, mmproj, onProxy }: { status: SetupSt
           )}
         </div>
       )}
-      {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
     </div>
   )
 }

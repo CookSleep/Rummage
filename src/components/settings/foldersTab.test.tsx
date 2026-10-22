@@ -2,7 +2,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { type Handler, button, click, flush, mockCore, render, setupStatus, text } from '../../test/tauri'
+import { type Handler, button, click, flush, mockCore, render, setupStatus, text, toast } from '../../test/tauri'
+import Toaster from '../Toast'
 import SettingsModal from './SettingsModal'
 
 const VALUES = { index_documents: true, index_images: true, index_audio: true, index_video: true }
@@ -12,7 +13,10 @@ const APPEARANCE = { uiFont: 'builtin', uiFontName: '', monoFont: 'builtin', mon
 async function open(setParam: Handler, setup = setupStatus()) {
   const calls = mockCore({ param_defs: () => [], get_params: () => VALUES, get_notices: () => [], list_roots: () => [], set_param: setParam })
   render(
-    <SettingsModal onClose={vi.fn()} coreStatus="running" setup={setup} setupError="" onSetup={vi.fn()} onSetupRetry={vi.fn()} appearance={APPEARANCE} onAppearance={vi.fn()} />,
+    <>
+      <Toaster />
+      <SettingsModal onClose={vi.fn()} coreStatus="running" setup={setup} setupError="" onSetup={vi.fn()} onSetupRetry={vi.fn()} appearance={APPEARANCE} onAppearance={vi.fn()} />
+    </>,
   )
   await flush()
   return calls
@@ -33,40 +37,25 @@ describe('FoldersTab 文件类型开关', () => {
     await click(kind('图片'))
     expect(calls.filter((c) => c.cmd === 'set_param').map((c) => c.args)).toEqual([{ key: 'index_images', value: false }])
     expect(kind('图片').getAttribute('aria-pressed')).toBe('false')
-    expect(text()).not.toContain('未能保存')
+    expect(toast()).toBe('')
   })
 
-  it('保存失败时显示原因，开关保持原样', async () => {
+  it('保存失败时用胶囊通知说明原因，开关保持原样', async () => {
     await open(() => {
       throw { code: 'db', message: '设置未能保存：索引数据库不可用。' }
     })
     await click(kind('音频'))
-    expect(text()).toContain('设置未能保存：索引数据库不可用。')
+    expect(toast()).toBe('设置未能保存：索引数据库不可用')
     expect(kind('音频').getAttribute('aria-pressed')).toBe('true')
   })
 
-  it('已保存但未能安排重建索引时，开关改变并显示返回的提示', async () => {
-    const note = '设置已保存，但未能安排重建索引，请稍后再试。'
-    await open(() => note)
+  it('已保存但未能安排重建索引时，开关改变并用胶囊通知显示返回的提示', async () => {
+    await open(() => '设置已保存，但未能安排重建索引，请稍后再试。')
     await click(kind('视频'))
     expect(kind('视频').getAttribute('aria-pressed')).toBe('false')
-    expect(text()).toContain(note)
+    expect(toast()).toBe('设置已保存，但未能安排重建索引，请稍后再试')
   })
 
-  it('之后保存成功时清掉上一次的失败原因', async () => {
-    let fail = true
-    await open(() => {
-      if (fail) throw { code: 'db', message: '设置未能保存：索引数据库不可用。' }
-      return null
-    })
-    await click(kind('文档'))
-    expect(text()).toContain('设置未能保存：索引数据库不可用。')
-
-    fail = false
-    await click(kind('文档'))
-    expect(text()).not.toContain('设置未能保存')
-    expect(kind('文档').getAttribute('aria-pressed')).toBe('false')
-  })
 
   it('开着图片等类型但缺少图片与音视频模型时提示，“前往下载”转到模型页', async () => {
     const setup = setupStatus()

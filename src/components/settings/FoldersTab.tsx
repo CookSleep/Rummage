@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { ParamValue, ParamValues, RootInfo, SetupStatus } from '../../types'
 import { errorMessage } from '../../lib/errors'
-import { useSaveParam } from '../../hooks/useSaveParam'
 import { KIND_PARAMS, type Kinds, kindsOf, needsMmproj } from '../../lib/kinds'
+import { saveParam } from '../../lib/params'
 import { isAndroid } from '../../lib/platform'
 import { InfoIcon, WarningIcon } from '../icons'
 import Checkbox from '../Checkbox'
@@ -96,15 +96,10 @@ interface Props {
  * 开着图片、音频或视频但缺少图片与音视频模型时，在开关下方提示，并提供转到“模型”页下载的入口
  */
 export default function FoldersTab({ values, setParam, setup, onModels }: Props) {
-  // 只显示最近改动的那一项的提示或保存失败的原因（含“设置已保存，但未能安排重建索引”这类提示）
-  const { errors, save } = useSaveParam(setParam)
-  const [last, setLast] = useState('')
-  const error = errors[last] ?? ''
   const kinds = kindsOf(values)
 
   const setKind = (key: keyof Kinds, on: boolean) => {
-    setLast(KIND_PARAMS[key])
-    void save(KIND_PARAMS[key], on)
+    void saveParam(setParam, KIND_PARAMS[key], on)
   }
 
   return (
@@ -118,7 +113,6 @@ export default function FoldersTab({ values, setParam, setup, onModels }: Props)
       />
       <div>
         <KindsStep section kinds={kinds} mmprojBytes={setup?.mmproj.bytes ?? 0} mmprojReady={setup?.mmproj.ready ?? false} onChange={setKind} />
-        {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
         {/* Android 上一个模型包含全部模态，没有单独的图片与音视频模型 */}
         {!isAndroid && needsMmproj(kinds) && setup && !setup.mmproj.ready && (
           <div className={`mt-4 ${NOTICE_BOX}`}>

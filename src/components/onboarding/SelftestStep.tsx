@@ -9,10 +9,11 @@ import { AudioIcon, BanIcon, CheckCircleIcon, ClockIcon, CpuIcon, DocumentIcon, 
 import ConfirmDialog, { renderMessage } from '../ConfirmDialog'
 import Select from '../Select'
 import Tip, { HoverTip } from '../Tip'
+import { showToast } from '../Toast'
 import { ROW_DESC, ROW_LABEL } from '../settings/styles'
 import { NPU_DEVICE } from './ModelDownload'
 import SpeedParamsDialog from './SpeedParamsDialog'
-import { CARD, CARD_ROW, ERROR_TEXT, ICON_TILE, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
+import { CARD, CARD_ROW, ICON_TILE, ROW_ACTIONS, ROW_ICON_TILE, ROW_LONG_TEXT, SMALL_BUTTON } from './styles'
 
 function ms(v: number) {
   return v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`
@@ -58,9 +59,6 @@ export function DeviceIcon({ id, gpu, className = 'h-4 w-4' }: { id?: string; gp
  * - 已屏蔽：出现过严重错误；“解除屏蔽”确认后删除它的全部屏蔽记录，后台服务随即只重测它。
  */
 export function DeviceList({ st, values }: { st: SelftestStatus; values: ParamValues | null }) {
-  // 没能当场重测的原因或出错，显示在列表下方
-  const [note, setNote] = useState('')
-  const [error, setError] = useState('')
   // 请求还没返回，之后由 `st.running` 隐藏按钮
   const [busy, setBusy] = useState(false)
   // 等待确认解除屏蔽的设备
@@ -79,14 +77,13 @@ export function DeviceList({ st, values }: { st: SelftestStatus; values: ParamVa
   const stale = (d: DeviceResult) => speedStale(d, values)
   const clear = (d: DeviceResult) => {
     const failed = d.status === 'failed'
-    setNote('')
-    setError('')
     setBusy(true)
     invoke<string | null>('unblock_gpu', { device: d.id, failed })
-      .then((n) => setNote(n ?? ''))
+      // 没能当场重测时说明原因
+      .then((n) => n && showToast(n))
       .catch((err) => {
         console.warn('unblock_gpu 失败：', err)
-        setError(errorMessage(err, failed ? '无法重新检测，请重试。' : '无法解除屏蔽，请重试。'))
+        showToast(errorMessage(err, failed ? '无法重新检测，请重试。' : '无法解除屏蔽，请重试。'), 'error')
       })
       .finally(() => {
         setBusy(false)
@@ -129,8 +126,6 @@ export function DeviceList({ st, values }: { st: SelftestStatus; values: ParamVa
           </div>
         ))}
       </div>
-      {note && !st.running && <p data-selectable-text className={`mt-2 ${ROW_DESC}`}>{note}</p>}
-      {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
       {unblocking && (
         <ConfirmDialog
           title="解除屏蔽"
@@ -152,8 +147,6 @@ export function DeviceList({ st, values }: { st: SelftestStatus; values: ParamVa
  * 选了的显卡不能用时核心实际按自动选择，菜单也显示“自动”。`cpu` 为假时（Android 上只有 NPU 模型，CPU 要用通用模型）不列出 CPU
  */
 export function DevicePicker({ st, cpu }: { st: SelftestStatus; cpu: boolean }) {
-  // 选择设备失败的原因，显示在下拉菜单下方
-  const [pickError, setPickError] = useState('')
   const options = [
     { label: '自动', value: 'auto' },
     ...st.devices.filter((d) => d.gpu && d.status === 'passed' && !st.blocked.some((b) => b.id === d.id)).map((d) => ({ label: deviceName(d, st.devices), value: d.id })),
@@ -174,17 +167,15 @@ export function DevicePicker({ st, cpu }: { st: SelftestStatus; cpu: boolean }) 
             onChange={(device) => {
               // 所选显卡不能用时显示为“自动”，再选“自动”也要发出，把偏好改回自动
               if (device === current && device === st.preferred) return
-              setPickError('')
               invoke('set_preferred_device', { device }).catch((err) => {
                 console.warn('set_preferred_device 失败：', err)
-                setPickError(errorMessage(err, '操作失败，请重试。'))
+                showToast(errorMessage(err, '操作失败，请重试。'), 'error')
               })
             }}
           />
         </div>
       </div>
       <div className={ROW_DESC}>“自动”按检测结果选用速度最快的设备。只能选择通过检测的{isAndroid ? ' GPU 或 NPU' : '显卡'}，它之后不能使用时改为自动选择。</div>
-      {pickError && <div data-selectable-text className={`mt-0.5 ${ERROR_TEXT}`}>{pickError}</div>}
     </div>
   )
 }
@@ -198,7 +189,6 @@ export function DevicePicker({ st, cpu }: { st: SelftestStatus; cpu: boolean }) 
  * 未通过的设备可在结果中重新检测，已屏蔽的设备也在结果中，可以解除屏蔽，与设置页相同（`DeviceList`）
  */
 export default function SelftestStep({ selftest, model, cpu, text }: { selftest: SelftestStatus; model: boolean; cpu: boolean; text: string }) {
-  const [error, setError] = useState('')
   const [advanced, setAdvanced] = useState(false)
   const values = useParamValues(true)
   const st = selftest
@@ -210,11 +200,10 @@ export default function SelftestStep({ selftest, model, cpu, text }: { selftest:
   const offerCpu = cpu && !st.running && !cpuOnly && !tested
 
   const call = (cmd: 'run_selftest' | 'set_preferred_device') => {
-    setError('')
     // 引导中先选了只用 CPU、又开始检测时，核心改回自动选择
     invoke(cmd, cmd === 'set_preferred_device' ? { device: 'cpu' } : { onboarding: true }).catch((err) => {
       console.warn(`${cmd} 失败：`, err)
-      setError(errorMessage(err, '操作失败，请重试。'))
+      showToast(errorMessage(err, '操作失败，请重试。'), 'error')
     })
   }
 
@@ -290,7 +279,6 @@ export default function SelftestStep({ selftest, model, cpu, text }: { selftest:
           )}
         </div>
       </div>
-      {error && <p data-selectable-text className={`mt-2 ${ERROR_TEXT}`}>{error}</p>}
       {advanced && values && <SpeedParamsDialog values={values} onClose={() => setAdvanced(false)} />}
       {!st.running && tested && (
         <div className="mt-4">

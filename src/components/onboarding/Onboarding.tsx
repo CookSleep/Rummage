@@ -18,7 +18,7 @@ import KindsStep from './KindsStep'
 import { anyModelReady, requiredModel, rowFile } from './ModelDownload'
 import ModelStep from './ModelStep'
 import SelftestStep from './SelftestStep'
-import { BUTTON, ERROR_TEXT, PRIMARY_BUTTON } from './styles'
+import { BUTTON, PRIMARY_BUTTON } from './styles'
 
 const STEPS = ['选择文件夹', '文件类型', '下载模型', '检测设备', '预估'] as const
 
@@ -51,7 +51,6 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
   const [kinds, setKinds] = useState<Kinds | null>(null)
   const [preset, setPreset] = useState<number>()
   const [minFreeGb, setMinFreeGb] = useState(0)
-  const [error, setError] = useState('')
   const [finishing, setFinishing] = useState(false)
 
   const [paramsError, setParamsError] = useState('')
@@ -98,14 +97,14 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
   const setKind = (key: keyof Kinds, on: boolean) => {
     if (!kinds) return
     setKinds((k) => k && { ...k, [key]: on })
-    // 已保存但需要告诉用户的提示（如未能安排重建索引）显示在错误的位置
+    // 已保存但需要告诉用户的提示，如未能安排重建索引
     invoke<string | null>('set_param', { key: KIND_PARAMS[key], value: on })
-      .then((note) => setError(note ?? ''))
+      .then((note) => note && showToast(note))
       .catch((err) => {
         console.warn('无法保存文件类型：', err)
         // 只回滚这一项：期间可能又切换了别的类型
         setKinds((k) => k && { ...k, [key]: !on })
-        setError(errorMessage(err, '设置未能保存，请重试。'))
+        showToast(errorMessage(err, '设置未能保存，请重试。'), 'error')
       })
   }
 
@@ -113,11 +112,11 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
     const prev = preset
     setPreset(value)
     invoke<string | null>('set_param', { key: 'video_preset', value })
-      .then((note) => setError(note ?? ''))
+      .then((note) => note && showToast(note))
       .catch((err) => {
         console.warn('无法保存视频识别方式：', err)
         setPreset(prev)
-        setError(errorMessage(err, '设置未能保存，请重试。'))
+        showToast(errorMessage(err, '设置未能保存，请重试。'), 'error')
       })
   }
 
@@ -191,7 +190,7 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
       .then(onDone)
       .catch((err) => {
         console.warn('无法完成引导：', err)
-        setError(errorMessage(err, '无法完成设置，请重试。'))
+        showToast(errorMessage(err, '无法完成设置，请重试。'), 'error')
       })
       .finally(() => setFinishing(false))
   }
@@ -234,8 +233,6 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
         </section>
 
         {running && paramsError && <LoadError message={paramsError} onRetry={loadParams} className="mt-3 px-1" />}
-        {error && <p data-selectable-text className={`mt-3 px-1 ${ERROR_TEXT}`}>{error}</p>}
-        {config.error && <p data-selectable-text className={`mt-3 px-1 ${ERROR_TEXT}`}>{config.error}</p>}
 
         {step !== null && (
           <footer className="mt-5 flex items-center gap-3 max-sm:sticky max-sm:bottom-0 max-sm:-mx-4 max-sm:mt-auto max-sm:bg-gray-50/85 max-sm:px-4 max-sm:pb-[calc(0.75rem+var(--safe-bottom))] max-sm:pt-5 max-sm:backdrop-blur-xl dark:max-sm:bg-gray-950/85">
@@ -259,10 +256,7 @@ export default function Onboarding({ status, coreStatus, onStatus, onDone }: Pro
                 type="button"
                 className={`shrink-0 ${PRIMARY_BUTTON}`}
                 disabled={Boolean(blocker) || !kinds || !running}
-                onClick={() => {
-                  setError('')
-                  go(step + 1)
-                }}
+                onClick={() => go(step + 1)}
               >
                 下一步
               </button>

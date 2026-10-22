@@ -55,7 +55,7 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice, foc
     focused.current = true
     focusRef.current.scrollIntoView({ block: 'center' })
   })
-  const { errors, epoch, pending, request, confirm, cancel } = useParamChanges(values, setParam, (key) => key === SELFTEST_KEY && setRecheck(true))
+  const { epoch, pending, request, confirm, cancel } = useParamChanges(values, setParam, (key) => key === SELFTEST_KEY && setRecheck(true))
   // 本页有影响索引的参数时，在顶部说明按新设置重建的情况
   const indexStatus = useIndexStatus(true)
   const rebuild = defs.some((d) => d.group === group && d.affectsIndex) ? indexStatus?.rebuild : null
@@ -101,7 +101,7 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice, foc
           <h4 className={SECTION_TITLE}>{sec.title}</h4>
           {sec.defs.map((d) => (
             <div key={`${d.key}-${epoch}`} ref={d.key === focus ? focusRef : undefined}>
-              <ParamField def={d} value={values[d.key] ?? d.default} error={errors[d.key]} onChange={(v) => request([[d, v]])} />
+              <ParamField def={d} value={values[d.key] ?? d.default} onChange={(v) => request([[d, v]])} />
               {d.key === SELFTEST_KEY && recheck && (
                 <div className={`mt-2 ${NOTICE_BOX}`}>
                   <span className="flex-1">需要重新检测设备，新的通过标准才会生效。</span>

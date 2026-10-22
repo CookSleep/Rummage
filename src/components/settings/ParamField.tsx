@@ -11,8 +11,6 @@ import { ROW_DESC, ROW_LABEL } from './styles'
 interface Props {
   def: ParamDef
   value: ParamValue
-  /** 保存失败的原因 */
-  error?: string
   onChange: (value: ParamValue) => void
 }
 
@@ -20,7 +18,7 @@ interface Props {
  * 参数表中的一项：名称、控件、说明与默认值、允许范围、恢复默认。
  * 数字在失焦或回车时提交；输入无效时在输入框上方以气泡说明原因，回车不提交，失焦则恢复为已保存的值
  */
-export default function ParamField({ def, value, error, onChange }: Props) {
+export default function ParamField({ def, value, onChange }: Props) {
   const [text, setText] = useState(String(value))
   const [invalid, setInvalid] = useState('')
   // Esc 放弃编辑时跳过随后失焦触发的提交：失焦在同一事件中发生，状态还没更新
@@ -124,7 +122,6 @@ export default function ParamField({ def, value, error, onChange }: Props) {
         </div>
       </div>
       <div data-selectable-text className={ROW_DESC}>{describeParam(def)}</div>
-      {error && <div data-selectable-text className="mt-0.5 text-xs text-red-500 dark:text-red-400">{error}</div>}
     </div>
   )
 }

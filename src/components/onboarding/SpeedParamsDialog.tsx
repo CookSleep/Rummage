@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { ParamDef, ParamValue, ParamValues } from '../../types'
 import { errorMessage } from '../../lib/errors'
+import { saveParam } from '../../lib/params'
 import { isAndroid } from '../../lib/platform'
-import { useSaveParam } from '../../hooks/useSaveParam'
 import ConfirmDialog from '../ConfirmDialog'
 import LoadError from '../LoadError'
 import ParamField from '../settings/ParamField'
@@ -43,7 +43,6 @@ export default function SpeedParamsDialog({ values, onClose }: { values: ParamVa
     setSaved((v) => ({ ...v, [key]: value }))
     return warning
   }
-  const { errors, save } = useSaveParam(setParam)
 
   const platform = isAndroid ? 'android' : 'windows'
   const list = SPEED_KEYS.flatMap((k) => defs?.find((d) => d.key === k && (!d.platform || d.platform === platform)) ?? [])
@@ -53,7 +52,7 @@ export default function SpeedParamsDialog({ values, onClose }: { values: ParamVa
       <div className="space-y-4">
         {loadError && <LoadError message={loadError} onRetry={load} />}
         {list.map((d) => (
-          <ParamField key={d.key} def={d} value={current[d.key] ?? d.default} error={errors[d.key]} onChange={(v) => current[d.key] !== v && void save(d.key, v)} />
+          <ParamField key={d.key} def={d} value={current[d.key] ?? d.default} onChange={(v) => current[d.key] !== v && void saveParam(setParam, d.key, v)} />
         ))}
       </div>
     </ConfirmDialog>

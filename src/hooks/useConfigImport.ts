@@ -8,30 +8,27 @@ import { showToast } from '../components/Toast'
 /**
  * 导入配置：Rust 侧选择并校验文件（`import_config`），再导入（`apply_config`）。
  * 传入 `defs` 时（设置页），会改变影响索引的参数就先等确认（`pending`，确认文字见 `rebuildConfirmText`），同参数页的修改；
- * 引导中还没有建立索引，传空，不确认。成功后显示胶囊通知并调用 `onDone`；参数已保存、但需要告诉用户的情况放在 `error` 中
+ * 引导中还没有建立索引，传空，不确认。结果与失败原因都用胶囊通知，成功后调用 `onDone`；参数已保存、但需要告诉用户的情况接在结果后面
  */
 export function useConfigImport(defs: ParamDef[] | null, onDone?: () => void) {
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   const [pending, setPending] = useState<[ParamDef, ParamValue][] | null>(null)
 
   const apply = () => {
     invoke<ConfigImport>('apply_config')
       .then((r) => {
-        showToast(importMessage(r), 'success')
-        if (r.warning) setError(r.warning)
+        showToast(r.warning ? `${importMessage(r)}\n${r.warning}` : importMessage(r), r.warning ? 'info' : 'success')
         onDone?.()
       })
       .catch((err) => {
         console.warn('无法导入配置：', err)
-        setError(errorMessage(err, '配置未能导入，请重试。'))
+        showToast(errorMessage(err, '配置未能导入，请重试。'), 'error')
       })
       .finally(() => setBusy(false))
   }
 
   const start = () => {
     setBusy(true)
-    setError('')
     invoke<ConfigPreview | null>('import_config')
       .then((p) => {
         if (!p) {
@@ -47,7 +44,7 @@ export function useConfigImport(defs: ParamDef[] | null, onDone?: () => void) {
       })
       .catch((err) => {
         console.warn('无法读取配置：', err)
-        setError(errorMessage(err, '无法读取配置文件，请重新选择。'))
+        showToast(errorMessage(err, '无法读取配置文件，请重新选择。'), 'error')
         setBusy(false)
       })
   }
@@ -62,5 +59,5 @@ export function useConfigImport(defs: ParamDef[] | null, onDone?: () => void) {
     setBusy(false)
   }
 
-  return { busy, error, pending, start, confirm, cancel }
+  return { busy, pending, start, confirm, cancel }
 }
