@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { TITLEBAR_HEIGHT } from '../lib/platform'
 import { onDismissTooltips } from '../lib/tooltipDismiss'
 
 interface Props {
@@ -9,7 +10,7 @@ interface Props {
 }
 
 /**
- * 说明气泡：挂在父元素上，放在父元素上方（空间不够时放下方），不超出视口；
+ * 说明气泡：挂在父元素上，放在父元素上方（空间不够时放下方），不超出视口、不压到标题栏；
  * 父元素被弹窗挡住时不显示，点到别处或打开弹窗（`dismissAllTooltips`）时收起，直到下一次显示
  */
 export default function ViewportTooltip({ visible, children, className = '' }: Props) {
@@ -68,7 +69,7 @@ export default function ViewportTooltip({ visible, children, className = '' }: P
       const maxLeft = Math.max(margin, window.innerWidth - tip.width - margin)
       const left = Math.min(Math.max(x - tip.width / 2, margin), maxLeft)
       const above = rect.top - tip.height - gap
-      const placement = above >= margin ? 'top' : 'bottom'
+      const placement = above >= margin + TITLEBAR_HEIGHT ? 'top' : 'bottom'
       setPosition({ left, top: placement === 'top' ? above : rect.bottom + gap, arrowLeft: x - left, placement })
     }
     update()

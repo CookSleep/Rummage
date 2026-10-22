@@ -3,12 +3,13 @@ import { useAppFonts } from './hooks/useAppFonts'
 import { useCoreStatus } from './hooks/useCoreStatus'
 import { useAutoUpdateCheck, useReleaseUpdates } from './hooks/useReleaseUpdates'
 import { useSetup } from './hooks/useSetup'
-import { isTauri } from './lib/platform'
+import { isTauri, TITLEBAR_HEIGHT } from './lib/platform'
 import CoreStatusNotice from './components/CoreStatusNotice'
 import DataDirNotices from './components/DataDirNotices'
 import DbErrorDialog from './components/DbErrorDialog'
 import Onboarding from './components/onboarding/Onboarding'
 import SearchPage from './components/SearchPage'
+import TitleBar from './components/TitleBar'
 import Toaster from './components/Toast'
 import TrayHint from './components/TrayHint'
 import UpdateModal from './components/UpdateModal'
@@ -58,6 +59,7 @@ export default function App() {
   return (
     <>
       {page()}
+      {TITLEBAR_HEIGHT > 0 && <TitleBar />}
       <DataDirNotices />
       <DbErrorDialog connected={coreStatus === 'running'} />
       <TrayHint />

@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_updater::{Error, Update, UpdaterExt};
-use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+use tauri_plugin_window_state::AppHandleExt;
 
 use crate::releases::{NETWORK, proxy_route};
 use crate::search::error;
@@ -268,7 +268,7 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<(), ApiErro
         }
     };
     // 插件结束进程时不经过关窗，窗口状态要先写下
-    if let Err(err) = app.save_window_state(StateFlags::all()) {
+    if let Err(err) = app.save_window_state(crate::WINDOW_STATE) {
         log::warn!("无法保存窗口状态：{err}");
     }
     // 插件直接结束进程，托盘图标来不及移除，会留下空图标

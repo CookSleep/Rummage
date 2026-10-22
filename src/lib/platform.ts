@@ -7,6 +7,9 @@ export const isTauri = detectTauri()
 /** Android 客户端：WebView 的 User-Agent 中带 `Android` */
 export const isAndroid = navigator.userAgent.includes('Android')
 
+/** 桌面客户端自绘标题栏的高度（src/components/TitleBar.tsx），页面经 `--safe-top` 让出；其余为 0 */
+export const TITLEBAR_HEIGHT = isTauri && !isAndroid ? 32 : 0
+
 // 刷新、前进后退、打印、查看源码、保存页面等浏览器快捷键，在客户端中会刷掉进行中的操作或打开无关界面；
 // 缩放（Ctrl+加减号/0）、开发者工具（F12、Ctrl+Shift+I）和页面内查找（Ctrl+F，以及查找下一个 F3、Ctrl+G）不在其中
 const BLOCKED_KEYS = new Set(['f5', 'f7', 'browserrefresh', 'browserback', 'browserforward', 'browsersearch'])

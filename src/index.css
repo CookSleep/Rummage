@@ -17,7 +17,8 @@
   --font-ui-sans: 'HarmonyOS Sans SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'Maple Mono NF CN', 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
   /* 安全区（Android 全面屏下的状态栏、导航栏与挖孔）：Android WebView 140 以前 env(safe-area-inset-*) 拿不到正确的值，
-     插件按 WindowInsets 注入的 --safe-area-inset-* 优先（src/lib/safeArea.ts）；桌面上都是 0 */
+     插件按 WindowInsets 注入的 --safe-area-inset-* 优先（src/lib/safeArea.ts）；桌面上都是 0，
+     桌面客户端的顶部为自绘标题栏的高度（由 src/main.tsx 设置） */
   --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
   --safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
   --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
@@ -90,6 +91,16 @@ img {
 
   ::-webkit-scrollbar-thumb { background: #3f3f46; }
   ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+}
+
+/* 窗口的滚动条让出标题栏：设了 scrollbar-width 或 scrollbar-color 时 Chromium 不认 ::-webkit-scrollbar-*，轨道留不出上边距 */
+@media (pointer: fine) {
+  :root[data-titlebar] {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  :root[data-titlebar]::-webkit-scrollbar-track { margin-top: var(--safe-top); }
 }
 
 /* 弹窗外层的留白（同 p-4），再让出安全区 */

@@ -50,6 +50,10 @@ use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 #[cfg(desktop)]
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
+/// 保存与恢复的窗口状态：边框由 tauri.conf.json 决定（不用系统边框，见 src/components/TitleBar.tsx），不跟随保存的旧值
+#[cfg(desktop)]
+pub(crate) const WINDOW_STATE: StateFlags = StateFlags::all().difference(StateFlags::DECORATIONS);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 检查更新（releases、update）用的 rustls 需要进程默认的 ring 加密实现
@@ -75,7 +79,11 @@ pub fn run() {
     // 紧随 single-instance 注册：第二个实例在此之前已退出，不会与已有实例同时写日志文件
     let builder = builder.plugin(diagnostics::plugin(data_dir.as_deref()));
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::default()
+            .with_state_flags(WINDOW_STATE)
+            .build(),
+    );
     let builder = builder
         .plugin(tauri_plugin_opener::init())
         // 只供 Rust 侧选择以图搜图的图片、引导中的文件夹与模型文件、配置文件，不向前端开放插件命令
@@ -231,7 +239,7 @@ pub fn run() {
             // 窗口状态平时只在退出时写盘；界面进程可能在托盘中一直留到关机，关窗时就写下来
             #[cfg(desktop)]
             tauri::WindowEvent::Destroyed => {
-                if let Err(err) = window.app_handle().save_window_state(StateFlags::all()) {
+                if let Err(err) = window.app_handle().save_window_state(WINDOW_STATE) {
                     log::warn!("无法保存窗口状态：{err}");
                 }
             }
