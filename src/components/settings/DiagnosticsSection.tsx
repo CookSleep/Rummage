@@ -101,7 +101,7 @@ export default function DiagnosticsSection({ defs, values, setParam }: Props) {
             {exporting ? '正在导出' : '导出'}
           </button>
         </div>
-        <div className={ROW_DESC}>把日志、设备检测结果、版本与显卡信息和设置打包成 ZIP，保存在本机，不会上传。不含搜索历史和文件内容。</div>
+        <div className={ROW_DESC}>把日志、设备检测结果、版本与显卡信息和设置打包成 ZIP，保存在本机，不会上传，不含搜索历史和文件内容。</div>
         {status && <div data-selectable-text className={`mt-1 break-all ${ROW_DESC}`}>{renderMessage(status, 'font-semibold')}</div>}
       </div>
     </section>

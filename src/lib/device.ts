@@ -39,10 +39,10 @@ export const SPEED_STALE_TEXT = '参数已修改，以下耗时为修改前的�
 
 /** 引导与设备页共用的检测设备说明。Android 上按装好的模型说明测哪些设备：CPU 与 GPU 用通用模型，NPU 用 NPU 模型 */
 export function selftestText(s: SetupStatus) {
-  if (!isAndroid) return '用 CPU 和每块显卡计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。'
+  if (!isAndroid) return '用 CPU 和每块显卡计算几条样本，确认结果正确并测速，选用最快的设备，约需几分钟。'
   const npu = Boolean(s.npu?.ready)
-  if (npu && !s.model.ready) return '用 NPU 计算几条样本，确认结果正确并测速。检测约需几分钟。CPU 和 GPU 要用通用模型，下载后才会检测。'
-  return `用 ${npu ? 'CPU、GPU 和 NPU' : 'CPU 和 GPU'} 计算几条样本，确认结果正确并测速，选用最快的设备。检测约需几分钟。`
+  if (npu && !s.model.ready) return '用 NPU 计算几条样本，确认结果正确并测速，约需几分钟。CPU 和 GPU 要用通用模型，下载后才会检测。'
+  return `用 ${npu ? 'CPU、GPU 和 NPU' : 'CPU 和 GPU'} 计算几条样本，确认结果正确并测速，选用最快的设备，约需几分钟。`
 }
 
 
