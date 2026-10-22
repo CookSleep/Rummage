@@ -43,6 +43,14 @@ export function abbreviatePath(path: string, max = 60) {
   return joinPath(path, [parts[0], '…', ...tail])
 }
 
+/** 过长的文件名：保留开头和末尾约三分之一（含扩展名），中间用“…”代替 */
+export function abbreviateName(name: string, max = 40) {
+  const chars = Array.from(name)
+  if (chars.length <= max) return name
+  const tail = Math.floor((max - 1) / 3)
+  return `${chars.slice(0, max - 1 - tail).join('')}…${chars.slice(-tail).join('')}`
+}
+
 /** 补零到两位，如 5 → 05 */
 export function pad2(n: number) {
   return String(n).padStart(2, '0')

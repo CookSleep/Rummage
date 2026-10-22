@@ -1,5 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type RefObject } from 'react'
 import type { ImageQuery, SimilarQuery } from '../types'
+import { abbreviateName } from '../lib/format'
 import { queryImageUrl } from '../lib/media'
 import { isAndroid } from '../lib/platform'
 import { ClockIcon, CloseIcon, ImageIcon, SearchIcon, SimilarIcon, SpinnerIcon } from './icons'
@@ -37,6 +38,12 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
   const preview = image ? queryImageUrl(image.token) : similar?.preview ?? null
   // 取不到预览图（格式不支持、文件已删除等）时只显示文件名
   const [failed, setFailed] = useState<string | null>(null)
+  // 预览图的宽高比，加载后按它定框的大小；比例超过 2.5 倍的长图或宽图把框限制在 2.5 倍，裁切填满
+  const [ratio, setRatio] = useState<{ src: string; value: number } | null>(null)
+  const r = ratio && ratio.src === preview ? ratio.value : null
+  const clamped = r === null ? null : Math.min(2.5, Math.max(1 / 2.5, r))
+  // 最大 256×224
+  const box = clamped === null ? { width: 224, height: 144 } : clamped >= 256 / 224 ? { width: 256, height: 256 / clamped } : { width: 224 * clamped, height: 224 }
 
   useEffect(() => {
     setActive((a) => Math.min(a, history.length - 1))
@@ -94,9 +101,21 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
               label={(
                 <>
                   {preview && preview !== failed && (
-                    <img src={preview} alt="" onError={() => setFailed(preview)} className="mb-2 block h-36 w-56 rounded-md bg-black/20 object-contain" />
+                    <img
+                      src={preview}
+                      alt=""
+                      onLoad={(e) => {
+                        const img = e.currentTarget
+                        // 没有固有尺寸的图片（如部分 SVG）保持默认的框
+                        if (img.naturalWidth && img.naturalHeight) setRatio({ src: preview, value: img.naturalWidth / img.naturalHeight })
+                      }}
+                      onError={() => setFailed(preview)}
+                      style={box}
+                      // 裁切时长图显示开头，宽图显示中间
+                      className={`mx-auto mb-2 block rounded-md bg-black/20 ${clamped !== r ? `object-cover ${r !== null && r < 1 ? 'object-top' : ''}` : 'object-contain'}`}
+                    />
                   )}
-                  {similar?.name ?? image?.name}
+                  {abbreviateName(similar?.name ?? image?.name ?? '')}
                 </>
               )}
             />

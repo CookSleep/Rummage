@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FileInfo, SearchHit } from '../types'
-import { abbreviateDir, abbreviatePath, formatClock, formatDuration, formatSize, highlight, indexStateText, locatorText, lowRelevanceText, matchPercent, matchText, openAtText, trimPeriod, unavailableText } from './format'
+import { abbreviateDir, abbreviateName, abbreviatePath, formatClock, formatDuration, formatSize, highlight, indexStateText, locatorText, lowRelevanceText, matchPercent, matchText, openAtText, trimPeriod, unavailableText } from './format'
 
 describe('abbreviateDir', () => {
   it('短路径原样显示所在文件夹，长路径省略中间', () => {
@@ -20,6 +20,14 @@ describe('abbreviatePath', () => {
     expect(abbreviatePath('D:\\资料\\工作')).toBe('D:\\资料\\工作')
     expect(abbreviatePath('D:\\资料\\工作\\2025\\总结', 12)).toBe('D:\\…\\2025\\总结')
     expect(abbreviatePath('/storage/emulated/0/Documents/工作', 24)).toBe('/storage/…/Documents/工作')
+  })
+})
+
+describe('abbreviateName', () => {
+  it('不超长时原样显示，超长时省略中间、保留扩展名', () => {
+    expect(abbreviateName('柯基.jpg')).toBe('柯基.jpg')
+    expect(abbreviateName('abcdefghijklmnop.png', 10)).toBe('abcdef…png')
+    expect(abbreviateName('😀😀😀😀😀😀😀😀😀😀😀😀', 10)).toBe('😀😀😀😀😀😀…😀😀😀')
   })
 })
 
