@@ -32,7 +32,7 @@ jobs:
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ steps.check.outputs.enabled == 'true' }}
 
       - name: Check version and extract release notes
@@ -70,9 +70,9 @@ jobs:
     if: ${{ needs.check.outputs.enabled == 'true' }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -82,7 +82,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
 
       # llama.cpp 运行库（CPU、Vulkan）与 ffmpeg：获取脚本校验钉定的 SHA-256，缓存命中且哈希正确时不再下载
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .cache/third-party
           key: third-party-${{ hashFiles('scripts/fetch-llama.ps1', 'scripts/fetch-ffmpeg.ps1', 'scripts/common.ps1') }}
@@ -127,7 +127,7 @@ jobs:
       NDK_VERSION: 30.0.16248370
       BUILD_TOOLS: 36.0.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check signing secrets
         env:
@@ -141,7 +141,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
@@ -152,7 +152,7 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS" > /dev/null
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -163,7 +163,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .cache/third-party
           key: third-party-android-${{ hashFiles('scripts/fetch-litert.ps1', 'scripts/common.ps1') }}
@@ -216,7 +216,7 @@ jobs:
             '{version: $version, url: $url, sha256: $sha256, size: $size}' > dist-android/android.json
           cat dist-android/android.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: dist-android/
@@ -228,7 +228,7 @@ jobs:
     needs: [check, windows, android]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: android
           path: dist-android
