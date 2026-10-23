@@ -6,6 +6,7 @@
 //!   保存文件（导出配置、诊断包）先由调用方生成到应用私有目录，再用系统的“创建文件”选择位置，由 Kotlin 侧复制过去。
 //! - 前台服务（`mediaProcessing`）与常驻通知由 Rust 侧按索引进度启停；应用回到前台、后台额度用完（`onTimeout`）、
 //!   服务没能进入前台等情况由 `next_event` 报告（Kotlin 侧排队，Rust 侧循环等待）。
+//!   因未接电源暂停时服务停止，由按充电条件安排的作业（`PowerJob`）在接上电源时唤醒应用。
 //! - 电池优化白名单（`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`）与通知权限（Android 13 起的 `POST_NOTIFICATIONS`）。
 //! - 应用内更新：“安装未知应用”权限（`canRequestPackageInstalls`、`ACTION_MANAGE_UNKNOWN_APP_SOURCES`）与用
 //!   `PackageInstaller` 会话安装 APK（Kotlin 侧的 `ApkInstaller`）。
@@ -206,8 +207,19 @@ impl<R: Runtime> Android<R> {
         self.0.run_mobile_plugin_async("stopIndexing", ()).await
     }
 
+    /// 安排接上电源时唤醒应用的作业（Kotlin 侧的 `PowerJob`）；已安排或正在运行时不变
+    pub async fn schedule_power_job(&self) -> Result<(), Error> {
+        self.0.run_mobile_plugin_async("schedulePowerJob", ()).await
+    }
+
+    /// 取消尚未运行的唤醒作业
+    pub async fn cancel_power_job(&self) -> Result<(), Error> {
+        self.0.run_mobile_plugin_async("cancelPowerJob", ()).await
+    }
+
     /// 等下一个事件：`resume`（应用回到前台）、`timeout`（后台额度已用完，服务已停止）、
-    /// `stopped`（服务没能进入前台，已停止）
+    /// `stopped`（服务没能进入前台，已停止）、`charging`（唤醒作业运行：已接上电源）、
+    /// `power_job_done`（唤醒作业已结束而前台服务没有启动）
     pub async fn next_event(&self) -> Result<String, Error> {
         let res: PluginEvent = self.0.run_mobile_plugin_async("nextEvent", ()).await?;
         Ok(res.kind)

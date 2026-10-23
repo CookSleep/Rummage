@@ -22,7 +22,8 @@ import app.tauri.plugin.JSObject
  * 建立索引的前台服务（Android 15 起类型为 `mediaProcessing`，Android 14 为 `dataSync`），只负责让系统在应用退到后台时保留进程，索引本身在应用进程的后台服务中进行。
  * 由 Rust 侧（src-tauri/src/android/background.rs）按索引进度经 [StoragePlugin] 启停。
  * - 常驻通知显示进度，渠道为低重要度；点击打开应用。更新至少间隔 2 秒，避免被系统限流。
- *   因未接电源、亮屏、过热暂停期间服务保持运行，通知标题改为“已暂停建立索引”，正文为暂停原因（`note`）。
+ *   因亮屏、过热暂停期间服务保持运行，通知标题改为“已暂停建立索引”，正文为暂停原因（`note`）；因未接电源暂停时服务停止，
+ *   接上电源时由 [PowerJob] 唤醒。
  * - 正在建立索引（没有暂停原因）时持有部分唤醒锁：前台服务只保留进程，不阻止息屏后 CPU 休眠；暂停与停止时释放。
  *   锁有时限，每次进度更新时续期：处理卡住、进度长时间不动时自行释放，不让 CPU 空等。
  * - Android 15 起 `mediaProcessing` 每 24 小时共有 6 小时额度，用完时系统回调 [onTimeout]，必须几秒内停止：
@@ -79,7 +80,7 @@ class IndexService : Service() {
 
   companion object {
     private const val PROGRESS_CHANNEL = "indexing"
-    private const val NOTICE_CHANNEL = "notices"
+    const val NOTICE_CHANNEL = "notices"
     private const val PROGRESS_ID = 1
     private const val QUOTA_ID = 2
     private const val MIN_UPDATE_MS = 2000L
@@ -89,6 +90,7 @@ class IndexService : Service() {
     private val handler = Handler(Looper.getMainLooper())
 
     @Volatile private var running = false
+    val isRunning get() = running
     @Volatile private var done = 0L
     @Volatile private var total = 0L
     /** 暂停原因；为空时显示进度 */
@@ -115,12 +117,12 @@ class IndexService : Service() {
       }
     }
 
-    private fun channels(nm: NotificationManager) {
+    fun channels(nm: NotificationManager) {
       nm.createNotificationChannel(NotificationChannel(PROGRESS_CHANNEL, "建立索引", NotificationManager.IMPORTANCE_LOW))
       nm.createNotificationChannel(NotificationChannel(NOTICE_CHANNEL, "提示", NotificationManager.IMPORTANCE_DEFAULT))
     }
 
-    private fun openApp(ctx: Context): PendingIntent? {
+    fun openApp(ctx: Context): PendingIntent? {
       val intent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return null
       return PendingIntent.getActivity(ctx, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
@@ -183,12 +185,15 @@ class IndexService : Service() {
 }
 
 /**
- * 交给 Rust 侧的事件：Rust 侧循环调用 `nextEvent` 等待（[StoragePlugin.nextEvent]），没有等待者时排队；
+ * 交给 Rust 侧的事件（`resume`、`timeout`、`stopped`、`charging`、`power_job_done`）：Rust 侧循环调用 `nextEvent` 等待（[StoragePlugin.nextEvent]），没有等待者时排队；
  * 同一种事件在队列中只留一个
  */
 object BackgroundEvents {
   private val queue = ArrayDeque<String>()
   private var waiting: Invoke? = null
+  /** Rust 侧已开始等待事件；进程由 [PowerJob] 新启动时没有 Rust 侧，为 false */
+  @Volatile var attached = false
+    private set
 
   private fun resolve(invoke: Invoke, type: String) {
     val ret = JSObject()
@@ -209,6 +214,7 @@ object BackgroundEvents {
 
   @Synchronized
   fun next(invoke: Invoke) {
+    attached = true
     val type = queue.removeFirstOrNull()
     if (type == null) waiting = invoke else resolve(invoke, type)
   }

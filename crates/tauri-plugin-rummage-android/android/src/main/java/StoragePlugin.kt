@@ -75,7 +75,7 @@ class PickFilesArgs {
  * 存储权限、文件选择、后台建立索引、安装更新与界面的几项系统功能，只由 Rust 侧调用（crates/tauri-plugin-rummage-android/src/lib.rs）。
  * 选择的文件夹与文件换算成真实路径，读取靠“所有文件访问”权限，不持有文档提供者的 URI 授权；
  * 保存文件（[saveFile]）把应用私有目录中已生成的文件复制到用户选定的文档，只写这一次。
- * 前台服务见 [IndexService]；应用回到前台（[onResume]）作为 `resume` 事件交给 Rust 侧。
+ * 前台服务见 [IndexService]，接上电源时的唤醒见 [PowerJob]；应用回到前台（[onResume]）作为 `resume` 事件交给 Rust 侧。
  * 安全区见 [load]：页面加载前算出的值写不进页面，前端启动时再用 `safeArea` 取一次
  */
 @TauriPlugin
@@ -236,6 +236,18 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun stopIndexing(invoke: Invoke) {
     IndexService.stop(activity.applicationContext)
+    invoke.resolve()
+  }
+
+  @Command
+  fun schedulePowerJob(invoke: Invoke) {
+    PowerJob.schedule(activity.applicationContext)
+    invoke.resolve()
+  }
+
+  @Command
+  fun cancelPowerJob(invoke: Invoke) {
+    PowerJob.cancel(activity.applicationContext)
     invoke.resolve()
   }
 

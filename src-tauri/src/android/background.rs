@@ -1,8 +1,12 @@
 //! Android 上的后台建立索引：前台服务的启停、进度通知、后台额度与电池优化白名单
 //! （Kotlin 部分见 crates/tauri-plugin-rummage-android 的 `IndexService`）。
-//! - 启停：按后台服务的 `IndexProgress` 事件决定（`wanted`）。有作业要处理且没有暂停时运行；因未接电源、亮屏、过热暂停时
-//!   也保持运行，通知改为显示暂停原因（`note`，文字与界面的索引提示一致）：这几种暂停会在应用留在后台时自行解除
-//!   （如夜里接上电源、息屏），而 Android 12 起应用在后台不能再启动前台服务。其余情况停止服务。
+//! - 启停：按后台服务的 `IndexProgress` 事件决定（`wanted`）。有作业要处理且没有暂停时运行；因亮屏、过热暂停时
+//!   也保持运行，通知改为显示暂停原因（`note`，文字与界面的索引提示一致）：这两种暂停很快会在应用留在后台时自行解除，
+//!   而 Android 12 起应用在后台不能再启动前台服务。其余情况停止服务。
+//! - 因未接电源暂停时（`waits_for_power`）可能要等到夜里，服务保持运行会白白耗掉后台额度，因此停止服务，改为安排
+//!   按充电条件运行的作业（Kotlin 侧的 `PowerJob`）。作业运行时报告 `charging`，这里清除 `blocked`：此时进程未被冻结，
+//!   后台服务几秒内发现已接上电源、继续建立索引，再按上一条启动服务（不受电池优化限制时系统才允许）。
+//!   不再需要时取消尚未运行的作业；作业结束而服务没有启动时报告 `power_job_done`，与应用回到前台时一样重新同步一次。
 //! - 系统拒绝从后台启动（`ForegroundServiceStartNotAllowedException`）或服务没能进入前台时记录警告，不重试，
 //!   等应用回到前台（Activity 的 resume，插件转发为 `resume` 事件）再启动。
 //! - 后台额度（Android 15 起 `mediaProcessing` 每 24 小时共 6 小时，应用回到前台时重新计时）用完时系统回调 `onTimeout`：
@@ -28,7 +32,6 @@ use {
 /// 暂停期间保持服务运行的原因在通知中的文字，与界面的索引提示（`src/components/IndexHint.tsx`）一致；其他原因为空
 pub fn note(p: PauseReason) -> Option<&'static str> {
     match p {
-        PauseReason::Battery => Some("未接电源，已暂停"),
         PauseReason::ScreenOn => Some("屏幕亮着，已暂停"),
         PauseReason::Hot => Some("手机温度过高，已暂停"),
         _ => None,
@@ -46,15 +49,23 @@ pub fn shown(s: &IndexStatus) -> (u64, u64) {
     (s.done, s.total)
 }
 
+/// 有文件要处理、只是暂停中
+fn waiting(s: &IndexStatus) -> bool {
+    s.pending > 0 && matches!(s.state, IndexState::Running | IndexState::Idle)
+}
+
 /// 前台服务是否应当运行（见模块说明）
 pub fn wanted(s: &IndexStatus) -> bool {
     match s.paused {
         None => s.state == IndexState::Running,
-        Some(p) if note(p).is_some() => {
-            s.pending > 0 && matches!(s.state, IndexState::Running | IndexState::Idle)
-        }
+        Some(p) if note(p).is_some() => waiting(s),
         Some(_) => false,
     }
+}
+
+/// 是否因未接电源暂停、要在接上电源时唤醒（见模块说明）
+pub fn waits_for_power(s: &IndexStatus) -> bool {
+    s.paused == Some(PauseReason::Battery) && waiting(s)
 }
 
 #[cfg(target_os = "android")]
@@ -68,8 +79,10 @@ enum Msg {
 #[derive(Default)]
 struct Service {
     running: bool,
-    /// 系统拒绝了启动，应用回到前台之前不再尝试
+    /// 系统拒绝了启动，应用回到前台或接上电源之前不再尝试
     blocked: bool,
+    /// 已安排接上电源时的唤醒作业
+    power_job: bool,
     last: Option<IndexStatus>,
 }
 
@@ -88,6 +101,18 @@ async fn sync<R: Runtime>(plugin: &Android<R>, svc: &mut Service) {
     let Some(s) = &svc.last else {
         return;
     };
+    let job = waits_for_power(s);
+    if job != svc.power_job {
+        let res = if job {
+            plugin.schedule_power_job().await
+        } else {
+            plugin.cancel_power_job().await
+        };
+        match res {
+            Ok(()) => svc.power_job = job,
+            Err(err) => log::warn!("无法安排或取消接上电源时的唤醒作业：{err}"),
+        }
+    }
     let want = wanted(s);
     let text = s.paused.and_then(note);
     let (done, total) = shown(s);
@@ -158,6 +183,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
                 Msg::Plugin(kind) => match kind.as_str() {
                     "resume" => {
                         svc.blocked = false;
+                        // 作业可能已运行过或被系统清除，重新安排一次
+                        svc.power_job = false;
                         set_quota(&h, false).await;
                     }
                     "timeout" => {
@@ -166,6 +193,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
                         svc.blocked = true;
                         set_quota(&h, true).await;
                     }
+                    "charging" => svc.blocked = false,
+                    "power_job_done" => svc.power_job = false,
                     "stopped" => {
                         log::warn!("建立索引的前台服务没能进入前台，应用回到前台后再启动");
                         svc.running = false;
@@ -268,18 +297,19 @@ mod tests {
 
     #[test]
     fn keeps_running_through_transient_pauses() {
-        for p in [
-            PauseReason::Battery,
-            PauseReason::ScreenOn,
-            PauseReason::Hot,
-        ] {
+        for p in [PauseReason::ScreenOn, PauseReason::Hot] {
             assert!(note(p).is_some(), "{p:?}");
             assert!(wanted(&status(IndexState::Idle, Some(p), 3)), "{p:?}");
             assert!(wanted(&status(IndexState::Running, Some(p), 3)), "{p:?}");
             assert!(!wanted(&status(IndexState::Idle, Some(p), 0)), "{p:?}");
             assert!(!wanted(&status(IndexState::NoModel, Some(p), 3)), "{p:?}");
+            assert!(
+                !waits_for_power(&status(IndexState::Idle, Some(p), 3)),
+                "{p:?}"
+            );
         }
         for p in [
+            PauseReason::Battery,
             PauseReason::Manual { until: None },
             PauseReason::Sleeping,
             PauseReason::DiskLow { free_gb: 1.0 },
@@ -289,6 +319,17 @@ mod tests {
             assert!(note(p).is_none(), "{p:?}");
             assert!(!wanted(&status(IndexState::Running, Some(p), 3)), "{p:?}");
         }
+    }
+
+    #[test]
+    fn stops_and_waits_for_power_on_battery() {
+        let b = Some(PauseReason::Battery);
+        assert!(!wanted(&status(IndexState::Idle, b, 3)));
+        assert!(waits_for_power(&status(IndexState::Idle, b, 3)));
+        assert!(waits_for_power(&status(IndexState::Running, b, 3)));
+        assert!(!waits_for_power(&status(IndexState::Idle, b, 0)));
+        assert!(!waits_for_power(&status(IndexState::NoModel, b, 3)));
+        assert!(!waits_for_power(&status(IndexState::Running, None, 3)));
     }
 
     #[test]
