@@ -247,3 +247,5 @@ Rummage 站在许多优秀项目的肩膀上：
 - [Lobe Icons](https://github.com/lobehub/lobe-icons)：“设置 → Agent”中各个 AI 工具的图标。
 
 以及其他所有依赖的作者，完整清单见“设置 → 关于 → 第三方许可”。
+
+特别致谢：[LINUX DO](https://linux.do)
