@@ -18,6 +18,40 @@ fn names(db: &Db, kind: &str) -> Vec<String> {
         .unwrap()
 }
 
+fn pragma(db: &Db, name: &str) -> i64 {
+    db.conn
+        .pragma_query_value(None, name, |row| row.get(0))
+        .unwrap()
+}
+
+#[test]
+fn deleting_rows_shrinks_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(dir.path()).unwrap();
+    assert_eq!(pragma(&db, "auto_vacuum"), 1);
+    let base = pragma(&db, "page_count");
+    for i in 0..200 {
+        db.meta_set(&format!("k{i}"), &"x".repeat(4000)).unwrap();
+    }
+    assert!(pragma(&db, "page_count") > base + 100);
+    db.conn.execute("DELETE FROM meta", []).unwrap();
+    assert_eq!(pragma(&db, "freelist_count"), 0);
+    assert!(pragma(&db, "page_count") <= base + 1);
+}
+
+#[test]
+fn existing_db_switches_to_auto_vacuum() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(dir.path()).unwrap();
+    db.conn
+        .execute_batch("PRAGMA auto_vacuum = NONE; VACUUM;")
+        .unwrap();
+    assert_eq!(pragma(&db, "auto_vacuum"), 0);
+    drop(db);
+    let db = Db::open(dir.path()).unwrap();
+    assert_eq!(pragma(&db, "auto_vacuum"), 1);
+}
+
 #[test]
 fn migrates_empty_db_to_latest() {
     let dir = tempfile::tempdir().unwrap();

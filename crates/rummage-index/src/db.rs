@@ -1,8 +1,8 @@
 //! 索引数据库 `<数据目录>\index.db`。
 //! - 结构版本记在 `PRAGMA user_version`，`MIGRATIONS` 第 N 项把结构从 N 升到 N+1，每项一个事务。
 //! - 打开顺序：在 `<数据目录>\tmp\` 实际写一个文件探测可写，并清掉上次崩溃留下的临时文件 → 打开连接，
-//!   设置忙等待、WAL、`recursive_triggers` → 只读时按不可写处理 → 版本高于程序支持的版本时拒绝 → 迁移 → 开启外键
-//!   → 建记录缩略图引用的临时触发器（`thumbs`）。
+//!   设置忙等待、WAL、`recursive_triggers` → 只读时按不可写处理 → 版本高于程序支持的版本时拒绝 → 迁移
+//!   → 开启自动回收（`auto_vacuum = FULL`，删除索引后文件随之变小）→ 开启外键 → 建记录缩略图引用的临时触发器（`thumbs`）。
 //! - 迁移：不是新库时先备份为 `index.db.v<旧版本>.bak`（先合并 WAL，复制到 `tmp\` 再改名）。迁移期间外键关闭，
 //!   每项提交前用 `foreign_key_check` 检查；全部成功后删除备份，中途失败时用备份覆盖回去，数据库回到迁移前的状态。
 //! - 迁移前已有同名备份（上次迁移中途退出或恢复失败）：当前库通过 `integrity_check` 就覆盖旧备份照常迁移；
@@ -332,10 +332,12 @@ fn backup_path(data_dir: &Path, version: usize) -> PathBuf {
 fn connect(data_dir: &Path, path: &Path) -> Result<(Connection, usize), DbError> {
     let sql = |err| sqlite(data_dir, err);
     let conn = Connection::open(path).map_err(sql)?;
-    // 忙等待先于其他 PRAGMA 设置，切换 WAL 时遇到锁也会等待；外键在迁移完成后才开启
+    // 忙等待先于其他 PRAGMA 设置，切换 WAL 时遇到锁也会等待；外键在迁移完成后才开启。
+    // WAL 合并后截短，大量删除后不会一直留着同样大的 WAL 文件
     conn.busy_timeout(Duration::from_secs(5)).map_err(sql)?;
     conn.execute_batch(
-        "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA recursive_triggers = ON;",
+        "PRAGMA journal_mode = WAL; PRAGMA journal_size_limit = 0; PRAGMA synchronous = NORMAL;
+         PRAGMA recursive_triggers = ON;",
     )
     .map_err(sql)?;
     if conn.is_readonly(MAIN_DB).map_err(sql)? {
@@ -498,6 +500,16 @@ impl Db {
             && let Err(err) = fs::remove_file(&bak)
         {
             log::warn!("无法删除索引数据库的迁移备份 {}：{err}", bak.display());
+        }
+        // 删除索引空出的页面在每次提交时还给系统，文件随之变小；该模式只在整理一次后生效，新库整理几乎不花时间。
+        // 整理失败（如磁盘空间不足）不影响使用，下次打开时再试
+        let mode: i64 = conn
+            .pragma_query_value(None, "auto_vacuum", |row| row.get(0))
+            .map_err(|err| sqlite(data_dir, err))?;
+        if mode != 1
+            && let Err(err) = conn.execute_batch("PRAGMA auto_vacuum = FULL; VACUUM;")
+        {
+            log::warn!("无法开启索引数据库的自动回收：{err}");
         }
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .map_err(|err| sqlite(data_dir, err))?;

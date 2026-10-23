@@ -240,7 +240,6 @@ impl Db {
     /// 清空索引的一步：删除最多 `limit` 个文件（级联删除片段、向量和作业），根目录、排除规则和设置保留；
     /// 已没有文件可删时清除失败黑名单。返回删除的文件数，为 0 表示清空完成。调用方在两步之间释放数据库锁，
     /// 不让清空大索引时长时间挡住搜索。
-    /// 不做 VACUUM：它要在锁内重写整个数据库并临时占用同样大小的磁盘空间，而空出的页面在随后重建时会被重新使用
     pub fn clear_index_batch(&self, limit: usize) -> Result<usize, DbError> {
         let res = self.conn.unchecked_transaction().and_then(|tx| {
             let before: i64 = tx.query_row(
