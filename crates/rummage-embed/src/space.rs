@@ -110,6 +110,8 @@ pub fn video_av_preprocess(
 /// 模型仓库与钉定的提交。下载地址为 `resolve/<提交>/<文件名>`，不跟随 main。
 pub const REPO: &str = "ggml-org/embeddinggemma-2-GGUF";
 pub const COMMIT: &str = "bfcd298762cc34d0357ece5ebdd31791a3a374d8";
+/// 魔搭上同名仓库的提交（魔搭的提交号与 Hugging Face 不同，文件内容相同）
+pub const MODELSCOPE_COMMIT: &str = "51d98d5489e2d4e64c25081d3ef0b5379ba12a39";
 /// 模型在 `<数据目录>\models\` 下的子目录
 pub const MODEL_DIR: &str = "embeddinggemma-2-gguf";
 
@@ -163,9 +165,11 @@ pub const LITERT_IMAGE_PREPROCESS: &str = "image-v1-litert-v1";
 /// LiteRT 模型的仓库与钉定的提交（通用版与 `npu` 中的芯片版都在这里）
 pub const LITERT_REPO: &str = "litert-community/embeddinggemma-2-740m-litert-lm";
 pub const LITERT_COMMIT: &str = "24d962e906c7d332c6428e71c9676855024569e2";
+pub const LITERT_MODELSCOPE_COMMIT: &str = "e2c761f37fb07ece1f105492bb668baf35fd854a";
 /// 分词器（数切片长度用）取自主模型仓库
 pub const TOKENIZER_REPO: &str = "google/embeddinggemma-2";
 pub const TOKENIZER_COMMIT: &str = "914f7f89142e33e77833254d9c9b90c3cef7303b";
+pub const TOKENIZER_MODELSCOPE_COMMIT: &str = "1d1a0505e55c1bf519cd386fc5ec4d0ecea14ffe";
 /// LiteRT 模型与分词器在 `<数据目录>\models\` 下的子目录
 pub const LITERT_MODEL_DIR: &str = "embeddinggemma-2-litert";
 

@@ -311,7 +311,7 @@ export interface RootInfo {
 }
 
 /** 模型下载源，对应 Rust `rummage_proto::ModelSource` */
-export type ModelSource = { type: 'official' } | { type: 'mirror' } | { type: 'custom'; url: string }
+export type ModelSource = { type: 'official' } | { type: 'modelscope' } | { type: 'custom'; url: string }
 
 /** 对应 Rust `rummage_proto::ProxyMode` */
 export type ProxyMode = 'system' | 'none' | 'custom'

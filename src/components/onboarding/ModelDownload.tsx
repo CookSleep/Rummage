@@ -211,7 +211,7 @@ export interface SourceChoice {
 
 const SOURCES: { value: ModelSource['type']; label: string }[] = [
   { value: 'official', label: 'Hugging Face' },
-  { value: 'mirror', label: '镜像 hf-mirror.com' },
+  { value: 'modelscope', label: '魔搭' },
   { value: 'custom', label: '自定义' },
 ]
 
@@ -255,7 +255,7 @@ export function ProxyStatus({ proxy, onProxy }: { proxy: ProxySetting; onProxy: 
         <button type="button" className="ml-2 text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300" onClick={() => setOpen((v) => !v)}>
           {open ? '收起' : '更改'}
         </button>
-        <p className="mt-1 text-gray-400 dark:text-gray-500">直连 Hugging Face 较慢或失败时，可以换用镜像或设置代理</p>
+        <p className="mt-1 text-gray-400 dark:text-gray-500">直连 Hugging Face 较慢或失败时，可以换用魔搭或设置代理</p>
       </div>
       {open && <ProxyForm saved={proxy} onSaved={onProxy} />}
     </>

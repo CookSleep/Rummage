@@ -108,7 +108,7 @@ fn request_round_trip() {
         Request::FinishSetup,
         Request::SetOnboardingStep { step: 2 },
         Request::DownloadModels {
-            source: ModelSource::Mirror,
+            source: ModelSource::ModelScope,
             mmproj: true,
             npu: false,
         },

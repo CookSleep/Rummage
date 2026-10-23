@@ -1,12 +1,13 @@
 //! 模型文件的下载、导入与校验。
-//! - 下载源：Hugging Face（默认）、镜像 hf-mirror.com 或用户填写的兼容地址；地址钉定仓库提交
+//! - 下载源：Hugging Face（默认）、魔搭或用户填写的与 Hugging Face 兼容的地址；地址钉定仓库提交
 //!   （`resolve/<提交>/<文件名>`），仓库、提交与已知哈希表都在 `rummage_embed::space` 与 `npu`。每个文件带自己的仓库与提交
-//!   （`Pinned`）：Android 的 LiteRT 模型与分词器在两个仓库中。
+//!   （`Pinned`）：Android 的 LiteRT 模型与分词器在两个仓库中。魔搭上的仓库同名，提交号另记。
 //! - 高通 NPU 的 QNN 运行库（`rummage_embed::npu`）从 Maven Central 的 AAR 中取：不下载整个包，按记下的位置用 HTTP Range
 //!   先取条目的本地文件头（得到文件名与扩展字段的长度），再取压缩数据，解压（deflate）到 `.part`，核对大小与 SHA-256 后改名。
 //!   不走 Hugging Face 的下载源，同样跟随代理设置；文件小（每个不超过约 5 MB），不续传。
-//! - 下载前请求 `/api/models/<仓库>/tree/<提交>` 取文件大小与 `lfs.oid`（即 SHA-256），与已知表核对，不一致时拒绝
-//!   （镜像可能不同步或内容被替换，向量空间也按已知哈希计算）；接口不可用（返回错误状态或内容无法解析）时直接用已知表。
+//! - 下载前读取钉定提交的文件列表（Hugging Face 为 `/api/models/<仓库>/tree/<提交>` 的 `lfs.oid`，魔搭为
+//!   `/api/v1/models/<仓库>/repo/files` 的 `Sha256`）取文件大小与 SHA-256，与已知表核对，不一致时拒绝
+//!   （下载源可能不同步或内容被替换，向量空间也按已知哈希计算）；接口不可用（返回错误状态或内容无法解析）时直接用已知表。
 //!   连不上下载源时直接报错，不再请求文件。
 //! - 已有的文件先核对大小与 SHA-256，正确的跳过，全部正确时不联网（开发版数据目录中已有的模型不会被重新下载或覆盖）。
 //! - 断点续传：写入同目录的 `<文件名>.part`；续传前先对已下载的部分计算哈希，再用 HTTP `Range` 请求剩下的部分，
@@ -38,7 +39,7 @@ use sha2::{Digest, Sha256};
 use crate::proxy::Route;
 
 pub const OFFICIAL: &str = "https://huggingface.co";
-pub const MIRROR: &str = "https://hf-mirror.com";
+pub const MODELSCOPE: &str = "https://modelscope.cn";
 const USER_AGENT: &str = concat!("rummage/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// 读取响应时超过这么久没有收到数据就判为超时
@@ -64,6 +65,8 @@ pub struct Pinned {
     pub file: &'static ModelFile,
     pub repo: &'static str,
     pub commit: &'static str,
+    /// 魔搭上同名仓库的提交
+    pub ms_commit: &'static str,
 }
 
 impl Pinned {
@@ -73,6 +76,7 @@ impl Pinned {
             file,
             repo: space::REPO,
             commit: space::COMMIT,
+            ms_commit: space::MODELSCOPE_COMMIT,
         }
     }
 
@@ -82,6 +86,7 @@ impl Pinned {
             file,
             repo: space::LITERT_REPO,
             commit: space::LITERT_COMMIT,
+            ms_commit: space::LITERT_MODELSCOPE_COMMIT,
         }
     }
 
@@ -90,6 +95,7 @@ impl Pinned {
         file: &space::TOKENIZER,
         repo: space::TOKENIZER_REPO,
         commit: space::TOKENIZER_COMMIT,
+        ms_commit: space::TOKENIZER_MODELSCOPE_COMMIT,
     };
 
     /// 钉定版本的文件页面
@@ -120,11 +126,43 @@ pub fn install_crypto() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-/// 下载源的基地址（不带末尾的 `/`）。自定义地址可以带路径前缀，但必须是 http 或 https，不能带查询参数
-pub fn base_url(source: &ModelSource) -> Result<String, String> {
+/// 解析后的下载源，带基地址（不带末尾的 `/`）
+#[derive(Debug, Clone, PartialEq)]
+pub enum Hub {
+    /// Hugging Face 或接口兼容的地址
+    HuggingFace(String),
+    ModelScope(String),
+}
+
+impl Hub {
+    fn file_url(&self, f: &Pinned) -> String {
+        match self {
+            Hub::HuggingFace(base) => {
+                format!("{base}/{}/resolve/{}/{}", f.repo, f.commit, f.file.name)
+            }
+            Hub::ModelScope(base) => format!(
+                "{base}/models/{}/resolve/{}/{}",
+                f.repo, f.ms_commit, f.file.name
+            ),
+        }
+    }
+
+    fn list_url(&self, f: &Pinned) -> String {
+        match self {
+            Hub::HuggingFace(base) => format!("{base}/api/models/{}/tree/{}", f.repo, f.commit),
+            Hub::ModelScope(base) => format!(
+                "{base}/api/v1/models/{}/repo/files?Revision={}&Recursive=true",
+                f.repo, f.ms_commit
+            ),
+        }
+    }
+}
+
+/// 自定义地址可以带路径前缀，但必须是 http 或 https，不能带查询参数
+pub fn hub(source: &ModelSource) -> Result<Hub, String> {
     let url = match source {
-        ModelSource::Official => return Ok(OFFICIAL.into()),
-        ModelSource::Mirror => return Ok(MIRROR.into()),
+        ModelSource::Official => return Ok(Hub::HuggingFace(OFFICIAL.into())),
+        ModelSource::ModelScope => return Ok(Hub::ModelScope(MODELSCOPE.into())),
         ModelSource::Custom { url } => url.trim().trim_end_matches('/'),
     };
     const HINT: &str = "例如 https://hf-mirror.com";
@@ -138,7 +176,7 @@ pub fn base_url(source: &ModelSource) -> Result<String, String> {
     if parsed.query().is_some() || parsed.fragment().is_some() {
         return Err(format!("下载源地址不能带查询参数，{HINT}。"));
     }
-    Ok(url.to_string())
+    Ok(Hub::HuggingFace(url.to_string()))
 }
 
 /// 节流后交给回调的进度
@@ -279,10 +317,10 @@ async fn cancelled(cancel: &AtomicBool) {
 }
 
 /// 下载 `files` 到 `dir`（`<数据目录>\models\<子目录>`），再从 QNN 包中取出 `qnn` 到 `qnn_dir`（见模块说明），
-/// 已正确的文件跳过。`base` 为 `base_url` 的结果
+/// 已正确的文件跳过
 #[allow(clippy::too_many_arguments)]
 pub fn download(
-    base: &str,
+    hub: &Hub,
     files: &[Pinned],
     dir: &Path,
     qnn: &[&'static QnnEntry],
@@ -339,7 +377,7 @@ pub fn download(
                 Some(k) => &lists[k].1,
                 None => {
                     rep.start(ModelTaskPhase::Preparing, f.file, i, 0);
-                    let info = remote_info(&client, route, base, &f, cancel).await?;
+                    let info = remote_info(&client, route, hub, &f, cancel).await?;
                     lists.push((f.repo, info));
                     &lists[lists.len() - 1].1
                 }
@@ -347,8 +385,7 @@ pub fn download(
             if let Some(list) = list {
                 check_remote(list, f.file)?;
             }
-            let url = format!("{base}/{}/resolve/{}/{}", f.repo, f.commit, f.file.name);
-            let url = Url::parse(&url)
+            let url = Url::parse(&hub.file_url(&f))
                 .map_err(|_| Error::Failed("下载源地址格式不正确，请检查后重试。".into()))?;
             let part = dir.join(format!("{}.part", f.file.name));
             fetch(&client, route, &url, f.file, &part, i, cancel, &mut rep).await?;
@@ -456,12 +493,11 @@ type Remote = (String, u64, String);
 async fn remote_info(
     client: &Client,
     route: &Route,
-    base: &str,
+    hub: &Hub,
     pinned: &Pinned,
     cancel: &AtomicBool,
 ) -> Result<Option<Vec<Remote>>, Error> {
-    let url = format!("{base}/api/models/{}/tree/{}", pinned.repo, pinned.commit);
-    let Ok(url) = Url::parse(&url) else {
+    let Ok(url) = Url::parse(&hub.list_url(pinned)) else {
         return Err(Error::Failed("下载源地址格式不正确，请检查后重试。".into()));
     };
     let send = async {
@@ -484,17 +520,35 @@ async fn remote_info(
     };
     let list = serde_json::from_slice::<serde_json::Value>(&body)
         .ok()
-        .and_then(|v| {
-            let list = v.as_array()?.iter().filter_map(|e| {
-                // 非 LFS 的小文件没有 lfs 字段，跳过
-                let lfs = e.get("lfs")?;
-                Some((
-                    e.get("path")?.as_str()?.to_string(),
-                    lfs.get("size")?.as_u64()?,
-                    lfs.get("oid")?.as_str()?.to_lowercase(),
-                ))
-            });
-            Some(list.collect::<Vec<_>>())
+        .and_then(|v| match hub {
+            Hub::HuggingFace(_) => {
+                let list = v.as_array()?.iter().filter_map(|e| {
+                    // 非 LFS 的小文件没有 lfs 字段，跳过
+                    let lfs = e.get("lfs")?;
+                    Some((
+                        e.get("path")?.as_str()?.to_string(),
+                        lfs.get("size")?.as_u64()?,
+                        lfs.get("oid")?.as_str()?.to_lowercase(),
+                    ))
+                });
+                Some(list.collect::<Vec<_>>())
+            }
+            // 出错时以 `Code` 为准；目录项的 `Sha256` 为空，跳过
+            Hub::ModelScope(_) => {
+                if v.get("Code")?.as_u64()? != 200 {
+                    return None;
+                }
+                let files = v.get("Data")?.get("Files")?.as_array()?;
+                let list = files.iter().filter_map(|e| {
+                    let sha = e.get("Sha256")?.as_str().filter(|s| !s.is_empty())?;
+                    Some((
+                        e.get("Path")?.as_str()?.to_string(),
+                        e.get("Size")?.as_u64()?,
+                        sha.to_lowercase(),
+                    ))
+                });
+                Some(list.collect::<Vec<_>>())
+            }
         });
     if list.is_none() {
         log::warn!("无法解析下载源的文件列表，改用内置的文件信息。");
@@ -679,11 +733,11 @@ fn net_error(err: &reqwest::Error, proxied: bool) -> Error {
     let tls = ["certificate", "tls", "handshake", "corrupt message"]
         .iter()
         .any(|s| lower.contains(s));
-    let retry = "请检查网络，或换用镜像、设置代理";
+    let retry = "请检查网络，或换一个下载源、设置代理";
     let reason = if lower.contains("proxy authorization required") {
         "代理服务器要求身份验证，请检查代理地址中的用户名和密码".to_string()
     } else if lower.contains("tunnel error: unsuccessful") {
-        "代理服务器未能连接到下载源，请检查代理软件的设置，或换用镜像".to_string()
+        "代理服务器未能连接到下载源，请检查代理软件的设置，或换一个下载源".to_string()
     } else if lower.contains("tunnel error: failed to create underlying connection")
         || (proxied && err.is_connect() && !tls)
     {

@@ -41,7 +41,7 @@ fn serve(data: Vec<u8>, opts: Opts) -> Server {
             let (path, range) = read_request(&stream);
             log.lock().unwrap().push((path.clone(), range.clone()));
             let mut s = stream;
-            if path.contains("/api/models/") {
+            if path.contains("/api/") {
                 match &opts.api {
                     Some(body) => respond(&mut s, "200 OK", &[], body.as_bytes(), None),
                     None => respond(&mut s, "404 Not Found", &[], b"", None),
@@ -137,11 +137,15 @@ fn model(name: &'static str, data: &[u8]) -> &'static ModelFile {
 }
 
 fn run(base: &str, files: &[&'static ModelFile], dir: &Path) -> Result<Vec<Progress>, Error> {
+    run_hub(&Hub::HuggingFace(base.into()), files, dir)
+}
+
+fn run_hub(hub: &Hub, files: &[&'static ModelFile], dir: &Path) -> Result<Vec<Progress>, Error> {
     install_crypto();
     let mut seen = Vec::new();
     let files: Vec<Pinned> = files.iter().map(|f| Pinned::gguf(f)).collect();
     download(
-        base,
+        hub,
         &files,
         dir,
         &[],
@@ -307,6 +311,69 @@ fn checks_remote_listing() {
 }
 
 #[test]
+fn modelscope_listing_and_url() {
+    let data = content(1000);
+    let file = model("m.gguf", &data);
+    let dir = crate::test_dir();
+    let listing = |code: u64, sha: &str| {
+        Some(format!(
+            r#"{{"Code":{code},"Data":{{"Files":[
+                {{"Path":"sub","Size":0,"Sha256":"","Type":"tree"}},
+                {{"Path":"m.gguf","Size":1000,"Sha256":"{sha}","Type":"blob"}}]}}}}"#
+        ))
+    };
+    let server = serve(
+        data.clone(),
+        Opts {
+            api: listing(200, file.sha256),
+            ..Opts::default()
+        },
+    );
+    run_hub(&Hub::ModelScope(server.base.clone()), &[file], dir.path()).unwrap();
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(
+        requests[0].0,
+        format!(
+            "/api/v1/models/{}/repo/files?Revision={}&Recursive=true",
+            space::REPO,
+            space::MODELSCOPE_COMMIT
+        )
+    );
+    assert_eq!(
+        requests[1].0,
+        format!(
+            "/models/{}/resolve/{}/m.gguf",
+            space::REPO,
+            space::MODELSCOPE_COMMIT
+        )
+    );
+
+    // 不一致：拒绝
+    let other = crate::test_dir();
+    let server = serve(
+        data.clone(),
+        Opts {
+            api: listing(200, &"0".repeat(64)),
+            ..Opts::default()
+        },
+    );
+    let hub = Hub::ModelScope(server.base.clone());
+    let err = run_hub(&hub, &[file], other.path()).unwrap_err();
+    assert!(err.to_string().contains("不一致"), "{err}");
+
+    // 接口报错（HTTP 200 但 Code 不是 200）：按已知表下载
+    let third = crate::test_dir();
+    let server = serve(
+        data,
+        Opts {
+            api: listing(10990101004, &"0".repeat(64)),
+            ..Opts::default()
+        },
+    );
+    run_hub(&Hub::ModelScope(server.base.clone()), &[file], third.path()).unwrap();
+}
+
+#[test]
 fn http_errors_are_sentences() {
     let file = model("m.gguf", &content(10));
     let dir = crate::test_dir();
@@ -325,7 +392,7 @@ fn http_errors_are_sentences() {
     // 经过自定义代理时，连不上归因到代理服务器
     let proxy = Route::Via(Url::parse(&format!("http://127.0.0.1:{port}")).unwrap());
     let err = download(
-        "http://example.invalid",
+        &Hub::HuggingFace("http://example.invalid".into()),
         &[Pinned::gguf(file)],
         dir.path(),
         &[],
@@ -349,7 +416,7 @@ fn cancel_keeps_part() {
     let dir = crate::test_dir();
     let server = serve(content(10), Opts::default());
     let err = download(
-        &server.base,
+        &Hub::HuggingFace(server.base.clone()),
         &[Pinned::gguf(file)],
         dir.path(),
         &[],
@@ -427,12 +494,18 @@ fn imports_known_files() {
 
 #[test]
 fn custom_source_validated() {
-    assert_eq!(base_url(&ModelSource::Official).unwrap(), OFFICIAL);
-    assert_eq!(base_url(&ModelSource::Mirror).unwrap(), MIRROR);
-    let custom = |url: &str| base_url(&ModelSource::Custom { url: url.into() });
+    assert_eq!(
+        hub(&ModelSource::Official).unwrap(),
+        Hub::HuggingFace(OFFICIAL.into())
+    );
+    assert_eq!(
+        hub(&ModelSource::ModelScope).unwrap(),
+        Hub::ModelScope(MODELSCOPE.into())
+    );
+    let custom = |url: &str| hub(&ModelSource::Custom { url: url.into() });
     assert_eq!(
         custom(" https://hf.example.com/hf/ ").unwrap(),
-        "https://hf.example.com/hf"
+        Hub::HuggingFace("https://hf.example.com/hf".into())
     );
     assert!(custom("").unwrap_err().starts_with("请填写下载源地址"));
     assert!(custom("ftp://x").unwrap_err().contains("http://"));

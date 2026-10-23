@@ -16,8 +16,9 @@ use crate::ParamValue;
 pub enum ModelSource {
     /// huggingface.co
     Official,
-    /// hf-mirror.com
-    Mirror,
+    /// 魔搭 modelscope.cn
+    #[serde(rename = "modelscope")]
+    ModelScope,
     /// 用户填写的地址，接口与 Hugging Face 兼容
     Custom { url: String },
 }
@@ -402,7 +403,7 @@ mod tests {
         });
         for s in [
             ModelSource::Official,
-            ModelSource::Mirror,
+            ModelSource::ModelScope,
             ModelSource::Custom {
                 url: "https://x".into(),
             },
@@ -413,7 +414,7 @@ mod tests {
 
     #[test]
     fn wire_format() {
-        assert_eq!(encode(&ModelSource::Mirror), r#"{"type":"mirror"}"#);
+        assert_eq!(encode(&ModelSource::ModelScope), r#"{"type":"modelscope"}"#);
         assert_eq!(
             encode(&ModelSource::Custom { url: "u".into() }),
             r#"{"type":"custom","url":"u"}"#

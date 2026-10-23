@@ -141,7 +141,7 @@
 
 1. **选择文件夹**：要搜索的文件夹，至少一个。手机上可以一键添加 DCIM、Pictures、Download、Documents。
 2. **文件类型**：希望按内容查找的类型（文档、图片、音频、视频）。选了视频时再选识别方式：找物体、找动作或找说话内容。
-3. **下载模型**：从 Hugging Face 下载，下载后校验。国内连接较慢时可以切换到镜像或设置代理，也可以导入已下载的模型文件。手机上芯片有 NPU 版模型时先下载它（高通芯片另从 Maven Central 下载约 8 MB 的 QNN 运行库）；NPU 不可用时再下载通用模型。
+3. **下载模型**：从 Hugging Face 下载，下载后校验。国内连接较慢时可以切换到魔搭或设置代理，也可以导入已下载的模型文件。手机上芯片有 NPU 版模型时先下载它（高通芯片另从 Maven Central 下载约 8 MB 的 QNN 运行库）；NPU 不可用时再下载通用模型。
 4. **检测设备**：检测各个设备能否正确计算以及速度，自动选择最快的；电脑上也可以只用 CPU。
 5. **预估**：根据文件数量与大小预估建立索引的时间和占用空间。
 
@@ -243,7 +243,7 @@ Rummage 站在许多优秀项目的肩膀上：
 - [FFmpeg](https://ffmpeg.org/)：电脑上的音视频解码。
 - [Tauri](https://tauri.app/)：一套代码同时构建 Windows 与 Android 客户端。
 - [SQLite](https://sqlite.org/)：索引与元数据的存储。
-- [Hugging Face](https://huggingface.co/) 与 [HF-Mirror](https://hf-mirror.com/)：模型的托管与国内镜像。
+- [Hugging Face](https://huggingface.co/) 与 [魔搭 ModelScope](https://modelscope.cn/)：模型的托管与国内下载源。
 - [Lobe Icons](https://github.com/lobehub/lobe-icons)：“设置 → Agent”中各个 AI 工具的图标。
 
 以及其他所有依赖的作者，完整清单见“设置 → 关于 → 第三方许可”。

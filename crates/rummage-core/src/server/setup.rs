@@ -331,7 +331,7 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
             mmproj,
             npu,
         } => {
-            let base = models::base_url(&source).map_err(bad_request)?;
+            let hub = models::hub(&source).map_err(bad_request)?;
             let cfg = config(state)?;
             let mut rows = Vec::new();
             if npu {
@@ -358,7 +358,7 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
             let route = Route::from_setting(&setting);
             let s = state.clone();
             start_task(state, ModelTaskKind::Download, move |cancel, progress| {
-                models::download(&base, &hf, &dir, &qnn, &qnn_dir, &route, cancel, progress)?;
+                models::download(&hub, &hf, &dir, &qnn, &qnn_dir, &route, cancel, progress)?;
                 for (f, path) in &all {
                     set_verified(&s, f.name, Some((path, true)));
                 }
