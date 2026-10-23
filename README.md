@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🔎 Rummage
+<img src="src-tauri/icons/source.svg" alt="Rummage" width="128" height="128">
+
+# Rummage
 
 [![License](https://img.shields.io/badge/license-MIT-10b981?style=flat-square)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/CookSleep/Rummage?style=flat-square)](https://github.com/CookSleep/Rummage/releases/latest)
