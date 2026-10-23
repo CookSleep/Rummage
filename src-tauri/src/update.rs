@@ -12,7 +12,6 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use reqwest::Url;
 use rummage_core::proxy::Route;
 use rummage_proto::ApiError;
 use semver::Version;
@@ -140,7 +139,7 @@ async fn check<R: Runtime>(app: &AppHandle<R>, any: bool) -> Result<Update, ApiE
     let builder = match std::env::var("RUMMAGE_UPDATER_ENDPOINT") {
         Ok(url) => {
             let invalid = |err: String| error(UPDATE, format!("更新源地址无效：{err}"));
-            let url = Url::parse(&url).map_err(|err| invalid(err.to_string()))?;
+            let url = reqwest::Url::parse(&url).map_err(|err| invalid(err.to_string()))?;
             builder
                 .endpoints(vec![url])
                 .map_err(|err| invalid(err.to_string()))?
