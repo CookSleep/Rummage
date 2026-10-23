@@ -10,6 +10,7 @@ import { isAndroid } from '../../lib/platform'
 import { useCoreEvent } from '../../hooks/useCoreEvent'
 import { useParamValues } from '../../hooks/useParamValues'
 import ChangeDataDirButton from '../ChangeDataDirButton'
+import { renderMessage } from '../ConfirmDialog'
 import { WarningIcon } from '../icons'
 import LoadError from '../LoadError'
 import { NOTICE_BOX } from '../settings/styles'
@@ -117,6 +118,9 @@ export default function EstimateStep({ kinds, preset, selftest, minFreeGb }: Pro
       {est?.scanning && <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">还在统计文件，数量会继续增加</p>}
       <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
         {r && r.nameOnly > 0 ? `其余 ${r.nameOnly} 个文件只按文件名索引。` : ''}预估基于设备检测的速度{r && r.audioFiles + r.videoFiles > 0 ? '，音频和视频的时长按文件大小估算' : ''}，实际用时受文件内容影响。
+      </p>
+      <p className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
+        {renderMessage(`建立索引的方式可在「设置 → 资源」中调整，如${isAndroid ? '低电量、未接电源、亮屏或发热时暂停' : '低电量、未接电源或全屏时暂停'}。`, 'font-semibold')}
       </p>
       {error && <LoadError message={error} onRetry={load} className="mt-2" />}
     </div>

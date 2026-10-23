@@ -428,6 +428,7 @@ fn response_and_event_round_trip() {
         PauseReason::Quota,
         PauseReason::Hot,
         PauseReason::Battery,
+        PauseReason::LowBattery,
         PauseReason::ScreenOn,
         PauseReason::Fullscreen,
     ] {
@@ -446,6 +447,10 @@ fn response_and_event_round_trip() {
         r#"{"type":"disk_low","freeGb":1.5}"#
     );
     assert_eq!(encode(&PauseReason::Battery), r#"{"type":"battery"}"#);
+    assert_eq!(
+        encode(&PauseReason::LowBattery),
+        r#"{"type":"low_battery"}"#
+    );
     assert_eq!(encode(&PauseReason::Sleeping), r#"{"type":"sleeping"}"#);
     assert_eq!(encode(&PauseReason::ScreenOn), r#"{"type":"screen_on"}"#);
     round_trip(CoreMsg::Event {

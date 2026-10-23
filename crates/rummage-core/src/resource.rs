@@ -1,13 +1,14 @@
 //! 资源占用控制中与平台无关的部分：由检测到的系统状态、手动暂停和参数判定建索引是否暂停、是否降温。
 //! - 自动暂停：数据目录所在卷的剩余空间低于 `min_free_disk_gb`；Android 前台服务今日的后台额度已用完（`Quota`，由界面经
 //!   `BackgroundQuota` 告知，不持久化）；手机过热（热状态达到 `SEVERE` 或温度余量达到 1.0，`pause_when_hot`）；未充电
-//!   （`pause_on_battery`）；Android 亮屏（`pause_when_screen_on`）；任一显示器上有全屏程序（`pause_on_fullscreen`）。
+//!   （`pause_on_battery`）；未充电且电量低于 `low_battery_percent`（`pause_on_low_battery`，接上电源即解除）；
+//!   Android 亮屏（`pause_when_screen_on`）；任一显示器上有全屏程序（`pause_on_fullscreen`）。
 //!   检测由平台模块的 `sense` 完成，查询失败的项按“不暂停”处理；Windows 上热状态、亮屏两项始终为默认值。
 //! - 降温（`slow`，`slow_when_hot`）：温度余量达到 `thermal_slow_headroom`（百分数）或热状态为 `MODERATE` 及以上时，流水线按 50% 占空比领取作业
 //!   （`pipeline::schedule`）。降温不是暂停，不报暂停原因。
 //! - 手动暂停：存在索引数据库 `meta` 表的 `manual_pause` 中（`{"until": Unix 毫秒或 null}`），核心重启后仍然有效；
 //!   到期由调用方清除。
-//! - 多个原因同时成立时只报一个，优先级：手动 > 磁盘 > 额度 > 过热 > 电池 > 亮屏 > 全屏。睡眠（`sleeping`）由流水线在报告时
+//! - 多个原因同时成立时只报一个，优先级：手动 > 磁盘 > 额度 > 过热 > 电池 > 低电量 > 亮屏 > 全屏。睡眠（`sleeping`）由流水线在报告时
 //!   插在手动之后（`pipeline::wake`）。
 //! - 检测与时钟可注入（`System`），测试不依赖真实的电源、全屏状态与系统时间。
 use std::collections::BTreeMap;
@@ -30,6 +31,8 @@ pub(crate) struct Sensed {
     pub fullscreen: bool,
     /// 使用电池供电（未充电）
     pub battery: bool,
+    /// 剩余电量（%）；没有电池或查询失败时为空
+    pub battery_percent: Option<u8>,
     /// 屏幕亮着（Android `PowerManager.isInteractive`）
     pub screen_on: bool,
     /// Android 的热状态（`PowerManager.getCurrentThermalStatus`，0 为 `NONE`）
@@ -105,6 +108,13 @@ pub(crate) fn reason(
     if s.battery && params::flag(values, "pause_on_battery") {
         return Some(PauseReason::Battery);
     }
+    if s.battery
+        && s.battery_percent
+            .is_some_and(|p| i64::from(p) < params::int(values, "low_battery_percent"))
+        && params::flag(values, "pause_on_low_battery")
+    {
+        return Some(PauseReason::LowBattery);
+    }
     if s.screen_on && params::flag(values, "pause_when_screen_on") {
         return Some(PauseReason::ScreenOn);
     }
@@ -137,6 +147,7 @@ mod tests {
         let all = Sensed {
             fullscreen: true,
             battery: true,
+            battery_percent: None,
             screen_on: true,
             thermal: THERMAL_SEVERE,
             headroom: Some(1.2),
@@ -178,6 +189,32 @@ mod tests {
             ..s
         };
         assert_eq!(r(None, false, s), Some(PauseReason::Battery));
+        let mut low = values.clone();
+        low.insert("pause_on_battery".into(), ParamValue::Bool(false));
+        let s = Sensed {
+            battery_percent: Some(39),
+            ..s
+        };
+        assert_eq!(reason(None, false, &s, &low), Some(PauseReason::LowBattery));
+        // 不低于门槛、查不到电量或已接上电源时不暂停
+        for s in [
+            Sensed {
+                battery_percent: Some(40),
+                ..s
+            },
+            Sensed {
+                battery_percent: None,
+                ..s
+            },
+            Sensed {
+                battery: false,
+                ..s
+            },
+        ] {
+            assert_eq!(reason(None, false, &s, &low), Some(PauseReason::ScreenOn));
+        }
+        low.insert("pause_on_low_battery".into(), ParamValue::Bool(false));
+        assert_eq!(reason(None, false, &s, &low), Some(PauseReason::ScreenOn));
         let s = Sensed {
             battery: false,
             ..s
@@ -200,6 +237,7 @@ mod tests {
     fn params_switch_conditions() {
         let mut values = params::defaults();
         values.insert("pause_on_battery".into(), ParamValue::Bool(false));
+        values.insert("pause_on_low_battery".into(), ParamValue::Bool(false));
         values.insert("pause_on_fullscreen".into(), ParamValue::Bool(false));
         values.insert("pause_when_screen_on".into(), ParamValue::Bool(false));
         values.insert("pause_when_hot".into(), ParamValue::Bool(false));
@@ -207,6 +245,7 @@ mod tests {
         let s = Sensed {
             fullscreen: true,
             battery: true,
+            battery_percent: Some(10),
             screen_on: true,
             thermal: THERMAL_SEVERE,
             headroom: Some(1.2),

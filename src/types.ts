@@ -135,6 +135,7 @@ export type PauseReason =
   | { type: 'quota' }
   | { type: 'hot' }
   | { type: 'battery' }
+  | { type: 'low_battery' }
   | { type: 'screen_on' }
   | { type: 'fullscreen' }
 

@@ -144,6 +144,14 @@ describe('EstimateStep', () => {
     expect(text()).not.toContain('共 0 个文件')
     expect(text()).toContain('还在统计文件，数量会继续增加')
   })
+
+  it('提示可在「设置 → 资源」中调整建立索引的方式，位置加粗', async () => {
+    mockCore({ index_estimate: () => ESTIMATE })
+    render(<EstimateStep kinds={KINDS} selftest={selftest()} minFreeGb={5} />)
+    await flush()
+    expect(text()).toContain('建立索引的方式可在「设置 → 资源」中调整，如低电量、未接电源或全屏时暂停。')
+    expect([...document.querySelectorAll('strong')].some((el) => el.textContent === '「设置 → 资源」')).toBe(true)
+  })
 })
 
 describe('Onboarding', () => {

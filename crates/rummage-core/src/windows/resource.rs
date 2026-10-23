@@ -187,15 +187,19 @@ pub(crate) fn sense(dir: &Path) -> Sensed {
     // SAFETY: SYSTEM_POWER_STATUS 全为零是合法的初始值
     let mut power: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
     // SAFETY: power 是输出参数，调用期间有效
-    let battery = if unsafe { GetSystemPowerStatus(&mut power) } != 0 {
-        power.ACLineStatus == 0
+    let (battery, battery_percent) = if unsafe { GetSystemPowerStatus(&mut power) } != 0 {
+        // 电量 255 为未知；`BatteryFlag` 的 128 表示没有电池
+        let percent = (power.BatteryLifePercent <= 100 && power.BatteryFlag & 128 == 0)
+            .then_some(power.BatteryLifePercent);
+        (power.ACLineStatus == 0, percent)
     } else {
         log::debug!("无法查询电源状态：{}", io::Error::last_os_error());
-        false
+        (false, None)
     };
     Sensed {
         fullscreen,
         battery,
+        battery_percent,
         free_gb: free_gb(dir),
         ..Sensed::default()
     }

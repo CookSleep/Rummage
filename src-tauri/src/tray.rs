@@ -265,6 +265,7 @@ fn auto_text(reason: PauseReason) -> &'static str {
         PauseReason::Quota => "已达到系统每天 6 小时的后台运行上限",
         PauseReason::Hot => "手机温度过高，已暂停",
         PauseReason::Battery => "未接电源，已暂停",
+        PauseReason::LowBattery => "电量低，已暂停",
         PauseReason::ScreenOn => "屏幕亮着，已暂停",
         PauseReason::Fullscreen => "有全屏程序在运行，已暂停",
     }

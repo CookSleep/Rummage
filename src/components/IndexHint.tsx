@@ -17,6 +17,7 @@ const PAUSE_TEXT: Record<PauseReason['type'], string> = {
   quota: '已达到系统每天 6 小时的后台运行上限',
   hot: '手机温度过高，已暂停',
   battery: '未接电源，已暂停',
+  low_battery: '电量低，已暂停',
   screen_on: '屏幕亮着，已暂停',
   fullscreen: '有全屏程序在运行，已暂停',
 }
@@ -26,6 +27,7 @@ const ADJUST_PARAM: Partial<Record<PauseReason['type'], string>> = {
   disk_low: 'min_free_disk_gb',
   hot: 'pause_when_hot',
   battery: 'pause_on_battery',
+  low_battery: 'pause_on_low_battery',
   screen_on: 'pause_when_screen_on',
   fullscreen: 'pause_on_fullscreen',
 }

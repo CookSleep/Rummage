@@ -636,6 +636,8 @@ pub enum PauseReason {
     Hot,
     /// 使用电池供电（未充电），且开启了 `pause_on_battery`
     Battery,
+    /// 使用电池供电且电量低于 `low_battery_percent`，且开启了 `pause_on_low_battery`
+    LowBattery,
     /// Android 屏幕亮着，且开启了 `pause_when_screen_on`
     ScreenOn,
     /// 有全屏程序，且开启了 `pause_on_fullscreen`

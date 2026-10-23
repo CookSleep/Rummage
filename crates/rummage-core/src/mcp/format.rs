@@ -296,6 +296,7 @@ pub fn pause_text(p: &PauseReason) -> &'static str {
         PauseReason::Quota => "paused: the system's 6-hour daily background limit has been reached",
         PauseReason::Hot => "paused: the phone is too hot",
         PauseReason::Battery => "paused: running on battery",
+        PauseReason::LowBattery => "paused: the battery is low",
         PauseReason::ScreenOn => "paused: the screen is on",
         PauseReason::Fullscreen => "paused: a full-screen program is running",
     }

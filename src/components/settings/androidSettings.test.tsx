@@ -20,6 +20,8 @@ function def(key: string, label: string, platform = ''): ParamDef {
 
 const DEFS = [
   def('pause_on_battery', '未接电源时暂停'),
+  def('pause_on_low_battery', '低电量时暂停'),
+  { ...def('low_battery_percent', '低电量（%）'), kind: { Int: { min: 10, max: 80 } }, default: 40 } as ParamDef,
   def('pause_when_screen_on', '亮屏时暂停', 'android'),
   def('pause_on_fullscreen', '全屏时暂停', 'windows'),
   def('slow_when_hot', '发热时放慢', 'android'),
@@ -80,6 +82,19 @@ describe('Android 上的设置', () => {
     await tab('资源')
     expect(text()).toContain('发热时放慢')
     expect(text()).not.toContain('开始放慢的发热程度')
+  })
+
+  it('开启“低电量时暂停”时显示低电量的门槛', async () => {
+    await open({ pause_on_low_battery: true, low_battery_percent: 40 })
+    await tab('资源')
+    expect(text()).toContain('低电量（%）')
+  })
+
+  it('关闭“低电量时暂停”时不显示低电量的门槛', async () => {
+    await open({ pause_on_low_battery: false, low_battery_percent: 40 })
+    await tab('资源')
+    expect(text()).toContain('低电量时暂停')
+    expect(text()).not.toContain('低电量（%）')
   })
 
   it('排除规则下方可以取消勾选“跳过含 .nomedia 的文件夹”，与规则一起保存', async () => {

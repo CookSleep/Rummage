@@ -2,7 +2,9 @@
 //! 资源占用控制的检测（`sense`）在这里实现。
 //! - Context 与 JavaVM 取自 `ndk-context`（tao 在 `Rust.onCreate` 中初始化），检测线程在第一次调用时永久附加到 JVM，
 //!   每次查询都在 `attach_current_thread` 的局部引用帧中进行，局部引用不累积。
-//! - 充电：`BatteryManager.isCharging()`（API 23），未在充电算使用电池。
+//! - 充电：`BatteryManager.isCharging()`（API 23），未在充电算使用电池；电量：系统粘性广播 `ACTION_BATTERY_CHANGED` 的
+//!   `level / scale`（`registerReceiver(null, …)` 只取最近一次广播，不注册接收器），与状态栏显示的一致。
+//!   不用 `getIntProperty(BATTERY_PROPERTY_CAPACITY)`：它直接读电池硬件，与 `isCharging` 的来源不同。
 //! - 亮屏：`PowerManager.isInteractive()`（API 20）。
 //! - 热状态：`PowerManager.getCurrentThermalStatus()`（API 29）；温度余量：`getThermalHeadroom(10)`（API 30），
 //!   1.0 对应 `SEVERE`。按官方文档，设备不支持或调用明显快于每秒一次时返回 NaN，此时按空处理；检测每 5 秒一次，
@@ -75,14 +77,62 @@ fn or_default<T: Default>(what: &str, res: jni::errors::Result<T>) -> T {
     })
 }
 
+/// 系统最近一次广播的电量（%，见模块说明）；没有电池信息时为空
+fn battery_level(env: &mut Env, ctx: &JObject) -> jni::errors::Result<Option<u8>> {
+    let action = env.new_string("android.intent.action.BATTERY_CHANGED")?;
+    let filter = env.new_object(
+        jni_str!("android/content/IntentFilter"),
+        jni_sig!("(Ljava/lang/String;)V"),
+        &[JValue::Object(&action)],
+    )?;
+    let intent = env
+        .call_method(
+            ctx,
+            jni_str!("registerReceiver"),
+            jni_sig!(
+                "(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)Landroid/content/Intent;"
+            ),
+            &[JValue::Object(&JObject::null()), JValue::Object(&filter)],
+        )?
+        .l()?;
+    if env.is_same_object(&intent, JObject::null())? {
+        return Ok(None);
+    }
+    let mut v = [0; 2];
+    for (i, name) in ["level", "scale"].into_iter().enumerate() {
+        let name = env.new_string(name)?;
+        v[i] = env
+            .call_method(
+                &intent,
+                jni_str!("getIntExtra"),
+                jni_sig!("(Ljava/lang/String;I)I"),
+                &[JValue::Object(&name), JValue::Int(-1)],
+            )?
+            .i()?;
+    }
+    let [level, scale] = v;
+    if level < 0 || scale <= 0 {
+        return Ok(None);
+    }
+    Ok(u8::try_from(level * 100 / scale).ok().filter(|p| *p <= 100))
+}
+
 /// 检测充电、亮屏、热状态与 `dir` 所在卷的剩余空间（见模块说明）
 pub(crate) fn sense(dir: &Path) -> Sensed {
     let battery = with_context(|env, ctx| {
         let bm = service(env, ctx, "batterymanager")?;
-        env.call_method(&bm, jni_str!("isCharging"), jni_sig!("()Z"), &[])?
-            .z()
-    })
-    .map(|charging| !charging);
+        let charging = env
+            .call_method(&bm, jni_str!("isCharging"), jni_sig!("()Z"), &[])?
+            .z();
+        Ok((charging, battery_level(env, ctx)))
+    });
+    let (battery, battery_percent) = match battery {
+        Ok((c, p)) => (or_default("充电状态", c.map(|c| !c)), or_default("电量", p)),
+        Err(err) => {
+            log::debug!("无法查询电池状态：{err}");
+            (false, None)
+        }
+    };
     let power = with_context(|env, ctx| {
         let pm = service(env, ctx, "power")?;
         let screen_on = env
@@ -119,7 +169,8 @@ pub(crate) fn sense(dir: &Path) -> Sensed {
     };
     Sensed {
         fullscreen: false,
-        battery: or_default("充电状态", battery),
+        battery,
+        battery_percent,
         screen_on,
         thermal,
         headroom: headroom.filter(|h| !h.is_nan()).map(f64::from),

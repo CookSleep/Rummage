@@ -17,6 +17,8 @@ import { HEADER_BUTTON, NOTICE_BOX, ROW_DESC, SECTION_TITLE } from './styles'
 const VIDEO_CUSTOM_KEYS = ['video_window_s', 'video_overlap_s', 'video_frames', 'video_audio']
 /** 打开“发热时放慢”时才生效、才显示 */
 const SLOW_LEVEL_KEY = 'thermal_slow_headroom'
+/** 打开“低电量时暂停”时才生效、才显示 */
+const LOW_BATTERY_KEY = 'low_battery_percent'
 /** 自检门槛改了以后要重新检测设备才生效，不自动检测 */
 const SELFTEST_KEY = 'selftest_min_cosine'
 
@@ -61,9 +63,10 @@ export default function ParamsTab({ group, defs, values, setParam, onDevice, foc
   const rebuild = defs.some((d) => d.group === group && d.affectsIndex) ? indexStatus?.rebuild : null
   const custom = values.video_preset === 0
   const slow = values.slow_when_hot !== false
+  const lowBattery = values.pause_on_low_battery !== false
   // 只在某个平台显示的参数（`platform`）在其他平台上不显示
   const all = defs.filter((d) => d.group === group && d.section && (!d.platform || d.platform === (isAndroid ? 'android' : 'windows')))
-  const list = all.filter((d) => (custom || !VIDEO_CUSTOM_KEYS.includes(d.key)) && (slow || d.key !== SLOW_LEVEL_KEY))
+  const list = all.filter((d) => (custom || !VIDEO_CUSTOM_KEYS.includes(d.key)) && (slow || d.key !== SLOW_LEVEL_KEY) && (lowBattery || d.key !== LOW_BATTERY_KEY))
   // 参数表保证同一小标题的参数相邻
   const sections: { title: string; defs: ParamDef[] }[] = []
   for (const d of list) {

@@ -3,7 +3,7 @@
 //! - 启停：按后台服务的 `IndexProgress` 事件决定（`wanted`）。有作业要处理且没有暂停时运行；因亮屏、过热暂停时
 //!   也保持运行，通知改为显示暂停原因（`note`，文字与界面的索引提示一致）：这两种暂停很快会在应用留在后台时自行解除，
 //!   而 Android 12 起应用在后台不能再启动前台服务。其余情况停止服务。
-//! - 因未接电源暂停时（`waits_for_power`）可能要等到夜里，服务保持运行会白白耗掉后台额度，因此停止服务，改为安排
+//! - 因未接电源或低电量暂停时（`waits_for_power`）可能要等到夜里，服务保持运行会白白耗掉后台额度，因此停止服务，改为安排
 //!   按充电条件运行的作业（Kotlin 侧的 `PowerJob`）。作业运行时报告 `charging`，这里清除 `blocked`：此时进程未被冻结，
 //!   后台服务几秒内发现已接上电源、继续建立索引，再按上一条启动服务（不受电池优化限制时系统才允许）。
 //!   不再需要时取消尚未运行的作业；作业结束而服务没有启动时报告 `power_job_done`，与应用回到前台时一样重新同步一次。
@@ -63,9 +63,12 @@ pub fn wanted(s: &IndexStatus) -> bool {
     }
 }
 
-/// 是否因未接电源暂停、要在接上电源时唤醒（见模块说明）
+/// 是否因未接电源或低电量暂停、要在接上电源时唤醒（见模块说明）
 pub fn waits_for_power(s: &IndexStatus) -> bool {
-    s.paused == Some(PauseReason::Battery) && waiting(s)
+    matches!(
+        s.paused,
+        Some(PauseReason::Battery | PauseReason::LowBattery)
+    ) && waiting(s)
 }
 
 #[cfg(target_os = "android")]
@@ -310,6 +313,7 @@ mod tests {
         }
         for p in [
             PauseReason::Battery,
+            PauseReason::LowBattery,
             PauseReason::Manual { until: None },
             PauseReason::Sleeping,
             PauseReason::DiskLow { free_gb: 1.0 },
@@ -330,6 +334,9 @@ mod tests {
         assert!(!waits_for_power(&status(IndexState::Idle, b, 0)));
         assert!(!waits_for_power(&status(IndexState::NoModel, b, 3)));
         assert!(!waits_for_power(&status(IndexState::Running, None, 3)));
+        let low = Some(PauseReason::LowBattery);
+        assert!(!wanted(&status(IndexState::Idle, low, 3)));
+        assert!(waits_for_power(&status(IndexState::Idle, low, 3)));
     }
 
     #[test]

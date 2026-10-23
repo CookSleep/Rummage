@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { errorMessage } from '../../lib/errors'
+import { renderMessage } from '../ConfirmDialog'
 import { showToast } from '../Toast'
 import { HEADER_BUTTON, ROW_DESC, ROW_LABEL } from './styles'
 
@@ -62,8 +63,10 @@ export default function BackgroundRunRow() {
           打开应用信息
         </button>
       </div>
-      <div data-selectable-text className={ROW_DESC}>
-        部分手机系统会在 Rummage 退到后台几秒后暂停它，不受上面的设置影响。如果锁屏或切到其他应用后进度不动，请在应用信息的「电量」或「电池」中允许 Rummage 在后台运行（各系统的叫法不同，如“允许后台耗电”“无限制”）。
+      <div data-selectable-text className={`space-y-1 ${ROW_DESC}`}>
+        <p>部分手机系统会在 Rummage 退到后台几秒后暂停它，不受上面的设置影响。</p>
+        <p>{renderMessage('如果锁屏或切到其他应用后进度不动，请在应用信息的「电量」或「电池」中允许 Rummage 在后台运行。', 'font-semibold')}</p>
+        <p>各系统的叫法不同，如“允许后台耗电”“无限制”。</p>
       </div>
     </div>
   )
