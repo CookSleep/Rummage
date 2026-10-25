@@ -14,7 +14,7 @@ import { DEFAULT_FILTERS } from '../lib/filter'
 import { lowRelevanceText, trimPeriod, unavailableText } from '../lib/format'
 import { moveSelection, type Direction, type Masonry } from '../lib/masonry'
 import { hitPosition, hitPreviewUrl, hitRegion } from '../lib/media'
-import { isAndroid, isTauri, TITLEBAR_HEIGHT } from '../lib/platform'
+import { isAndroid, isTauri } from '../lib/platform'
 import { shouldShowUpdate } from '../lib/releaseUpdates'
 import { revealFile } from '../lib/reveal'
 import { readLocal, writeLocal } from '../lib/storage'
@@ -436,10 +436,6 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
   return (
     // 页面自己滚动，不用窗口的滚动条：常驻的详情栏让出宽度后，滚动条在详情栏左侧
     <main ref={mainRef} className="page-scroll h-dvh overflow-y-auto" style={panelShown && wide ? { marginRight: PANEL_WIDTH } : undefined}>
-      {/* 电脑上滚动条那一列在标题栏中的一段铺上搜索栏的底色，与两侧连成一片；手机的状态栏是沉浸式的，不铺 */}
-      {TITLEBAR_HEIGHT > 0 && (
-        <div aria-hidden className="pointer-events-none fixed top-0 z-20 h-[var(--safe-top)] w-2 bg-gray-50/85 dark:bg-gray-950/85" style={{ right: panelShown && wide ? PANEL_WIDTH : 0 }} />
-      )}
       {/* 首页像搜索引擎：项目名在上、搜索框居中；开始搜索后搜索框移到顶部 */}
       <header
         ref={headerRef}
