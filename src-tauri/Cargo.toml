@@ -46,6 +46,8 @@ tempfile = "=3.27.0"
 
 # 只有桌面平台能用的插件
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# 去掉资源目录的 \\?\ 前缀（src/agent.rs），已是 tauri 的依赖，CC0-1.0 OR MIT-0 OR Apache-2.0
+dunce = "=1.0.5"
 tauri-plugin-single-instance = "=2.5.3"
 # 应用内更新（src/update.rs），只供 Rust 侧的更新命令使用
 tauri-plugin-updater = "=2.13.3"

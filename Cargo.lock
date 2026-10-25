@@ -5070,6 +5070,7 @@ dependencies = [
 name = "rummage"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "flate2",
  "jni 0.22.4",
  "jsonc-parser",

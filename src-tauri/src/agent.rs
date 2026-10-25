@@ -422,7 +422,8 @@ fn bundled_skill<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, ApiError> {
             "找不到 Skill 所在的目录，请重新安装 Rummage。",
         )
     })?;
-    Ok(res.join("skills").join(NAME))
+    // 资源目录经过规范化，Windows 上带 `\\?\` 前缀
+    Ok(dunce::simplified(&res).join("skills").join(NAME))
 }
 
 fn skill_path(target: SkillTarget) -> Option<PathBuf> {
