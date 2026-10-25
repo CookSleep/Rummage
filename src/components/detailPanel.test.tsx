@@ -87,7 +87,7 @@ describe('DetailPanel', () => {
     expect(calls.filter((c) => c.cmd === 'file_details').map((c) => c.args)).toEqual([{ fileId: 7 }, { fileId: 7 }])
   })
 
-  it('点击文件名时复制，点击路径时在资源管理器中显示', async () => {
+  it('点击文件名、路径时复制', async () => {
     mockCore({ file_details: () => INFO })
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
@@ -98,8 +98,23 @@ describe('DetailPanel', () => {
     button(HIT.name).click()
     button(HIT.path).click()
     await flush()
-    expect(writeText.mock.calls).toEqual([[HIT.name]])
-    expect(onReveal).toHaveBeenCalledTimes(1)
+    expect(writeText.mock.calls).toEqual([[HIT.name], [HIT.path]])
+    expect(onReveal).not.toHaveBeenCalled()
+  })
+
+  it('点击图片预览时打开文件', async () => {
+    mockCore({ file_details: () => INFO })
+    // jsdom 没有 ResizeObserver，图片预览用它量宽度
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+    const onOpen = vi.fn()
+    render(<DetailPanel hit={{ ...HIT, kind: 'image', name: 'a.jpg' }} query="" overlay={false} viewportHeight={800} connected onHide={vi.fn()} onOpen={onOpen} onReveal={vi.fn()} onSimilar={vi.fn()} />)
+    await flush()
+    document.querySelector('img')!.click()
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
   })
 
   it('有 onShare 时显示“分享”，点击调用它；没有时不显示', async () => {

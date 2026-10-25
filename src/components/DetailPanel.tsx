@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { FileInfo, SearchHit } from '../types'
-import { copyText } from '../lib/clipboard'
+import { copyWithToast } from '../lib/clipboard'
 import { errorMessage } from '../lib/errors'
 import { canFindSimilar, formatSize, formatTime, indexStateText, kindLabel, matchPercent, matchText, openAtText } from '../lib/format'
 import { hitPosition } from '../lib/media'
@@ -12,7 +12,6 @@ import { CloseIcon, FolderIcon, KindIcon, OpenIcon, PanelCollapseIcon, ShareIcon
 import Preview from './Preview'
 import { HoverTip } from './Tip'
 import PathText from './PathText'
-import { showToast } from './Toast'
 
 /** 详情栏宽度（px）；窗口不窄于 `PANEL_OVERLAY_BELOW` 时详情栏常驻右侧、网格让出这么宽，否则选中结果后覆盖整个窗口 */
 export const PANEL_WIDTH = 400
@@ -28,16 +27,9 @@ function selectedIn(el: HTMLElement) {
   return !!sel && !sel.isCollapsed && sel.containsNode(el, true)
 }
 
-/** 点击文件名时复制 */
-async function copyField(el: HTMLElement, text: string, what: string) {
-  if (selectedIn(el)) return
-  try {
-    await copyText(text)
-    showToast(`${what}已复制`, 'success')
-  } catch (err) {
-    console.warn(err)
-    showToast(`复制${what}失败`, 'error')
-  }
+/** 点击文件名、路径时复制 */
+function copyField(el: HTMLElement, text: string, what: string) {
+  if (!selectedIn(el)) void copyWithToast(text, what)
 }
 
 const COPY_TEXT = 'cursor-pointer text-left transition duration-200 hover:text-blue-500 dark:hover:text-blue-400'
@@ -136,13 +128,13 @@ function Details({ hit, query, onOpen, onReveal, onSimilar, onShare }: DetailsPr
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-5 pb-5 [scrollbar-gutter:stable_both-edges]">
-        <Preview hit={hit} query={query} />
+        <Preview hit={hit} query={query} onOpen={onOpen} />
 
         <Section title="文件">
           <Row label="路径">
-            <button type="button" data-selectable-text onClick={(e) => !selectedIn(e.currentTarget) && onReveal()} className={COPY_TEXT}>
+            <button type="button" data-selectable-text onClick={(e) => copyField(e.currentTarget, hit.path, '路径')} className={COPY_TEXT}>
               <PathText path={hit.path} />
-              <HoverTip label={REVEAL_TEXT} />
+              <HoverTip label="复制路径" />
             </button>
           </Row>
           <Row label="类型">{kindLabel(hit.kind)}{info?.ext ? `（.${info.ext}）` : ''}</Row>
@@ -239,7 +231,7 @@ export default function DetailPanel({ hit, query, overlay, viewportHeight, conne
         {hit && (
           <>
             <KindIcon kind={hit.kind} className="mt-2 h-5 w-5 flex-shrink-0 text-gray-400" />
-            <button type="button" onClick={(e) => void copyField(e.currentTarget, hit.name, '文件名')} className={`mt-2 min-w-0 flex-1 break-all text-sm font-semibold text-gray-800 dark:text-gray-100 ${COPY_TEXT}`}>
+            <button type="button" onClick={(e) => copyField(e.currentTarget, hit.name, '文件名')} className={`mt-2 min-w-0 flex-1 break-all text-sm font-semibold text-gray-800 dark:text-gray-100 ${COPY_TEXT}`}>
               {hit.name}
               <HoverTip label="复制文件名" />
             </button>

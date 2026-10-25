@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { invoke } from '@tauri-apps/api/core'
 import type { FailedCursor, FailedFile, FailedPage } from '../types'
+import { copyWithToast } from '../lib/clipboard'
 import { errorMessage } from '../lib/errors'
-import { revealFile } from '../lib/reveal'
 import { useEscape } from '../hooks/useEscape'
 import ConfirmDialog, { renderMessage } from './ConfirmDialog'
 import { CloseIcon, KindIcon } from './icons'
 import { BUTTON, ERROR_TEXT, ICON_TILE, PRIMARY_BUTTON, SMALL_BUTTON } from './onboarding/styles'
 import PathText from './PathText'
+import { HoverTip } from './Tip'
 import { showToast } from './Toast'
 
 /** 可点击的文件名与路径：换行显示完整 */
@@ -225,8 +226,9 @@ export default function FailedFilesDialog({ onClose }: { onClose: () => void }) 
                     <button type="button" onClick={() => open(f)} className={`block text-sm text-gray-800 dark:text-gray-100 ${LINK_TEXT}`}>
                       {f.name}
                     </button>
-                    <button type="button" onClick={() => void revealFile(f.fileId, f.path)} className={`mt-0.5 block text-xs text-gray-400 dark:text-gray-500 ${LINK_TEXT}`}>
+                    <button type="button" onClick={() => void copyWithToast(f.path, '路径')} className={`mt-0.5 block text-xs text-gray-400 dark:text-gray-500 ${LINK_TEXT}`}>
                       <PathText path={dir} />
+                      <HoverTip label="复制路径" />
                     </button>
                     {f.reason && (
                       <span data-selectable-text className="mt-0.5 block text-xs text-red-500 [overflow-wrap:anywhere] dark:text-red-400">

@@ -113,7 +113,7 @@ function previewSegments(hit: SearchHit) {
  * 原图加载完才替换缩略图，失败时保留缩略图。
  * 知道原图宽高时，两者放在按原图比例算出的同一尺寸里：缩略图可能截过（很长的图只留上部），贴顶显示，替换时不跳动
  */
-function ImagePreview({ hit }: { hit: SearchHit }) {
+function ImagePreview({ hit, onOpen }: { hit: SearchHit; onOpen: () => void }) {
   const wantOriginal = useSettled()
   const [original, setOriginal] = useState<'loading' | 'loaded' | 'failed'>('loading')
   const [thumbFailed, setThumbFailed] = useState(false)
@@ -135,14 +135,15 @@ function ImagePreview({ hit }: { hit: SearchHit }) {
   const h = hit.height ?? 0
   const scale = w && h && boxWidth ? Math.min(1, boxWidth / w, (window.innerHeight * 0.45) / h) : 0
   const style = scale ? { width: w * scale, height: h * scale } : undefined
-  const cls = `mx-auto max-h-[45vh] rounded-xl object-contain ${style ? 'object-top' : ''}`
+  const cls = `mx-auto max-h-[45vh] cursor-pointer rounded-xl object-contain ${style ? 'object-top' : ''}`
   return (
     <div ref={boxRef}>
-      {original !== 'loaded' && !thumbFailed && <img src={thumbUrl(hit)} alt={hit.name} onError={() => setThumbFailed(true)} style={style} className={cls} />}
+      {original !== 'loaded' && !thumbFailed && <img src={thumbUrl(hit)} alt={hit.name} onClick={onOpen} onError={() => setThumbFailed(true)} style={style} className={cls} />}
       {wantOriginal && original !== 'failed' && (
         <img
           src={imageUrl(hit.fileId)}
           alt={hit.name}
+          onClick={onOpen}
           onLoad={() => setOriginal('loaded')}
           onError={() => setOriginal('failed')}
           style={style}
@@ -158,7 +159,7 @@ function ImagePreview({ hit }: { hit: SearchHit }) {
  * 原图读不了或不是原图（WebView 不支持的格式退回的是截过的缩略图，宽高比对不上）时改为显示那一段的裁剪图。
  * 高度固定为详情栏给出的 `--long-image-max`：详情栏内容是可滚动的纵向弹性布局，不固定会被压扁
  */
-function LongImagePreview({ hit, region }: { hit: SearchHit; region: NonNullable<ReturnType<typeof hitRegion>> }) {
+function LongImagePreview({ hit, region, onOpen }: { hit: SearchHit; region: NonNullable<ReturnType<typeof hitRegion>>; onOpen: () => void }) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   const [originalFailed, setOriginalFailed] = useState(false)
   const [cropFailed, setCropFailed] = useState(false)
@@ -192,7 +193,7 @@ function LongImagePreview({ hit, region }: { hit: SearchHit; region: NonNullable
     if (cropFailed) return <Note>无法显示这张图片，可以用系统程序打开</Note>
     return (
       <div className="flex h-[var(--long-image-max)] flex-shrink-0 items-center justify-center">
-        <img src={cropUrl(hit, region.segmentId)} alt={hit.name} onError={() => setCropFailed(true)} className="max-h-full max-w-full rounded-xl object-contain" />
+        <img src={cropUrl(hit, region.segmentId)} alt={hit.name} onClick={onOpen} onError={() => setCropFailed(true)} className="max-h-full max-w-full cursor-pointer rounded-xl object-contain" />
       </div>
     )
   }
@@ -203,9 +204,10 @@ function LongImagePreview({ hit, region }: { hit: SearchHit; region: NonNullable
         <img
           src={imageUrl(hit.fileId)}
           alt={hit.name}
+          onClick={onOpen}
           onLoad={(e) => onLoad(e.currentTarget)}
           onError={() => setOriginalFailed(true)}
-          className={wide ? 'block h-[calc(var(--long-image-max)-8px)] w-auto max-w-none' : 'block w-full'}
+          className={`block cursor-pointer ${wide ? 'h-[calc(var(--long-image-max)-8px)] w-auto max-w-none' : 'w-full'}`}
         />
         {size && (
           <div
@@ -289,15 +291,15 @@ function MediaPreview({ hit }: { hit: SearchHit }) {
   )
 }
 
-/** 详情栏顶部的预览；`query` 为文字查询，文档预览中高亮其中的词 */
-export default function Preview({ hit, query }: { hit: SearchHit; query: string }) {
+/** 详情栏顶部的预览；`query` 为文字查询，文档预览中高亮其中的词；点击图片时调用 `onOpen` 打开文件 */
+export default function Preview({ hit, query, onOpen }: { hit: SearchHit; query: string; onOpen: () => void }) {
   // 占位文件与离线设备上的文件不预览
   if (hit.missing) return <Note>找不到文件所在的文件夹，无法预览</Note>
   if (hit.offline) return <Note>文件所在的设备未连接，无法预览</Note>
   if (hit.cloud) return <Note>文件仅在云端，打开时由系统下载，这里不预览</Note>
   if (hit.kind === 'image') {
     const region = hitRegion(hit)
-    return region ? <LongImagePreview hit={hit} region={region} /> : <ImagePreview hit={hit} />
+    return region ? <LongImagePreview hit={hit} region={region} onOpen={onOpen} /> : <ImagePreview hit={hit} onOpen={onOpen} />
   }
   if (hit.kind === 'audio' || hit.kind === 'video') return <MediaPreview hit={hit} />
   const ids = previewSegments(hit)
