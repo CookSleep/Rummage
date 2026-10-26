@@ -760,7 +760,10 @@ fn respond(body: Request, state: &Arc<State>) -> Result<Reply, ApiError> {
         | Request::GetHistory
         | Request::AddHistory { .. }
         | Request::RemoveHistory { .. }
-        | Request::ClearHistory) => data::respond(state, body),
+        | Request::ClearHistory
+        | Request::GetFolderFilter
+        | Request::SetFolderFilter { .. }
+        | Request::LocateFolder { .. }) => data::respond(state, body),
     }
 }
 

@@ -248,8 +248,7 @@ describe('搜索页：后台服务重新连上后重新读取', () => {
     handlers.list_roots = () => [{ id: 1, path: 'D:\\照片', offline: false, missing: false, files: 3, excludes: [], skipNomedia: true, scanning: false }]
     await emitEvent('core-status', 'running')
     expect(count('list_roots')).toBe(2)
-
-    await click(button('文件夹'))
-    expect([...document.querySelectorAll('[role="option"]')].map((el) => el.textContent)).toEqual(['照片'])
+    expect(count('get_folder_filter')).toBe(2)
+    expect(button('文件夹').getAttribute('aria-disabled')).toBeNull()
   })
 })

@@ -22,6 +22,7 @@ mod data;
 mod data_dir;
 mod diagnostics;
 mod failures;
+mod folder_filter;
 mod image_query;
 mod open_at;
 mod pause;
@@ -145,6 +146,12 @@ pub fn run() {
             search::add_history,
             search::remove_history,
             search::clear_history,
+            folder_filter::get_folder_filter,
+            folder_filter::set_folder_filter,
+            #[cfg(desktop)]
+            folder_filter::pick_subfolder,
+            #[cfg(target_os = "android")]
+            android::storage::pick_subfolder,
             #[cfg(not(target_os = "android"))]
             image_query::pick_image,
             #[cfg(target_os = "android")]

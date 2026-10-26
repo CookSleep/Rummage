@@ -426,7 +426,7 @@ fn search(text: String) -> Request {
         image_path: None,
         similar: None,
         kinds: Vec::new(),
-        root_ids: Vec::new(),
+        folders: Vec::new(),
         since: None,
         until: None,
         limit: None,

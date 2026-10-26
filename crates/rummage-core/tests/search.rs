@@ -68,7 +68,7 @@ fn query(text: Option<&str>, image_path: Option<&Path>, kinds: &[&str]) -> Reque
         image_path: image_path.map(|p| p.to_string_lossy().into_owned()),
         similar: None,
         kinds: kinds.iter().map(|k| k.to_string()).collect(),
-        root_ids: Vec::new(),
+        folders: Vec::new(),
         since: None,
         until: None,
         limit: None,

@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "search"
-description = "允许主窗口搜索、读取索引进度、片段正文与文件详情、选择以图搜图的图片，按索引中的文件 ID 打开文件（可带命中位置）或在资源管理器中显示、查询默认程序能否打开到命中位置，以及读取、记录、删除和清空搜索历史"
+description = "允许主窗口搜索、读取索引进度、片段正文与文件详情、选择以图搜图的图片，按索引中的文件 ID 打开文件（可带命中位置）或在资源管理器中显示、查询默认程序能否打开到命中位置，读取、记录、删除和清空搜索历史，以及读取与保存文件夹筛选、在已索引的文件夹中选择子文件夹（路径由 Rust 侧的对话框选择）"
 commands.allow = [
   "search",
   "index_status",
@@ -14,4 +14,7 @@ commands.allow = [
   "add_history",
   "remove_history",
   "clear_history",
+  "get_folder_filter",
+  "set_folder_filter",
+  "pick_subfolder",
 ]

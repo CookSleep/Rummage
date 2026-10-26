@@ -1,10 +1,11 @@
 //! 索引：SQLite 数据库的模式、迁移与类型化访问（`db`），网盘占位文件与卷检查（`fsx`），
 //! 根目录管理（`roots`），扫描与对账（`scan`），文件哈希（`hash`），索引作业队列（`jobs`），设置改了以后找出要重建的文件（`rebuild`），
-//! 内存向量索引（`vindex`）与检索（`search`），分数校准的背景分布（`calib`），按 ID 读取单个文件与片段（`files`），失败文件的列表与重试（`failures`），搜索历史（`history`），缩略图的引用（`thumbs`）
+//! 内存向量索引（`vindex`）与检索（`search`），分数校准的背景分布（`calib`），按 ID 读取单个文件与片段（`files`），失败文件的列表与重试（`failures`），搜索历史（`history`），搜索页的文件夹筛选（`folder_filter`），缩略图的引用（`thumbs`）
 pub mod calib;
 pub mod db;
 pub mod failures;
 pub mod files;
+pub mod folder_filter;
 pub mod fsx;
 pub mod hash;
 pub mod history;
@@ -27,6 +28,7 @@ pub use calib::{CalibError, QueryKind, Rng, TextQueries};
 pub use db::{Db, DbError, NOTICE_DB_RESTORED, Space, blob_to_vec, vec_to_blob};
 pub use failures::{FailedFile, FailedPage};
 pub use files::{FileRow, IndexInfo, JobRow, SegmentRow};
+pub use folder_filter::{FolderEntry, find_scope, normalize_rel};
 pub use fsx::{FsError, IoCause, check_volume, ensure_local, io_cause, io_kind};
 pub use hash::{HashError, content_hash, quick_hash, quick_hash_with_id};
 pub use jobs::{

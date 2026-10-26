@@ -89,7 +89,16 @@ fn request_round_trip() {
                 segment_id: None,
             }),
             kinds: vec!["image".into()],
-            root_ids: vec![1, 2],
+            folders: vec![
+                FolderScope {
+                    root_id: 1,
+                    rel: String::new(),
+                },
+                FolderScope {
+                    root_id: 2,
+                    rel: r"照片\2024".into(),
+                },
+            ],
             since: Some(0),
             until: None,
             limit: Some(20),
@@ -170,6 +179,25 @@ fn request_round_trip() {
             query: "旅行".into(),
         },
         Request::ClearHistory,
+        Request::GetFolderFilter,
+        Request::SetFolderFilter {
+            custom: true,
+            entries: vec![
+                FolderFilterEntry {
+                    root_id: 1,
+                    rel: String::new(),
+                    checked: false,
+                },
+                FolderFilterEntry {
+                    root_id: 1,
+                    rel: r"照片\2024".into(),
+                    checked: true,
+                },
+            ],
+        },
+        Request::LocateFolder {
+            path: r"D:\资料\照片".into(),
+        },
         Request::SetParam {
             key: "weight_name".into(),
             value: ParamValue::Float(1.5),
@@ -331,6 +359,25 @@ fn response_and_event_round_trip() {
         }),
         Ok(Reply::History {
             queries: vec!["柯基".into(), "年终 总结".into()],
+        }),
+        Ok(Reply::FolderFilter {
+            custom: false,
+            entries: vec![FolderFilterEntry {
+                root_id: 2,
+                rel: "照片".into(),
+                checked: true,
+            }],
+        }),
+        Ok(Reply::FolderLocation {
+            scope: Some(FolderScope {
+                root_id: 2,
+                rel: "照片".into(),
+            }),
+            files: 12,
+        }),
+        Ok(Reply::FolderLocation {
+            scope: None,
+            files: 0,
         }),
     ] {
         round_trip(CoreMsg::Response { id: 1, result });

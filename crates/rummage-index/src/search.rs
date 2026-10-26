@@ -52,7 +52,9 @@ const KEYWORD_LIMIT: usize = 200;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Filter {
     pub kinds: Vec<String>,
-    pub root_ids: Vec<i64>,
+    /// 搜索范围，取各项的并集：(根目录 id, 相对根目录的路径)，路径为空表示整个根目录，
+    /// 否则用本机分隔符、前后不带分隔符（`rummage_proto::FolderScope`）
+    pub folders: Vec<(i64, String)>,
     /// 修改时间的起止（Unix 毫秒，含两端）
     pub since: Option<i64>,
     pub until: Option<i64>,
@@ -212,7 +214,28 @@ impl FileHits {
     }
 }
 
-/// 追加过滤条件，参数依次放进 `args`
+/// 文件夹范围的条件 `(… OR …)`（不含前面的 `AND`），参数依次放进 `args`；`folders` 不能为空。
+/// 子文件夹用 `LIKE` 有意取它的 ASCII 不区分大小写：Windows 路径不区分大小写，命令行输入的大小写可能与磁盘不同
+pub(crate) fn folders_sql(folders: &[(i64, String)], args: &mut Vec<Value>) -> String {
+    let parts: Vec<&str> = folders
+        .iter()
+        .map(|(root, rel)| {
+            args.push(Value::Integer(*root));
+            if rel.is_empty() {
+                return "f.root_id = ?";
+            }
+            let escaped = rel.replace('!', "!!").replace('%', "!%").replace('_', "!_");
+            args.push(Value::Text(format!(
+                "{escaped}{}%",
+                std::path::MAIN_SEPARATOR
+            )));
+            "(f.root_id = ? AND f.rel_path LIKE ? ESCAPE '!')"
+        })
+        .collect();
+    format!("({})", parts.join(" OR "))
+}
+
+/// 追加过滤条件，参数依次放进 `args`。文件夹的子文件夹按 `LIKE` 匹配（`folders_sql`），有意 ASCII 不区分大小写
 fn filter_sql(filter: &Filter, args: &mut Vec<Value>) -> String {
     let mut sql = String::new();
     if !filter.kinds.is_empty() {
@@ -222,12 +245,9 @@ fn filter_sql(filter: &Filter, args: &mut Vec<Value>) -> String {
         );
         args.extend(filter.kinds.iter().map(|k| Value::Text(k.clone())));
     }
-    if !filter.root_ids.is_empty() {
-        sql += &format!(
-            " AND f.root_id IN ({})",
-            vec!["?"; filter.root_ids.len()].join(",")
-        );
-        args.extend(filter.root_ids.iter().map(|&id| Value::Integer(id)));
+    if !filter.folders.is_empty() {
+        sql += " AND ";
+        sql += &folders_sql(&filter.folders, args);
     }
     if let Some(t) = filter.since {
         sql += " AND f.mtime >= ?";
@@ -470,8 +490,37 @@ pub fn search(db: &Mutex<Db>, index: &Mutex<VIndex>, q: &Query) -> Result<Vec<Hi
         Some((_, space)) => {
             vi.sync(&db)?;
             let adaptive = q.kind == QueryKind::Similar;
+            // 有子文件夹时内存索引中没有路径可比，先从库中取出范围内的文件，各模态共用
+            let files = if q.filter.folders.iter().any(|(_, rel)| !rel.is_empty()) {
+                let mut args = Vec::new();
+                let sql = format!(
+                    "SELECT f.id FROM files f WHERE {}",
+                    folders_sql(&q.filter.folders, &mut args)
+                );
+                let ids: HashSet<i64> = db
+                    .conn
+                    .prepare(&sql)
+                    .and_then(|mut stmt| {
+                        stmt.query_map(params_from_iter(args), |row| row.get(0))?
+                            .collect()
+                    })
+                    .map_err(|err| db.err(err))?;
+                Some(ids)
+            } else {
+                None
+            };
             mods.iter()
-                .map(|m| vi.coarse(q.coarse, space, m, q.filter, p.candidates, adaptive))
+                .map(|m| {
+                    vi.coarse(
+                        q.coarse,
+                        space,
+                        m,
+                        q.filter,
+                        files.as_ref(),
+                        p.candidates,
+                        adaptive,
+                    )
+                })
                 .collect()
         }
         None => Vec::new(),

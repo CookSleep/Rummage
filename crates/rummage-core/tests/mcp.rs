@@ -1,7 +1,7 @@
 //! MCP 服务（`rummage-core mcp`）的集成测试：手写 JSON-RPC 走 stdio。
 //! - 旧版握手（`initialize`，2025-11-25）与新版（`server/discover`、逐请求 `_meta`，2026-07-28）都能用；
 //! - `tools/list` 的工具与注解（只读、会移除索引的、幂等的）、title；参数不对时返回 `isError` 并附正确写法；
-//! - 临时数据目录中的一次真实 `search_files`（不放模型，只靠文件名命中）与 `index_status`，以及查看与操作应用的
+//! - 临时数据目录中的真实 `search_files`（不放模型，只靠文件名命中；含按文件夹与子文件夹筛选）与 `index_status`，以及查看与操作应用的
 //!   工具（文件夹的增改删、参数的查看与修改、暂停与恢复、失败文件）；
 //! - stdin 关闭后进程退出。
 //!
@@ -176,7 +176,7 @@ fn legacy_handshake_and_tools() {
         "query",
         "image_path",
         "kinds",
-        "folder",
+        "folders",
         "limit",
         "offset",
         "include_weak",
@@ -342,11 +342,27 @@ async fn real_search() {
         !err && text.contains(&format!("  {folder} (2 files)")),
         "{text}"
     );
-    // 不是已索引的文件夹：列出可用的
+    // 已索引的文件夹或其中的子文件夹（大小写可以不同）
     let r = m.request(
         4,
         "tools/call",
-        json!({"name": "search_files", "arguments": {"query": "发票", "folder": r"C:\别处"}}),
+        json!({"name": "search_files", "arguments": {"query": "发票归档说明", "folders": [folder.to_uppercase()]}}),
+    );
+    let (text, err) = text_of(&r);
+    assert!(!err && text.contains("发票归档说明.txt"), "{text}");
+    let sub = format!(r"{folder}\子文件夹");
+    let r = m.request(
+        4,
+        "tools/call",
+        json!({"name": "search_files", "arguments": {"query": "发票归档说明", "folders": [sub]}}),
+    );
+    let (text, err) = text_of(&r);
+    assert!(!err && !text.contains("发票归档说明.txt"), "{text}");
+    // 不在已索引的文件夹中：列出可用的
+    let r = m.request(
+        4,
+        "tools/call",
+        json!({"name": "search_files", "arguments": {"query": "发票", "folders": [r"C:\别处"]}}),
     );
     let (text, err) = text_of(&r);
     assert!(err && text.contains(&folder), "{text}");

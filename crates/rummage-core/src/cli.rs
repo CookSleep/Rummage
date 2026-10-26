@@ -4,7 +4,7 @@
 //! - 数据目录：`--data-dir` 指定（必须已有 `index.db`），否则用 `rummage_datadir::locate`（只解析、不迁移）。
 //! - 每次运行新建一个 IPC 连接，用完即退出；搜索不计入搜索历史（不发 `AddHistory`）。
 //! - `--image` 与 `--folder` 的相对路径按本进程的当前目录转成绝对路径（核心的当前目录不同）。
-//!   `--folder` 必须是已索引的文件夹（与界面的文件夹筛选一致），按不区分大小写、去掉末尾分隔符后的路径比较。
+//!   `--folder` 可重复，每个是已索引的文件夹或其中的子文件夹，由核心定位（`LocateFolder`，不区分大小写），搜索范围取并集。
 //! - 日期写成 `YYYY-MM-DD`，按本地时区，`--since` 从当天 0 点起，`--until` 到当天结束，都包含当天。
 //! - 退出码：0 有结果或操作成功，1 没有结果（含命中已失效、命中没有文字、没有失败的文件），2 出错（用法错误、
 //!   连不上核心、请求被拒绝）。
@@ -100,7 +100,7 @@ pub fn usage() -> String {
 
   按内容搜索已索引的文件。查询可以是一句描述，也可以是关键词；--image 以图搜图，可同时给出文字描述。
   类型：document、image、audio、video、other（只按文件名索引的文件），多个用逗号分隔。
-  文件夹：已索引的文件夹，可用 status 查看。日期：YYYY-MM-DD，本地时间，包含当天。数量：1–{max}，默认 20。
+  文件夹：已索引的文件夹或其中的子文件夹，可重复给出多个，已索引的文件夹可用 status 查看。日期：YYYY-MM-DD，本地时间，包含当天。数量：1–{max}，默认 20。
   --include-weak 同时显示匹配度较低的结果；--json 输出 JSON（非 ASCII 字符转义为 \\uXXXX）。
   --output 把结果保存到新文件，格式按扩展名：.csv、.json 或 .txt（每行一个路径）。
   命中 ID 见 search 的结果，context 输出该处已索引的正文与前后段落。
@@ -119,7 +119,8 @@ pub struct SearchArgs {
     pub text: Option<String>,
     pub image: Option<PathBuf>,
     pub kinds: Vec<String>,
-    pub folder: Option<PathBuf>,
+    /// 为空表示不限
+    pub folders: Vec<PathBuf>,
     pub since: Option<NaiveDate>,
     pub until: Option<NaiveDate>,
     pub limit: u32,
@@ -211,7 +212,7 @@ pub fn parse(cmd: &str, args: impl IntoIterator<Item = OsString>) -> Result<Args
         text: None,
         image: None,
         kinds: Vec::new(),
-        folder: None,
+        folders: Vec::new(),
         since: None,
         until: None,
         limit: 20,
@@ -254,7 +255,7 @@ pub fn parse(cmd: &str, args: impl IntoIterator<Item = OsString>) -> Result<Args
         match flag.as_str() {
             "--data-dir" => data_dir = Some(PathBuf::from(value)),
             "--image" => s.image = Some(PathBuf::from(value)),
-            "--folder" => s.folder = Some(PathBuf::from(value)),
+            "--folder" => s.folders.push(PathBuf::from(value)),
             "--output" => {
                 let path = PathBuf::from(value);
                 if export::ext(&path).is_none() {
@@ -428,16 +429,21 @@ async fn run_search(s: &mut Session, a: SearchArgs, json: bool) -> Result<Outcom
     let cwd = |p: &Path| {
         std::path::absolute(p).map_err(|_| format!("无法识别路径 \"{}\"。", p.display()))
     };
-    let mut root_ids = Vec::new();
-    if let Some(folder) = &a.folder {
+    let mut folders = Vec::new();
+    for folder in &a.folders {
         let folder = cwd(folder)?;
-        let Reply::Roots { roots } = s.request(Request::ListRoots).await? else {
+        let path = folder.to_string_lossy().into_owned();
+        let Reply::FolderLocation { scope, .. } = s.request(Request::LocateFolder { path }).await?
+        else {
             return Err(unexpected());
         };
-        let Some(root) = crate::manage::find_root(&roots, &folder.to_string_lossy()) else {
-            return Err(output::not_a_root(&folder, &roots));
+        let Some(scope) = scope else {
+            let Reply::Roots { roots } = s.request(Request::ListRoots).await? else {
+                return Err(unexpected());
+            };
+            return Err(output::not_in_root(&folder, &roots));
         };
-        root_ids.push(root.id);
+        folders.push(scope);
     }
     let image_path = match &a.image {
         Some(p) => Some(cwd(p)?.to_string_lossy().into_owned()),
@@ -449,7 +455,7 @@ async fn run_search(s: &mut Session, a: SearchArgs, json: bool) -> Result<Outcom
         image_path,
         similar: None,
         kinds: a.kinds.clone(),
-        root_ids,
+        folders,
         since,
         until,
         limit: Some(a.limit.max(limit_range().0)),

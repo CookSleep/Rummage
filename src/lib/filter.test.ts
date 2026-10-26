@@ -1,5 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { customLabel, DEFAULT_FILTERS, isReversed, toSearchFilter } from './filter'
+import { customLabel, DEFAULT_FILTERS, folderScope, isReversed, toSearchFilter } from './filter'
+
+describe('folderScope', () => {
+  it('子文件夹缩小所在根目录的范围，未勾选的根目录连同子文件夹都不参与', () => {
+    expect(
+      folderScope([
+        { rootId: 1, rel: '', checked: true },
+        { rootId: 1, rel: '2023', checked: false },
+        { rootId: 2, rel: '', checked: true },
+        { rootId: 2, rel: '2024', checked: true },
+        { rootId: 2, rel: '2025', checked: true },
+        { rootId: 3, rel: '', checked: false },
+        { rootId: 3, rel: '旅行', checked: true },
+      ]),
+    ).toEqual([
+      { rootId: 1, rel: '' },
+      { rootId: 2, rel: '2024' },
+      { rootId: 2, rel: '2025' },
+    ])
+    expect(folderScope([])).toEqual([])
+  })
+})
 
 describe('toSearchFilter', () => {
   const now = new Date(2026, 9, 14, 15, 30)
@@ -7,14 +28,15 @@ describe('toSearchFilter', () => {
   it('默认全部勾选，此时不限种类', () => {
     const f = toSearchFilter(DEFAULT_FILTERS, now)
     expect(f.kinds).toEqual([])
-    expect(f.rootIds).toEqual([])
+    expect(f.folders).toEqual([])
     expect(f.since).toBeNull()
     const some = toSearchFilter({ ...DEFAULT_FILTERS, kinds: ['image', 'video'] }, now)
     expect(some.kinds).toEqual(['image', 'video'])
   })
 
   it('文件夹与修改时间', () => {
-    expect(toSearchFilter({ ...DEFAULT_FILTERS, rootIds: [3, 5] }, now).rootIds).toEqual([3, 5])
+    const folders = [{ rootId: 3, rel: '' }, { rootId: 5, rel: '2024\\旅行' }]
+    expect(toSearchFilter({ ...DEFAULT_FILTERS, folders }, now).folders).toEqual(folders)
     expect(toSearchFilter({ ...DEFAULT_FILTERS, time: 'today' }, now).since).toBe(new Date(2026, 9, 14).getTime())
     expect(toSearchFilter({ ...DEFAULT_FILTERS, time: 'week' }, now).since).toBe(now.getTime() - 7 * 86_400_000)
     expect(toSearchFilter({ ...DEFAULT_FILTERS, time: 'year' }, now).since).toBe(now.getTime() - 365 * 86_400_000)

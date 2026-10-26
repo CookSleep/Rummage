@@ -23,7 +23,7 @@ pub use setup::{
 };
 
 /// 首次发布前保持 1；发布后每次修改消息类型都要加 1。
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -149,7 +149,7 @@ pub enum Request {
     /// 只限图片，重新读取该图片与文字合成一条查询）；`image_path` 不为空时以图搜图（不走文件名通道，`text` 为附加的
     /// 文字描述，与图片合成一条查询），路径只用于计算查询向量；
     /// 否则按 `text` 做语义与文件名检索。
-    /// `kinds`、`root_ids` 为空表示不限，`since`、`until` 为修改时间（Unix 毫秒，含两端），
+    /// `kinds`、`folders` 为空表示不限（`folders` 为各项的并集），`since`、`until` 为修改时间（Unix 毫秒，含两端），
     /// `limit` 为空时用参数 `result_limit`；`snippets` 为真时给文档结果附正文片段（`SearchHit::snippet`，命令行用）。
     /// `supersede` 为真时（界面边输入边搜索）可被取代：同一连接上又收到带此标记的搜索时，本次中止并回 `cancelled`
     Search {
@@ -157,7 +157,7 @@ pub enum Request {
         image_path: Option<String>,
         similar: Option<SimilarTo>,
         kinds: Vec<String>,
-        root_ids: Vec<i64>,
+        folders: Vec<FolderScope>,
         since: Option<i64>,
         until: Option<i64>,
         limit: Option<u32>,
@@ -297,6 +297,17 @@ pub enum Request {
         query: String,
     },
     ClearHistory,
+    /// 搜索页的文件夹筛选，回复 `Reply::FolderFilter`；没有保存过时 `custom` 为假、`entries` 为空
+    GetFolderFilter,
+    /// 整体替换保存的文件夹筛选，回复 `Done`。不存在的文件夹被丢弃，重复项只留一项
+    SetFolderFilter {
+        custom: bool,
+        entries: Vec<FolderFilterEntry>,
+    },
+    /// 定位绝对路径 `path` 所在的已索引文件夹，回复 `Reply::FolderLocation`
+    LocateFolder {
+        path: String,
+    },
 }
 
 impl Request {
@@ -320,7 +331,9 @@ impl Request {
             | Request::GetAppearance
             | Request::GetNotices
             | Request::DbStatus
-            | Request::GetHistory => true,
+            | Request::GetHistory
+            | Request::GetFolderFilter
+            | Request::LocateFolder { .. } => true,
             Request::SetParam { .. }
             | Request::Shutdown
             | Request::AddRoot { .. }
@@ -350,7 +363,8 @@ impl Request {
             | Request::ClearIndex
             | Request::AddHistory { .. }
             | Request::RemoveHistory { .. }
-            | Request::ClearHistory => false,
+            | Request::ClearHistory
+            | Request::SetFolderFilter { .. } => false,
         }
     }
 }
@@ -362,6 +376,23 @@ impl Request {
 pub struct SimilarTo {
     pub file_id: i64,
     pub segment_id: Option<i64>,
+}
+
+/// 搜索范围中的一个文件夹：`rel` 为相对根目录的路径（本机分隔符，前后不带分隔符），空串表示整个根目录
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderScope {
+    pub root_id: i64,
+    pub rel: String,
+}
+
+/// 搜索页文件夹筛选中保存的一项：`rel` 为空是根目录本身，否则是用户添加的子文件夹（写法同 `FolderScope::rel`）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderFilterEntry {
+    pub root_id: i64,
+    pub rel: String,
+    pub checked: bool,
 }
 
 /// 对应 `rummage_index::SegmentHit`
@@ -753,6 +784,17 @@ pub enum Reply {
     },
     History {
         queries: Vec<String>,
+    },
+    /// `custom` 为假时搜索全部文件夹；为真时搜索 `entries` 中勾选的项
+    FolderFilter {
+        custom: bool,
+        entries: Vec<FolderFilterEntry>,
+    },
+    /// `LocateFolder` 的结果：不在任何已索引文件夹中时 `scope` 为空、`files` 为 0；
+    /// 否则 `files` 为库中位于该文件夹（含子文件夹）下的文件数
+    FolderLocation {
+        scope: Option<FolderScope>,
+        files: i64,
     },
 }
 

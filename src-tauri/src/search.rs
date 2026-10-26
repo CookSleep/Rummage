@@ -8,7 +8,7 @@
 //!   命令行与 MCP 没有打开文件的入口。
 //! - 以图搜图只接受 `image_query` 发出的令牌，前端提交不了路径；“找相似的”只接受索引中的文件与片段 ID。
 //!   以图搜图与图片的“找相似的”可附文字描述（`text`），由核心与图片合成一条查询。
-//! - 筛选条（种类、根目录 ID、修改时间范围）原样转给核心，在粗排之前生效。
+//! - 筛选条（种类、文件夹范围、修改时间范围）原样转给核心，在粗排之前生效；文件夹筛选的保存与选择见 `folder_filter`。
 //! - 搜索历史存在核心，前端只在用户确认了一次文字搜索时记录，以图搜图不记录。
 //! - 打开可带命中位置（`open_at`）：音视频的起点时刻、PDF 的页码。默认程序是已知程序时带跳转参数启动，
 //!   启动失败或不是已知程序时按普通方式打开；`can_open_at` 让界面决定按钮写“打开到 03:12”还是“打开”。
@@ -22,7 +22,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use rummage_proto::{
-    ApiError, FileInfo, IndexStatus, Reply, Request, SearchHit, SegmentPreview,
+    ApiError, FileInfo, FolderScope, IndexStatus, Reply, Request, SearchHit, SegmentPreview,
     SemanticUnavailable, SimilarTo, params,
 };
 use serde::{Deserialize, Serialize};
@@ -110,7 +110,8 @@ pub(crate) fn unexpected(reply: &Reply) -> ApiError {
 #[serde(rename_all = "camelCase")]
 pub struct SearchFilter {
     kinds: Vec<String>,
-    root_ids: Vec<i64>,
+    /// 各项的并集
+    folders: Vec<FolderScope>,
     /// 修改时间的起止（Unix 毫秒，含两端）
     since: Option<i64>,
     until: Option<i64>,
@@ -140,7 +141,7 @@ pub async fn search<R: Runtime>(
         image_path,
         similar,
         kinds: filter.kinds,
-        root_ids: filter.root_ids,
+        folders: filter.folders,
         since: filter.since,
         until: filter.until,
         limit: None,

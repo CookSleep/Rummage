@@ -241,10 +241,40 @@ export interface SimilarQuery extends SimilarTo {
 /** 筛选条件，对应 Rust `src-tauri/src/search.rs` 的 `SearchFilter`；为空的列表表示不限 */
 export interface SearchFilter {
   kinds: string[]
-  rootIds: number[]
+  folders: FolderScope[]
   /** 修改时间的起止（Unix 毫秒，含两端） */
   since: number | null
   until: number | null
+}
+
+/** 搜索范围中的一个文件夹，对应 Rust `rummage_proto::FolderScope`；`rel` 为相对根目录的路径（本机分隔符），空串表示整个根目录 */
+export interface FolderScope {
+  rootId: number
+  rel: string
+}
+
+/** 文件夹筛选中的一项，对应 Rust `rummage_proto::FolderFilterEntry`；`rel` 为空是根目录本身，否则是用户添加的子文件夹 */
+export interface FolderFilterEntry {
+  rootId: number
+  rel: string
+  checked: boolean
+}
+
+/** 保存的文件夹筛选，对应 Rust `rummage_proto::Reply::FolderFilter`；没有记录的根目录视为未勾选 */
+export interface FolderFilter {
+  /** 选中“自定义”；否则为全部文件夹，保留列表与勾选 */
+  custom: boolean
+  entries: FolderFilterEntry[]
+}
+
+/**
+ * 选择子文件夹的结果，对应 Rust `src-tauri` 的 `PickedFolder`：`root` 为根目录本身，`outside` 不在这个根目录中，
+ * `empty` 在其中但还没有已索引的文件
+ */
+export interface PickedFolder {
+  status: 'root' | 'outside' | 'empty' | 'ok'
+  rel: string
+  path: string
 }
 
 /** 以图搜图的查询图片，对应 Rust `src-tauri/src/image_query.rs` 的 `ImageQuery`：路径留在 Rust 侧，前端只拿令牌 */

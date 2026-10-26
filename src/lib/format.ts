@@ -23,6 +23,9 @@ function joinPath(path: string, parts: string[]) {
   return `${path.startsWith('/') ? '/' : ''}${parts.join('/')}`
 }
 
+/** 路径的最后一段，用作文件夹名 */
+export const folderName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path
+
 /** 所在文件夹的缩写：保留开头（盘符或第一段）和最后两级，中间用“…”代替 */
 export function abbreviateDir(path: string) {
   const parts = path.split(/[\\/]/).filter(Boolean)

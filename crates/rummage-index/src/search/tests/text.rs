@@ -131,7 +131,7 @@ fn text_channel() {
     assert!(hits[0].name_hit && !hits[0].text_segments.is_empty());
     // 过滤条件同样作用于正文通道
     let roots = Filter {
-        root_ids: vec![b],
+        folders: vec![(b, String::new())],
         ..Filter::default()
     };
     assert_eq!(file_names(&run("销售额", &roots)), ["memo.pdf"]);
@@ -280,7 +280,7 @@ fn like_reads_in_mtime_order() {
         Filter::default(),
         Filter {
             kinds: vec!["image".into()],
-            root_ids: vec![1, 2],
+            folders: vec![(1, String::new()), (2, "照片".into())],
             since: Some(0),
             until: Some(9),
             exclude_file: Some(3),

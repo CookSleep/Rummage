@@ -350,6 +350,22 @@ pub fn not_a_root(folder: &Path, roots: &[RootInfo]) -> String {
     )
 }
 
+/// `search --folder` 不在任何已索引的文件夹中时的错误，列出全部已索引的文件夹
+pub fn not_in_root(folder: &Path, roots: &[RootInfo]) -> String {
+    if roots.is_empty() {
+        return format!(
+            "\"{}\" 不在已索引的文件夹中。还没有已索引的文件夹，请先在 Rummage 中添加。",
+            folder.display()
+        );
+    }
+    let list: Vec<_> = roots.iter().map(|r| format!("  {}", r.path)).collect();
+    format!(
+        "\"{}\" 不在已索引的文件夹中。已索引的文件夹：\n{}",
+        folder.display(),
+        list.join("\n")
+    )
+}
+
 pub(crate) fn pause_text(p: &PauseReason) -> String {
     match p {
         PauseReason::Manual { until: None } => "已手动暂停".into(),

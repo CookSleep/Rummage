@@ -1,6 +1,6 @@
 //! MCP 工具的参数、校验与分页。
 //! - 可选参数都不是 `Option`，用 `#[serde(default)]`，schema 中不出现 `null` 类型；空字符串、空数组视为未给出。
-//! - 解析放宽：数值参数也接受数字字符串，`kinds` 也接受单个字符串，`null` 视为未给出；类型不对时的报错附正确写法
+//! - 解析放宽：数值参数也接受数字字符串，`kinds`、`folders` 也接受单个字符串，`null` 视为未给出；类型不对时的报错附正确写法
 //!   （rmcp 在前面加上 “failed to deserialize parameters: ”，以 `isError` 结果返回）。
 //! - 数量的上限：`MAX_LIMIT` 是一次最多返回的条数；`MAX_TOTAL` 同参数表 `result_limit` 的上限（校验时以参数表为准，
 //!   测试核对两者一致），schema 与说明文字用它。字段说明（`///`）是字面量，不能由常量生成，改常量时要同步修改，
@@ -25,6 +25,9 @@ pub const MAX_LIMIT: u32 = 50;
 pub const MAX_TOTAL: u32 = 500;
 /// offset 的上限：至少还要取 1 条
 pub const MAX_OFFSET: u32 = MAX_TOTAL - 1;
+
+const FOLDERS_EXAMPLE: &str =
+    r#"folders must be absolute folder paths. Example: {"folders": ["D:\\Photos\\2024"]}"#;
 
 fn default_limit() -> u32 {
     DEFAULT_LIMIT
@@ -115,6 +118,33 @@ fn kinds_schema(_: &mut SchemaGenerator) -> Schema {
     })
 }
 
+/// 文件夹：单个字符串或字符串数组，去掉首尾空白，跳过空项
+fn folders<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let items = match Value::deserialize(d)? {
+        Value::Null => Vec::new(),
+        Value::Array(a) => a,
+        v => vec![v],
+    };
+    let mut out = Vec::new();
+    for item in items {
+        let Value::String(s) = item else {
+            return Err(bad(FOLDERS_EXAMPLE.into()));
+        };
+        if let Some(s) = given(s) {
+            out.push(s);
+        }
+    }
+    Ok(out)
+}
+
+fn folders_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Limit to these folders; omit for all. Each is an absolute path of an indexed folder (as listed by list_folders) or of any folder inside one.",
+    })
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchParams {
     /// What to find, in natural language or keywords, in any language. Required unless image_path is set; with image_path it adds a text description to the image query.
@@ -126,9 +156,9 @@ pub struct SearchParams {
     #[serde(default, deserialize_with = "kinds")]
     #[schemars(schema_with = "kinds_schema")]
     pub kinds: Vec<String>,
-    /// Limit to one indexed folder, exactly as listed by index_status.
-    #[serde(default, deserialize_with = "text")]
-    pub folder: String,
+    #[serde(default, deserialize_with = "folders")]
+    #[schemars(schema_with = "folders_schema")]
+    pub folders: Vec<String>,
     /// Only files modified on or after this date: YYYY-MM-DD, local time.
     #[serde(default, deserialize_with = "text")]
     pub modified_after: String,
@@ -165,9 +195,9 @@ pub struct ExportParams {
     #[serde(default, deserialize_with = "kinds")]
     #[schemars(schema_with = "kinds_schema")]
     pub kinds: Vec<String>,
-    /// Limit to one indexed folder, exactly as listed by index_status.
-    #[serde(default, deserialize_with = "text")]
-    pub folder: String,
+    #[serde(default, deserialize_with = "folders")]
+    #[schemars(schema_with = "folders_schema")]
+    pub folders: Vec<String>,
     /// Only files modified on or after this date: YYYY-MM-DD, local time.
     #[serde(default, deserialize_with = "text")]
     pub modified_after: String,
@@ -192,7 +222,8 @@ pub struct Search {
     pub text: Option<String>,
     pub image: Option<String>,
     pub kinds: Vec<String>,
-    pub folder: Option<String>,
+    /// 绝对路径
+    pub folders: Vec<String>,
     pub since: Option<NaiveDate>,
     pub until: Option<NaiveDate>,
     pub limit: u32,
@@ -225,6 +256,9 @@ pub fn check_search(p: SearchParams) -> Result<Search, String> {
                 .into(),
         );
     }
+    if p.folders.iter().any(|f| !Path::new(f).is_absolute()) {
+        return Err(FOLDERS_EXAMPLE.into());
+    }
     let date = |v: String, name: &str| {
         given(v)
             .map(|d| {
@@ -250,14 +284,14 @@ pub fn check_search(p: SearchParams) -> Result<Search, String> {
     let max = limit_range().1;
     if p.offset > max.saturating_sub(p.limit) {
         return Err(format!(
-            "offset + limit must not exceed {max}. Narrow the search with kinds, folder or dates instead of paging further."
+            "offset + limit must not exceed {max}. Narrow the search with kinds, folders or dates instead of paging further."
         ));
     }
     Ok(Search {
         text,
         image,
         kinds: p.kinds,
-        folder: given(p.folder),
+        folders: p.folders,
         since,
         until,
         limit: p.limit,
@@ -283,7 +317,7 @@ pub fn check_export(p: ExportParams) -> Result<Search, String> {
         query: p.query,
         image_path: p.image_path,
         kinds: p.kinds,
-        folder: p.folder,
+        folders: p.folders,
         modified_after: p.modified_after,
         modified_before: p.modified_before,
         limit: DEFAULT_LIMIT,

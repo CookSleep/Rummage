@@ -27,14 +27,14 @@ fn search_params_defaults_and_normalization() {
     let s = checked(json!({
         "query": "  柯基  ",
         "kinds": ["image", "Video", "image", ""],
-        "folder": r" D:\照片 ",
+        "folders": [r" D:\照片 ", "", r"E:\音乐\2024"],
         "modified_after": "2026-01-05",
         "modified_before": "2026-02-01",
     }))
     .unwrap();
     assert_eq!(s.text.as_deref(), Some("柯基"));
     assert_eq!(s.kinds, ["image", "video"]);
-    assert_eq!(s.folder.as_deref(), Some(r"D:\照片"));
+    assert_eq!(s.folders, [r"D:\照片", r"E:\音乐\2024"]);
     assert_eq!(
         (s.limit, s.offset, s.include_weak),
         (DEFAULT_LIMIT, 0, false)
@@ -45,7 +45,7 @@ fn search_params_defaults_and_normalization() {
         "query": "",
         "image_path": r"C:\a.jpg",
         "kinds": [],
-        "folder": null,
+        "folders": null,
         "modified_after": "",
         "limit": null,
         "offset": "",
@@ -53,8 +53,11 @@ fn search_params_defaults_and_normalization() {
     }))
     .unwrap();
     assert_eq!((s.text, s.image.as_deref()), (None, Some(r"C:\a.jpg")));
-    assert!(s.kinds.is_empty() && s.folder.is_none() && s.since.is_none());
+    assert!(s.kinds.is_empty() && s.folders.is_empty() && s.since.is_none());
     assert_eq!((s.limit, s.offset), (DEFAULT_LIMIT, 0));
+    // 单个字符串也可以
+    let s = checked(json!({"query": "x", "folders": r"D:\照片"})).unwrap();
+    assert_eq!(s.folders, [r"D:\照片"]);
 }
 
 #[test]
@@ -90,6 +93,10 @@ fn lenient_parsing() {
             json!({"query": "x", "include_weak": "yes"}),
             r#"{"include_weak": true}"#,
         ),
+        (
+            json!({"query": "x", "folders": [1]}),
+            r#"{"folders": ["D:\\Photos\\2024"]}"#,
+        ),
     ] {
         let err = parsed(v.clone()).unwrap_err();
         assert!(err.contains(needle), "{v}: {err}");
@@ -106,6 +113,10 @@ fn search_params_errors_show_correct_usage() {
         (json!({}), r#"{"query": "#),
         (json!({"query": " ", "image_path": " "}), "Provide query"),
         (json!({"image_path": r"图片\a.jpg"}), "absolute path"),
+        (
+            json!({"query": "x", "folders": [r"D:\照片", r"照片\2024"]}),
+            r#"{"folders": ["D:\\Photos\\2024"]}"#,
+        ),
         (
             json!({"query": "x", "modified_after": "2026/01/05"}),
             r#"{"modified_after": "2026-01-05"}"#,
@@ -418,11 +429,16 @@ State: indexing (paused: running on battery)
 Progress: 100 / 400 files (25%), 3 failed, about 13 min left
   image 7 / 300
 Inference device: NVIDIA GeForce RTX 4080 SUPER
-Indexed folders (use these values for search_files.folder):
+Indexed folders (use these paths, or folders inside them, for search_files.folders):
   D:\资料 (1234 files)
   E:\照片 (device not connected)"
     );
     assert!(not_a_root("D:\\x", &roots).contains("  E:\\照片"));
+    assert_eq!(
+        not_in_root(r"D:\x\2024", &roots),
+        "folder \"D:\\x\\2024\" is not inside an indexed folder. Use one of these folders or a folder inside one:\n  D:\\资料\n  E:\\照片"
+    );
+    assert!(not_in_root("D:\\x", &[]).contains("No folders are indexed yet"));
 }
 
 #[test]

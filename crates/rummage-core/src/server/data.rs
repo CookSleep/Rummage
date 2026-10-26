@@ -8,12 +8,14 @@
 //!   缩略图时已写回 `quick_hash`（`files`），清扫时同样算作有引用。视频画面帧与长图裁剪图在同一 `quick_hash` 的
 //!   目录中（`files::derived_dir`），随缩略图一起删除。全量清扫时同时删除已没有文件使用的失败黑名单行。
 //! - 搜索历史：参数 `save_history` 关闭时不记录，读取也返回空；条数上限为参数 `history_limit`。
+//! - 搜索页的文件夹筛选：读写 `rummage_index::folder_filter`；`LocateFolder` 按路径找所在的已索引文件夹与其下的文件数。
 use std::collections::HashSet;
 use std::fs;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use rummage_proto::{ApiError, Reply, Request, params};
+use rummage_index::{FolderEntry, find_scope};
+use rummage_proto::{ApiError, FolderFilterEntry, FolderScope, Reply, Request, params};
 
 use super::files::{derived_dir, thumb_path};
 use super::setup::release_limit;
@@ -183,7 +185,7 @@ pub(super) fn sweep_thumbs(state: &State) {
     }
 }
 
-/// 设置页“数据”与搜索历史的请求（`Request::DbStatus` 等，见 `rummage_proto::Request`）
+/// 设置页“数据”、搜索历史与文件夹筛选的请求（`Request::DbStatus` 等，见 `rummage_proto::Request`）
 pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiError> {
     match body {
         Request::DbStatus => Ok(Reply::DbStatus {
@@ -215,7 +217,55 @@ pub(super) fn respond(state: &Arc<State>, body: Request) -> Result<Reply, ApiErr
             db(state)?.clear_history().map_err(unavailable)?;
             Ok(Reply::Done)
         }
-        other => unreachable!("server::respond 只把数据管理与搜索历史的请求交给这里：{other:?}"),
+        Request::GetFolderFilter => {
+            let (custom, entries) = db(state)?.folder_filter().map_err(unavailable)?;
+            Ok(Reply::FolderFilter {
+                custom,
+                entries: entries
+                    .into_iter()
+                    .map(|e| FolderFilterEntry {
+                        root_id: e.root_id,
+                        rel: e.rel,
+                        checked: e.checked,
+                    })
+                    .collect(),
+            })
+        }
+        Request::SetFolderFilter { custom, entries } => {
+            let entries: Vec<FolderEntry> = entries
+                .into_iter()
+                .map(|e| FolderEntry {
+                    root_id: e.root_id,
+                    rel: e.rel,
+                    checked: e.checked,
+                })
+                .collect();
+            db(state)?
+                .set_folder_filter(custom, &entries)
+                .map_err(unavailable)?;
+            Ok(Reply::Done)
+        }
+        Request::LocateFolder { path } => {
+            let db = db(state)?;
+            let roots = db.list_roots().map_err(unavailable)?;
+            let Some((root, rel)) = find_scope(&roots, &path) else {
+                return Ok(Reply::FolderLocation {
+                    scope: None,
+                    files: 0,
+                });
+            };
+            let files = db.folder_files(root.id, &rel).map_err(unavailable)?;
+            Ok(Reply::FolderLocation {
+                scope: Some(FolderScope {
+                    root_id: root.id,
+                    rel,
+                }),
+                files,
+            })
+        }
+        other => unreachable!(
+            "server::respond 只把数据管理、搜索历史与文件夹筛选的请求交给这里：{other:?}"
+        ),
     }
 }
 

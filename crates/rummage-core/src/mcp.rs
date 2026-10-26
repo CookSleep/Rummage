@@ -203,15 +203,21 @@ impl Server {
 
     /// 搜索；`s.export` 不为空时把全部结果保存到该文件，只返回保存了多少条
     async fn search(&self, s: params::Search) -> Result<String, String> {
-        let mut root_ids = Vec::new();
-        if let Some(folder) = &s.folder {
-            let Reply::Roots { roots } = self.call(Request::ListRoots).await? else {
+        let mut folders = Vec::new();
+        for folder in &s.folders {
+            let path = folder.clone();
+            let Reply::FolderLocation { scope, .. } =
+                self.call(Request::LocateFolder { path }).await?
+            else {
                 return Err(unexpected());
             };
-            let Some(root) = crate::manage::find_root(&roots, folder) else {
-                return Err(format::not_a_root(folder, &roots));
+            let Some(scope) = scope else {
+                let Reply::Roots { roots } = self.call(Request::ListRoots).await? else {
+                    return Err(unexpected());
+                };
+                return Err(format::not_in_root(folder, &roots));
             };
-            root_ids.push(root.id);
+            folders.push(scope);
         }
         let (since, until) = day_range(&Local, s.since, s.until);
         let body = Request::Search {
@@ -219,7 +225,7 @@ impl Server {
             image_path: s.image.clone(),
             similar: None,
             kinds: s.kinds.clone(),
-            root_ids,
+            folders,
             since,
             until,
             limit: Some(params::request_limit(&s)),
@@ -391,7 +397,7 @@ impl Server {
     #[tool(
         name = "list_folders",
         title = "List indexed folders",
-        description = "List the indexed folders with file counts and exclude rules, which file types are recognized by content (shared by all folders), and indexing progress. Use these paths for search_files.folder, update_folder and remove_folder.",
+        description = "List the indexed folders with file counts and exclude rules, which file types are recognized by content (shared by all folders), and indexing progress. Use these paths (or folders inside them) for search_files.folders, and these paths for update_folder and remove_folder.",
         annotations(
             title = "List indexed folders",
             read_only_hint = true,

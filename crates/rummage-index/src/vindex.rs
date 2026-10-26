@@ -3,6 +3,7 @@
 //!   `Query::coarse`），这里按 `s = max|u| / 127`、`q = round(u / s)` 对称量化为 int8，与 f32 缩放系数一起写在 `vectors.coarse`（实测：粗排取前 200 名再 f16 精排，评测指标不变）。
 //! - 每条记录带片段、文件、空间、模态，以及文件的过滤字段（种类、根目录、修改时间），过滤在粗排之前进行。
 //!   `cloud` 不参与过滤，结果中的 `cloud`、`offline` 在组装结果时从库中读取。
+//!   内存中不存路径：范围含子文件夹时，调用方先从库中取出范围内的文件（`coarse` 的 `files`）。
 //! - 同步：`load` 在连接上建临时表 `vindex_touched` 和临时触发器，`files` 的过滤字段变化、文件删除（含删除根目录的级联）、
 //!   片段与向量的增删都把文件 id 记进去；`sync` 取出这些文件，删掉内存中它们的全部记录后按库中现状重新载入。
 //!   临时表随事务回滚，只记录已提交的变化；所有写入都经由同一个 `Db` 连接，不会漏记。
@@ -296,13 +297,16 @@ impl VIndex {
     /// 粗排分数的均值、标准差，把候选的粗排分数换成 z。统计不受种类、文件夹、时间筛选影响（同一文件的匹配度不随筛选变化，
     /// 筛选后剩下的记录也可能太少），但不含被拿来查的文件；记录少于 `calib::MIN_VECTORS` 的空间不算，由调用方退回背景分布。
     /// z 用粗排分数而不用精排余弦：截断到 256 维后余弦的分布与 768 维不同，两者混用会有系统偏差。
-    /// `query` 为查询的粗排向量（`Query::coarse`）
+    /// `query` 为查询的粗排向量（`Query::coarse`）。`files` 为文件夹范围内的文件（范围含子文件夹时由调用方从库中取出），
+    /// 为空时按 `filter.folders` 的根目录过滤
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn coarse(
         &self,
         query: &[f32],
         space: &Space,
         modality: &str,
         filter: &Filter,
+        files: Option<&HashSet<i64>>,
         k: usize,
         adaptive: bool,
     ) -> Vec<Candidate> {
@@ -331,7 +335,13 @@ impl VIndex {
                 continue;
             }
             let wanted = kinds[usize::from(e.kind)]
-                && (filter.root_ids.is_empty() || filter.root_ids.contains(&e.root_id))
+                && match files {
+                    Some(files) => files.contains(&e.file_id),
+                    None => {
+                        filter.folders.is_empty()
+                            || filter.folders.iter().any(|(r, _)| *r == e.root_id)
+                    }
+                }
                 && filter.since.is_none_or(|t| e.mtime >= t)
                 && filter.until.is_none_or(|t| e.mtime <= t);
             if !wanted && !adaptive {
@@ -543,8 +553,8 @@ mod tests {
         let ts = text_space();
         for round in 0..3 {
             let t = std::time::Instant::now();
-            let a = vi.coarse(&query, &ts, "text", &filter, 200, false);
-            let b = vi.coarse(&query, &ts, "image", &filter, 200, false);
+            let a = vi.coarse(&query, &ts, "text", &filter, None, 200, false);
+            let b = vi.coarse(&query, &ts, "image", &filter, None, 200, false);
             println!(
                 "第 {round} 轮：{n} 条，文本 + 图片两次粗排共 {:.1} 毫秒（候选 {} + {}）",
                 t.elapsed().as_secs_f64() * 1000.0,

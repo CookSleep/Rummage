@@ -396,7 +396,13 @@ fn search(
         image_path: q.image.as_ref().map(|p| p.to_string_lossy().into_owned()),
         similar: None,
         kinds: Vec::new(),
-        root_ids,
+        folders: root_ids
+            .into_iter()
+            .map(|root_id| rummage_proto::FolderScope {
+                root_id,
+                rel: String::new(),
+            })
+            .collect(),
         since: None,
         until: None,
         limit: Some(DEPTH),
@@ -766,7 +772,7 @@ fn similar(
                     segment_id: seed.segments.first().map(|s| s.segment_id),
                 }),
                 kinds: Vec::new(),
-                root_ids: Vec::new(),
+                folders: Vec::new(),
                 since: None,
                 until: None,
                 limit: Some(DEPTH),

@@ -23,6 +23,8 @@ interface Props<T> {
   className?: string
   /** 触发器的无障碍名称 */
   label?: string
+  /** 触发器的说明气泡，如不可用的原因；悬停或触屏长按时显示 */
+  tip?: string
 }
 
 export const SELECT_CLASS =
@@ -33,7 +35,7 @@ export const SELECT_CLASS =
  * 宽度按最长的选项自适应：所有选项叠在触发器的同一格中，只显示选中的一项；外层给了宽度时填满外层。
  * 键盘：Tab 聚焦，Enter 或空格展开；展开后上下键移动、Enter 或空格选定，Esc 或 Tab 收起
  */
-export default function Select<T extends string | number>({ value, onChange, options, disabled, className = SELECT_CLASS, label }: Props<T>) {
+export default function Select<T extends string | number>({ value, onChange, options, disabled, className = SELECT_CLASS, label, tip }: Props<T>) {
   const [open, setOpen] = useState(false)
   // 键盘移动到的选项
   const [active, setActive] = useState(-1)
@@ -53,6 +55,7 @@ export default function Select<T extends string | number>({ value, onChange, opt
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-disabled={disabled || undefined}
         onClick={(e) => {
           if (disabled) return
           e.preventDefault()
@@ -98,6 +101,7 @@ export default function Select<T extends string | number>({ value, onChange, opt
           {!selected && <span className="col-start-1 row-start-1 truncate">{value}</span>}
         </span>
         <ChevronDownIcon className={`h-3.5 w-3.5 flex-shrink-0 text-gray-400 transition-transform duration-200 dark:text-gray-500 ${open ? 'rotate-180' : ''}`} />
+        {tip && <HoverTip label={tip} hide={open} longPress />}
       </div>
 
       {open && (

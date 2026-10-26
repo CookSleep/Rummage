@@ -233,7 +233,7 @@ fn similar_z_from_own_scores() {
     };
     let want = (cos[19] - mean) / std;
     assert!((z_of(&filter, "19.jpg") - want).abs() < 0.05);
-    filter.root_ids = vec![b];
+    filter.folders = vec![(b, String::new())];
     assert!((z_of(&filter, "19.jpg") - want).abs() < 0.05);
 }
 
@@ -300,7 +300,7 @@ fn similar_uses_stored_vector() {
         ..Filter::default()
     };
     assert_eq!(run(&filter), ["near.jpg", "far.jpg"]);
-    filter.root_ids = vec![b];
+    filter.folders = vec![(b, String::new())];
     assert_eq!(run(&filter), ["far.jpg"]);
     // 不排除时自己排第一
     assert_eq!(run(&Filter::default())[0], "src.jpg");

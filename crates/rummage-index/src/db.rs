@@ -179,6 +179,14 @@ CREATE TABLE calib_queries (
   vec BLOB NOT NULL,
   PRIMARY KEY (space_id, query)
 );
+", "
+-- 搜索页的文件夹筛选：rel 为空是根目录本身，否则是用户添加的子文件夹；移除根目录时一并删除
+CREATE TABLE folder_filter (
+  root_id INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+  rel TEXT NOT NULL,
+  checked INTEGER NOT NULL,
+  PRIMARY KEY (root_id, rel)
+);
 "];
 
 /// 消息都是能直接展示给用户的中文整句；原始错误在构造时写日志

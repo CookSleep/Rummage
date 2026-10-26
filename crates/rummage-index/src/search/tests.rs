@@ -299,7 +299,7 @@ fn filters_apply_before_coarse() {
             .collect::<Vec<_>>()
     };
     let roots = Filter {
-        root_ids: vec![b],
+        folders: vec![(b, String::new())],
         ..Filter::default()
     };
     assert_eq!(run(&roots), ["low.txt", "pic.jpg"]);
@@ -317,6 +317,62 @@ fn filters_apply_before_coarse() {
     let none = run(&Filter::default());
     assert_eq!(none.len(), 2);
     assert!(none[0].starts_with('a') && none[1] == "pic.jpg");
+}
+
+/// 子文件夹只命中它的子树：同级的前缀不误中，ASCII 大小写不同也能命中，`_`、`%` 按字面匹配，
+/// 与根目录混合时取并集；语义与文件名通道结果一致
+#[test]
+fn folder_scope_matches_subtree() {
+    let f = Fixture::new();
+    let a = f.root(r"D:\甲");
+    let b = f.root(r"D:\乙");
+    let t = text_space();
+    let sep = std::path::MAIN_SEPARATOR_STR;
+    let native = |s: &str| s.replace('/', sep);
+    for (root, rel) in [
+        (a, "照片/2024/a.txt"),
+        (a, "照片/2024/深/b.txt"),
+        (a, "照片/20245/c.txt"),
+        (a, "Photos/Trip/d.txt"),
+        (a, "x_y/e.txt"),
+        (a, "xay/f.txt"),
+        (a, "100%/g.txt"),
+        (a, "100a/h.txt"),
+        (b, "i.txt"),
+    ] {
+        let id = f.file(root, &native(rel), "document", 0);
+        f.segment(id, "text", &along(0.9), &t);
+    }
+    let index = f.index();
+    let q = unit(0);
+    let run = |folders: &[(i64, &str)]| {
+        let filter = Filter {
+            folders: folders.iter().map(|(r, s)| (*r, native(s))).collect(),
+            ..Filter::default()
+        };
+        let sorted = |hits: Vec<Hit>| {
+            let mut v: Vec<String> = hits.iter().map(|h| h.name.replace(sep, "/")).collect();
+            v.sort();
+            v
+        };
+        let semantic = sorted(f.search(&index, &semantic(&q, &t, &filter)));
+        assert_eq!(semantic, sorted(f.search(&index, &by_name("txt", &filter))));
+        semantic
+    };
+    assert_eq!(
+        run(&[(a, "照片/2024")]),
+        ["照片/2024/a.txt", "照片/2024/深/b.txt"]
+    );
+    assert_eq!(run(&[(a, "photos/TRIP")]), ["Photos/Trip/d.txt"]);
+    assert_eq!(run(&[(a, "x_y")]), ["x_y/e.txt"]);
+    assert_eq!(run(&[(a, "100%")]), ["100%/g.txt"]);
+    assert!(run(&[(a, "照片/2024/a.txt")]).is_empty());
+    assert_eq!(
+        run(&[(b, ""), (a, "照片/2024")]),
+        ["i.txt", "照片/2024/a.txt", "照片/2024/深/b.txt"]
+    );
+    assert_eq!(run(&[(b, "")]), ["i.txt"]);
+    assert_eq!(run(&[]).len(), 9);
 }
 
 #[test]

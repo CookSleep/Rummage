@@ -73,6 +73,7 @@ fn migrates_empty_db_to_latest() {
         "fts_text",
         "calib",
         "calib_queries",
+        "folder_filter",
     ] {
         assert!(tables.iter().any(|n| n == t), "缺少表 {t}");
     }
@@ -108,6 +109,30 @@ fn migrates_empty_db_to_latest() {
     // 再次打开不重复迁移
     let db = Db::open(dir.path()).unwrap();
     assert_eq!(user_version(&db), MIGRATIONS.len() as i64);
+}
+
+/// 从版本 1 升级：原有数据保留，新表可用
+#[test]
+fn upgrades_from_version_1() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let db = Db::open_with(dir.path(), &MIGRATIONS[..1]).unwrap();
+        assert_eq!(user_version(&db), 1);
+        db.meta_set("k", "v").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO roots (path, settings_json, settings_version, added_at)
+                 VALUES ('D:\\照片', '{}', 1, 0)",
+                [],
+            )
+            .unwrap();
+    }
+    let db = Db::open(dir.path()).unwrap();
+    assert_eq!(user_version(&db), MIGRATIONS.len() as i64);
+    assert_eq!(db.meta_get("k").unwrap().as_deref(), Some("v"));
+    assert_eq!(db.list_roots().unwrap().len(), 1);
+    assert!(names(&db, "table").iter().any(|n| n == "folder_filter"));
+    assert!(backups(dir.path()).is_empty());
 }
 
 #[test]

@@ -286,6 +286,18 @@ pub fn not_a_root(folder: &str, roots: &[RootInfo]) -> String {
     )
 }
 
+/// `search_files` 的 `folders` 中有不在任何已索引文件夹中的路径时的错误
+pub fn not_in_root(folder: &str, roots: &[RootInfo]) -> String {
+    if roots.is_empty() {
+        return "No folders are indexed yet; ask the user to add folders in Rummage.".into();
+    }
+    let list: Vec<_> = roots.iter().map(|r| format!("  {}", r.path)).collect();
+    format!(
+        "folder \"{folder}\" is not inside an indexed folder. Use one of these folders or a folder inside one:\n{}",
+        list.join("\n")
+    )
+}
+
 pub fn pause_text(p: &PauseReason) -> &'static str {
     match p {
         PauseReason::Manual { .. } => "paused by the user",
@@ -367,7 +379,9 @@ pub fn status_text(
         out.push_str("\nNo folders are indexed yet; ask the user to add folders in Rummage.");
         return out;
     }
-    out.push_str("\nIndexed folders (use these values for search_files.folder):");
+    out.push_str(
+        "\nIndexed folders (use these paths, or folders inside them, for search_files.folders):",
+    );
     for r in roots {
         if r.missing {
             let _ = write!(out, "\n  {} (folder not found)", r.path);

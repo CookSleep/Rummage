@@ -231,6 +231,11 @@ export function FilterIcon(props: SVGProps<SVGSVGElement>) {
   return <Icon {...props} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
 }
 
+/** 扫帚：清除勾选 */
+export function BroomIcon(props: SVGProps<SVGSVGElement>) {
+  return <Icon {...props} d="M16 22l-1-4M8 22l1-4M19 14a1 1 0 001-1v-1a2 2 0 00-2-2h-3a1 1 0 01-1-1V4a2 2 0 00-4 0v5a1 1 0 01-1 1H6a2 2 0 00-2 2v1a1 1 0 001 1M5 14h14l1.973 6.767A1 1 0 0120 22H4a1 1 0 01-.973-1.233L5 14z" />
+}
+
 /** 找相似的图标右上角的放大镜 */
 const SIMILAR_LENS = 'M17 4a3 3 0 100 6 3 3 0 000-6zm2.2 5.2l2.3 2.3'
 

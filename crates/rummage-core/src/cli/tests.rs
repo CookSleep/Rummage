@@ -45,6 +45,8 @@ fn search_args() {
             "image",
             "--folder",
             r"D:\照片",
+            "--folder",
+            r"照片\2024",
             "--since",
             "2026-01-05",
             "--until",
@@ -68,7 +70,7 @@ fn search_args() {
             text: Some("柯基".into()),
             image: Some(PathBuf::from(r"图\a.png")),
             kinds: vec!["image".into(), "video".into()],
-            folder: Some(PathBuf::from(r"D:\照片")),
+            folders: vec![PathBuf::from(r"D:\照片"), PathBuf::from(r"照片\2024")],
             since: Some(date(2026, 1, 5)),
             until: Some(date(2026, 2, 1)),
             limit: 5,
@@ -536,6 +538,18 @@ fn not_a_root_lists_folders() {
         "\"D:\\其他\" 不是已索引的文件夹。已索引的文件夹：\n  D:\\资料\n  E:\\照片"
     );
     assert!(not_a_root(Path::new("x"), &[]).contains("还没有已索引的文件夹"));
+}
+
+#[test]
+fn not_in_root_lists_folders() {
+    assert_eq!(
+        not_in_root(Path::new(r"D:\其他\2024"), &roots()),
+        "\"D:\\其他\\2024\" 不在已索引的文件夹中。已索引的文件夹：\n  D:\\资料\n  E:\\照片"
+    );
+    assert_eq!(
+        not_in_root(Path::new("x"), &[]),
+        "\"x\" 不在已索引的文件夹中。还没有已索引的文件夹，请先在 Rummage 中添加。"
+    );
 }
 
 #[test]

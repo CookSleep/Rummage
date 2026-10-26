@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import type { RootInfo } from '../types'
-import { customLabel, KIND_OPTIONS, TIME_OPTIONS, type Filters, type TimeRange } from '../lib/filter'
-import { abbreviatePath } from '../lib/format'
+import type { FolderFilter, RootInfo } from '../types'
+import { customLabel, folderScope, KIND_OPTIONS, TIME_OPTIONS, type Filters, type TimeRange } from '../lib/filter'
+import { errorMessage } from '../lib/errors'
+import { folderName } from '../lib/format'
 import { isTauri } from '../lib/platform'
 import { useCoreEvent } from '../hooks/useCoreEvent'
 import DateRangePopover from './DateRangePopover'
+import FolderFilterDialog from './FolderFilterDialog'
 import { FilterIcon } from './icons'
 import MultiSelect from './MultiSelect'
 import Select from './Select'
+import { showToast } from './Toast'
 
 interface Props {
   filters: Filters
@@ -19,30 +22,34 @@ interface Props {
   connected: boolean
 }
 
-/** 菜单里只显示文件夹名 */
-const folderName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path
-
 /** 下拉框的宽度一致 */
 const SELECT_WIDTH = 'w-32'
 
 /**
- * 搜索框下方的筛选条：类型、文件夹两个多选菜单（至少留一项），修改时间下拉框。
- * 修改时间的“自定义”：选项右侧的按钮打开起止日期的弹出层；还没设范围或已选自定义时点选项本身也打开它，确定后才选中
+ * 搜索框下方的筛选条：类型多选菜单（至少留一项），文件夹、修改时间下拉框。
+ * “自定义”：选项右侧的按钮打开弹窗或弹出层；还没设过或已选自定义时点选项本身也打开它，保存或确定后才选中。
+ * 文件夹的勾选保存在后台服务中，筛选条只按保存的结果算出生效范围
  */
 export default function FilterBar({ filters, onChange, refresh, connected }: Props) {
   const [roots, setRoots] = useState<RootInfo[]>([])
   // 读取过文件夹列表；读到之前不禁用文件夹筛选
   const [loaded, setLoaded] = useState(false)
+  const [folder, setFolder] = useState<FolderFilter>({ custom: false, entries: [] })
   const [editing, setEditing] = useState(false)
+  const [picking, setPicking] = useState(false)
   const range = customLabel(filters.from, filters.to)
 
-  const loadRoots = () =>
+  const loadRoots = () => {
     invoke<RootInfo[]>('list_roots')
       .then((list) => {
         setRoots(list)
         setLoaded(true)
       })
       .catch((err) => console.warn('无法读取文件夹列表：', err))
+    invoke<FolderFilter>('get_folder_filter')
+      .then((f) => setFolder({ custom: f.custom, entries: f.entries }))
+      .catch((err) => console.warn('无法读取文件夹筛选：', err))
+  }
 
   useEffect(() => {
     if (isTauri && connected) loadRoots()
@@ -53,15 +60,31 @@ export default function FilterBar({ filters, onChange, refresh, connected }: Pro
     if (ev.type === 'RootsChanged' && connected) loadRoots()
   })
 
-  // 勾选的文件夹被移除后去掉它，都移除了就回到全部文件夹
-  const rootIds = filters.rootIds
+  const active = folderScope(folder.entries)
+  const custom = folder.custom && active.length > 0
+  const scope = custom ? active : []
+  const scopeKey = JSON.stringify(scope)
   useEffect(() => {
-    if (!roots.length) return
-    const kept = rootIds.filter((id) => roots.some((r) => r.id === id))
-    if (kept.length !== rootIds.length) onChange({ ...filters, rootIds: kept })
-  }, [roots, rootIds, filters, onChange])
+    if (JSON.stringify(filters.folders) !== scopeKey) onChange({ ...filters, folders: scope })
+  }, [scopeKey, filters, onChange])
 
-  const allRoots = roots.map((r) => r.id)
+  // 文件夹列表读到之前没有根目录的名称，先不列出
+  const names = active.flatMap((e) => {
+    const root = roots.find((r) => r.id === e.rootId)
+    if (!root) return []
+    return [folderName(e.rel || root.path)]
+  })
+  const summary = names.length <= 2 ? names.join('、') : `${names.length} 个文件夹`
+
+  const save = (next: FolderFilter) =>
+    invoke('set_folder_filter', { custom: next.custom, entries: next.entries })
+      .then(() => setFolder(next))
+      .catch((err) => {
+        console.warn('无法保存文件夹筛选：', err)
+        showToast(errorMessage(err, '无法保存文件夹筛选，请稍后再试'), 'error')
+      })
+
+  const empty = loaded && !roots.length
 
   return (
     <div role="group" aria-label="筛选" className="mt-2.5 flex flex-wrap items-center justify-center gap-2 px-1">
@@ -76,18 +99,37 @@ export default function FilterBar({ filters, onChange, refresh, connected }: Pro
           tip="只勾选要找的文件类型，匹配更准"
         />
       </div>
-      {/* 全部勾选存为空列表，之后新添加的文件夹也包括在内 */}
       <div className={SELECT_WIDTH}>
-        <MultiSelect
+        <Select<'all' | 'custom'>
           label="文件夹"
-          values={rootIds.length ? rootIds : allRoots}
-          onChange={(ids) => onChange({ ...filters, rootIds: ids.length === allRoots.length ? [] : ids })}
-          options={roots.map((r) => ({ label: folderName(r.path), value: r.id, tip: abbreviatePath(r.path) }))}
-          allText="全部文件夹"
-          unit="个文件夹"
-          disabled={loaded && !roots.length}
-          tip={loaded && !roots.length ? '还没有添加文件夹' : undefined}
+          value={custom ? 'custom' : 'all'}
+          onChange={(v) => {
+            if (v === 'all') {
+              if (folder.custom) save({ custom: false, entries: folder.entries })
+              return
+            }
+            // 选项右侧的按钮键盘够不到：已选自定义时再选一次也打开弹窗
+            if (!active.length || custom) setPicking(true)
+            else save({ custom: true, entries: folder.entries })
+          }}
+          options={[
+            { label: '全部文件夹', value: 'all' },
+            { label: '自定义', value: 'custom', display: summary || '自定义', action: { label: '选择文件夹', icon: <FilterIcon className="h-3.5 w-3.5" />, onClick: () => setPicking(true) } },
+          ]}
+          disabled={empty}
+          tip={empty ? '还没有添加文件夹' : undefined}
         />
+        {picking && (
+          <FolderFilterDialog
+            roots={roots}
+            filter={folder}
+            onSaved={(next) => {
+              setFolder(next)
+              setPicking(false)
+            }}
+            onClose={() => setPicking(false)}
+          />
+        )}
       </div>
       {/* 自定义范围比其他选项长，按内容定宽 */}
       <div className="relative min-w-32">

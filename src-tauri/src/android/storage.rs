@@ -1,7 +1,7 @@
 //! Android 上的存储权限与选择文件夹、文件的命令（Kotlin 部分见 crates/tauri-plugin-rummage-android）：
 //! - 读取被索引的文件靠“所有文件访问”权限：`storage_access` 报告是否已授权，`request_storage_access` 打开系统的授权页面。
 //! - 添加文件夹只接受能换算成真实路径的位置（手机存储与存储卡），网盘等其他文档提供者的位置报告为不支持；
-//!   `add_common_root` 一键添加手机存储中的 DCIM 等常用文件夹。
+//!   `add_common_root` 一键添加手机存储中的 DCIM 等常用文件夹。搜索页选择子文件夹（`pick_subfolder`）同样只接受这类位置。
 //! - 导入模型、以图搜图选中的文件换算不出可读的真实路径时，由插件复制到 `<数据目录>/cache/import`、`cache/pick`：
 //!   导入的副本在导入任务结束（`ModelTask` 事件不再是进行中）或请求失败时删除；以图搜图只保留最近选的一张，
 //!   新选的图片放进新的子目录，选好后删除之前的副本。
@@ -110,6 +110,31 @@ pub async fn add_root<R: Runtime>(app: AppHandle<R>) -> Result<Option<AddedRoot>
         ));
     };
     add(&app, &path).await.map(Some)
+}
+
+/// 搜索页的文件夹筛选中，在已索引的文件夹 `root_id` 中选择子文件夹（`folder_filter::locate`）；取消选择时返回空
+#[tauri::command]
+pub async fn pick_subfolder<R: Runtime>(
+    app: AppHandle<R>,
+    root_id: i64,
+) -> Result<Option<crate::folder_filter::PickedFolder>, ApiError> {
+    let picked = app
+        .state::<Android<R>>()
+        .pick_folder()
+        .await
+        .map_err(|err| failed("无法打开文件夹选择器，请重试。", err))?;
+    let Some(path) = picked else {
+        return Ok(None);
+    };
+    let Some(path) = path else {
+        return Err(error(
+            ApiError::BAD_REQUEST,
+            "无法使用此位置：只支持手机存储和存储卡中的文件夹。",
+        ));
+    };
+    crate::folder_filter::locate(&app, root_id, path.to_string_lossy().into_owned())
+        .await
+        .map(Some)
 }
 
 /// 添加手机存储中的常用文件夹（`setup::common_root`）

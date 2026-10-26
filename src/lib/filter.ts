@@ -1,4 +1,4 @@
-import type { SearchFilter } from '../types'
+import type { FolderFilterEntry, FolderScope, SearchFilter } from '../types'
 import { kindLabel } from './format'
 
 // 搜索页的筛选条，条件在本次运行内保持
@@ -20,8 +20,8 @@ export type TimeRange = (typeof TIME_OPTIONS)[number]['value']
 
 export interface Filters {
   kinds: string[]
-  /** 勾选的根目录 ID；为空表示全部文件夹，之后新添加的文件夹也包括在内 */
-  rootIds: number[]
+  /** 实际生效的搜索范围；为空表示全部文件夹 */
+  folders: FolderScope[]
   time: TimeRange
   /** 自定义的起止日期（本地时区的 `YYYY-MM-DD`，都含当天），空字符串表示这一端不限；`time` 为 `custom` 时生效 */
   from: string
@@ -30,10 +30,23 @@ export interface Filters {
 
 export const DEFAULT_FILTERS: Filters = {
   kinds: KIND_OPTIONS.map((o) => o.kind),
-  rootIds: [],
+  folders: [],
   time: 'any',
   from: '',
   to: '',
+}
+
+/**
+ * 保存的文件夹筛选换成搜索范围：子文件夹用来缩小所在根目录的范围。勾选的根目录中有勾选的子文件夹时只搜这些子文件夹，
+ * 否则搜整个根目录；未勾选的根目录连同其下的子文件夹都不参与
+ */
+export function folderScope(entries: FolderFilterEntry[]): FolderScope[] {
+  return entries
+    .filter((e) => !e.rel && e.checked)
+    .flatMap((root) => {
+      const subs = entries.filter((e) => e.rootId === root.rootId && e.rel && e.checked)
+      return (subs.length ? subs : [root]).map((e) => ({ rootId: e.rootId, rel: e.rel }))
+    })
 }
 
 const DAY_MS = 86_400_000
@@ -63,9 +76,9 @@ export function toSearchFilter(f: Filters, now = new Date()): SearchFilter {
   const kinds = f.kinds.length === KIND_OPTIONS.length ? [] : f.kinds
   if (f.time === 'custom') {
     const next = localDay(f.to, 1)
-    return { kinds, rootIds: f.rootIds, since: localDay(f.from)?.getTime() ?? null, until: next ? next.getTime() - 1 : null }
+    return { kinds, folders: f.folders, since: localDay(f.from)?.getTime() ?? null, until: next ? next.getTime() - 1 : null }
   }
   const days = TIME_OPTIONS.find((o) => o.value === f.time)?.days ?? null
   const since = days === null ? null : days === 0 ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() : now.getTime() - days * DAY_MS
-  return { kinds, rootIds: f.rootIds, since, until: null }
+  return { kinds, folders: f.folders, since, until: null }
 }

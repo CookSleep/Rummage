@@ -27,7 +27,7 @@ use rummage_embed::space;
 use rummage_embed::{Error as EmbedError, Input};
 use rummage_index::{
     Cancel, DbError, Filter, FsError, Query, QueryKind, SearchParams, Space, check_volume,
-    ensure_local,
+    ensure_local, normalize_rel,
 };
 use rummage_proto::{
     ApiError, ParamKind, Reply, Request, SearchHit, SegmentHit, SemanticUnavailable, Snippet,
@@ -218,7 +218,7 @@ pub(super) fn request(
         image_path,
         similar,
         kinds,
-        root_ids,
+        folders,
         since,
         until,
         limit,
@@ -230,7 +230,10 @@ pub(super) fn request(
     };
     let mut filter = Filter {
         kinds,
-        root_ids,
+        folders: folders
+            .into_iter()
+            .map(|f| (f.root_id, normalize_rel(&f.rel)))
+            .collect(),
         since,
         until,
         exclude_file: None,
