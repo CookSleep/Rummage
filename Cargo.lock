@@ -5068,7 +5068,7 @@ dependencies = [
 
 [[package]]
 name = "rummage"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dunce",
  "flate2",
@@ -5107,7 +5107,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "chrono",
@@ -5140,7 +5140,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-datadir"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "log",
  "tempfile",
@@ -5150,7 +5150,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-embed"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libc",
  "log",
@@ -5169,7 +5169,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-extract"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "cfb 0.15.0",
@@ -5193,7 +5193,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-index"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "globset",
@@ -5208,7 +5208,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-litert"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libloading 0.9.0",
  "thiserror 2.0.21",
@@ -5216,7 +5216,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-llama"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libloading 0.9.0",
  "log",
@@ -5225,7 +5225,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-media"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "image",
  "log",
@@ -5238,7 +5238,7 @@ dependencies = [
 
 [[package]]
 name = "rummage-proto"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6425,7 +6425,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-rummage-android"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "tauri",
