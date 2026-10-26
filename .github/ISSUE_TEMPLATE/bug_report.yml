@@ -1,0 +1,127 @@
+name: Bug 反馈
+description: 报告本项目自身可复现的 Bug
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **警告：** 删除以下内容会导致 Issue 被直接关闭。
+
+        感谢你的反馈。在提交之前，请先确认问题不属于以下已知的设计取舍：
+
+        ---
+
+        **以下情况不属于 Bug：**
+
+        1. 网盘“按需下载”的占位文件只按文件名搜索：Rummage 不读取它们，以免触发下载。
+        2. 不在“支持的文件”列表中的格式（见 README）只按文件名索引；Android 上的音视频以系统能解码的格式为准。
+        3. 被排除规则排除的文件（包括默认排除的隐藏文件、构建输出目录等）不会出现在结果中，可在“设置 → 文件夹”中修改排除规则。
+        4. 某次搜索的结果不够理想属于效果问题，欢迎通过“功能建议”反馈，并附上查询和期望找到的文件类型。
+
+        > **提示：** 可以在“设置 → 高级 → 诊断”中导出诊断包并附在下方。诊断包默认不保留文件路径，上传前也可以自行检查其中的内容。
+
+        > **关于响应时间：** 项目维护者精力有限，不能保证始终按预期效率修复问题或完成优化，敬请理解。
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已确认该问题不属于上述设计取舍。
+          required: true
+        - label: 我已搜索现有 Issue，确认没有重复反馈。
+          required: true
+        - label: 我已在最新版本上复现该问题。
+          required: false
+        - label: 我理解项目维护者精力有限，不能保证始终按预期效率修复问题。
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请简要描述你遇到的问题。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请提供可稳定复现问题的操作步骤。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 你期望项目应该如何表现？
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么？如有报错请粘贴完整错误信息。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - Windows
+        - Android
+    validations:
+      required: true
+
+  - type: input
+    id: app_version
+    attributes:
+      label: 版本号
+      description: 可在“设置 → 关于”中查看。
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      description: Windows 版本或手机型号与 Android 版本；问题与识别速度或识别失败有关时，请同时填写“设置 → 设备”中使用的设备（如显卡型号）。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kinds
+    attributes:
+      label: 涉及的文件类型
+      multiple: true
+      options:
+        - 文档
+        - 图片
+        - 音频
+        - 视频
+        - 其他
+        - 与文件类型无关
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 错误信息 / 截图 / 诊断包
+      description: 请提供相关的错误信息、截图、复现录屏，或附上诊断包。
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 其他有助于定位问题的信息。
+    validations:
+      required: false
