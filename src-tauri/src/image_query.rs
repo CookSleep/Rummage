@@ -2,12 +2,21 @@
 //! 系统文件对话框（`pick_image`）和拖入窗口（`on_drop`，主窗口的 `DragDrop` 事件）选中的图片路径留在 Rust 侧，
 //! 换成递增的令牌，前端只收到 `{ token, name }`，搜索时提交令牌（`search::search`）。
 //! 只保留最近 `KEEP` 个令牌，更早的失效，需要重新选择。拖入的文件中没有图片时推送 `null`，由前端提示。
+//!
+//! 粘贴的图片（`paste_image`）没有路径：前端在粘贴事件中取出图片内容，以 Base64 交过来，写到
+//! `<数据目录>/cache/paste/<序号>/<文件名>` 后同样换成令牌。每次粘贴后删除令牌已失效的副本，启动时清空整个目录（`clear_pasted`）。
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use base64::Engine;
+use rummage_proto::ApiError;
 use serde::Serialize;
-use tauri::{Emitter, Manager, Runtime, Window};
+use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
+
+use crate::data::DataDir;
+use crate::search::error;
 
 /// 保留的令牌数
 const KEEP: usize = 16;
@@ -53,6 +62,12 @@ impl ImageTokens {
         let g = self.0.lock().unwrap_or_else(|err| err.into_inner());
         g.1.get(&token).cloned()
     }
+
+    /// 是否还有令牌指向 `dir` 中的图片
+    fn in_use(&self, dir: &Path) -> bool {
+        let g = self.0.lock().unwrap_or_else(|err| err.into_inner());
+        g.1.values().any(|p| p.starts_with(dir))
+    }
 }
 
 fn is_image(path: &Path) -> bool {
@@ -91,9 +106,134 @@ pub fn on_drop<R: Runtime>(window: &Window<R>, paths: &[PathBuf]) {
     }
 }
 
+fn paste_dir(data: &Path) -> PathBuf {
+    data.join("cache").join("paste")
+}
+
+/// 清空粘贴图片的副本；启动时调用
+pub fn clear_pasted(data: &Path) {
+    match std::fs::remove_dir_all(paste_dir(data)) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+            log::warn!("无法清理粘贴图片的副本：{err}")
+        }
+        _ => {}
+    }
+}
+
+/// 粘贴图片的文件名：`name` 是原文件名（截图等没有文件名时为空），`mime` 是图片类型。
+/// 去掉文件名中不能用的字符；没有图片扩展名时按类型补上，类型也不是图片时为空
+fn paste_name(name: &str, mime: &str) -> Option<String> {
+    let name: String = name
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let name = name.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    let name = if name.is_empty() {
+        "粘贴的图片"
+    } else {
+        name
+    };
+    if is_image(Path::new(name)) {
+        return Some(name.to_string());
+    }
+    let ext = match mime.strip_prefix("image/")? {
+        "jpeg" => "jpg",
+        other => other,
+    };
+    IMAGE_EXTS.contains(&ext).then(|| format!("{name}.{ext}"))
+}
+
+/// 粘贴的图片：`data` 是 Base64 编码的图片内容。
+/// 不用原始字节：Android 的 IPC 走 postMessage，字节会被转成 JSON 数字数组，占用的内存是图片的几十倍
+#[tauri::command]
+pub async fn paste_image<R: Runtime>(
+    app: AppHandle<R>,
+    data: String,
+    name: String,
+    mime: String,
+) -> Result<ImageQuery, ApiError> {
+    let name =
+        paste_name(&name, &mime).ok_or_else(|| error(ApiError::BAD_REQUEST, "请粘贴图片文件。"))?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        base64::engine::general_purpose::STANDARD.decode(data)
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .filter(|b| !b.is_empty())
+    .ok_or_else(|| error(ApiError::BAD_REQUEST, "无法读取粘贴的图片。"))?;
+    // 每张图片放在单独的子目录中，文件名保持原样
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let root = paste_dir(app.state::<DataDir>().dir()?);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = root.join(seq.to_string());
+    let path = dir.join(&name);
+    let written = match tokio::fs::create_dir_all(&dir).await {
+        Ok(()) => tokio::fs::write(&path, bytes).await,
+        Err(err) => Err(err),
+    };
+    if let Err(err) = written {
+        log::warn!("无法保存粘贴的图片：{err}");
+        return Err(error(ApiError::INTERNAL, "无法保存粘贴的图片。"));
+    }
+    let tokens = app.state::<ImageTokens>();
+    let query = tokens.insert(path);
+    if let Ok(mut entries) = tokio::fs::read_dir(&root).await {
+        while let Ok(Some(e)) = entries.next_entry().await {
+            // 序号更大的是同时进行的另一次粘贴，可能已写好文件、还没换成令牌
+            let older = e
+                .file_name()
+                .to_str()
+                .and_then(|n| n.parse::<u64>().ok())
+                .is_some_and(|n| n < seq);
+            if older
+                && !tokens.in_use(&e.path())
+                && let Err(err) = tokio::fs::remove_dir_all(e.path()).await
+            {
+                log::warn!("无法删除已失效的粘贴图片：{err}");
+            }
+        }
+    }
+    Ok(query)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paste_names() {
+        assert_eq!(paste_name("a.jpg", "image/jpeg").as_deref(), Some("a.jpg"));
+        assert_eq!(paste_name("猫.PNG", "").as_deref(), Some("猫.PNG"));
+        assert_eq!(
+            paste_name("", "image/png").as_deref(),
+            Some("粘贴的图片.png")
+        );
+        assert_eq!(
+            paste_name("shot", "image/jpeg").as_deref(),
+            Some("shot.jpg")
+        );
+        // 路径分隔符与上级目录不能离开子目录
+        assert_eq!(paste_name(r"../..\a.png", "").as_deref(), Some("_.._a.png"));
+        assert_eq!(
+            paste_name("..", "image/png").as_deref(),
+            Some("粘贴的图片.png")
+        );
+        assert_eq!(paste_name("a.txt", "text/plain"), None);
+        assert_eq!(paste_name("a", "image/svg+xml"), None);
+    }
+
+    #[test]
+    fn in_use_by_dir() {
+        let t = ImageTokens::default();
+        t.insert(PathBuf::from("/d/cache/paste/1/a.png"));
+        assert!(t.in_use(Path::new("/d/cache/paste/1")));
+        assert!(!t.in_use(Path::new("/d/cache/paste/2")));
+    }
 
     #[test]
     fn tokens_bounded() {

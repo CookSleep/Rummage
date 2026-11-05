@@ -5070,6 +5070,7 @@ dependencies = [
 name = "rummage"
 version = "0.1.3"
 dependencies = [
+ "base64 0.22.1",
  "dunce",
  "flate2",
  "jni 0.22.4",

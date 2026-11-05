@@ -4,8 +4,9 @@ import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SearchHit, SearchResults } from '../types'
 
-import { flush, mockCore, render, setupStatus, text } from '../test/tauri'
+import { flush, mockCore, render, setupStatus, text, toast, type Handler } from '../test/tauri'
 import SearchPage from './SearchPage'
+import Toaster from './Toast'
 
 const APPEARANCE = { uiFont: 'builtin', uiFontName: '', monoFont: 'builtin', monoFontName: '' } as const
 
@@ -61,6 +62,25 @@ async function search(value: string, reply: SearchResults) {
   })
   await flush()
   return input
+}
+
+/** 在 `el` 中粘贴：`text` 是剪贴板中的文字，`files` 是剪贴板中的文件（截图或复制的文件） */
+function paste(el: Element, text: string, files: File[]) {
+  const e = new Event('paste', { bubbles: true, cancelable: true })
+  const items = files.map((f) => ({ kind: 'file', type: f.type, getAsFile: () => f }))
+  Object.defineProperty(e, 'clipboardData', { value: { getData: (t: string) => (t === 'text/plain' ? text : ''), items } })
+  act(() => {
+    el.dispatchEvent(e)
+  })
+  return e
+}
+
+/** 渲染空的搜索页，`pasteImage` 处理 `paste_image` 命令 */
+async function renderPage(pasteImage: Handler) {
+  const calls = mockCore({ search: () => results(), get_history: () => [], list_roots: () => [], get_params: () => ({}), paste_image: pasteImage })
+  render(<SearchPage coreStatus="running" setup={setupStatus()} setupError="" onSetup={vi.fn()} onSetupRetry={vi.fn()} appearance={APPEARANCE} onAppearance={vi.fn()} />)
+  await flush()
+  return calls
 }
 
 function press(el: Element, key: string) {
@@ -128,5 +148,70 @@ describe('SearchPage', () => {
     await search('报告', results({ semanticUnavailable: true, unavailable: 'engine' }))
     expect(text()).toContain('内容识别无法使用，只显示文件名或正文中含有搜索词的结果')
     expect(text()).not.toContain('搜索词的结果。')
+  })
+
+  it('粘贴图片时以图搜图，Base64 编码的图片内容与文件名交给 Rust 侧', async () => {
+    const calls = await renderPage(() => ({ token: 7, name: '截图.png' }))
+    const input = document.querySelector<HTMLInputElement>('input[role="combobox"]')!
+    const file = new File([new Uint8Array([1, 2, 3])], '截图.png', { type: 'image/png' })
+    expect(paste(input, '', [file]).defaultPrevented).toBe(true)
+    await flush()
+    expect(calls.find((c) => c.cmd === 'paste_image')!.args).toEqual({ data: 'AQID', name: '截图.png', mime: 'image/png' })
+    expect(text()).toContain('以图搜图：截图.png')
+    // 已在以图搜图时，描述框中粘贴新图片换掉原来的
+    const note = document.querySelector<HTMLInputElement>('input[aria-label="加一句描述"]')!
+    expect(paste(note, '', [file]).defaultPrevented).toBe(true)
+    // 焦点不在输入框中（如在结果中、筛选条的复选框上）时同样可以粘贴；剪贴板中只有空白的文字不算文字
+    expect(paste(document.body, '', [file]).defaultPrevented).toBe(true)
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    document.body.appendChild(box)
+    expect(paste(box, ' \n', [file]).defaultPrevented).toBe(true)
+    box.remove()
+    await flush()
+    expect(calls.filter((c) => c.cmd === 'paste_image')).toHaveLength(4)
+  })
+
+  it('剪贴板中有文字、没有图片，或焦点在其他输入框中时照常粘贴', async () => {
+    const calls = await renderPage(() => ({ token: 7, name: 'a.png' }))
+    const input = document.querySelector<HTMLInputElement>('input[role="combobox"]')!
+    const image = new File([], 'image.png', { type: 'image/png' })
+    // 从表格中复制的文字附带一张渲染图
+    expect(paste(input, '季度报表', [image]).defaultPrevented).toBe(false)
+    expect(paste(input, '', []).defaultPrevented).toBe(false)
+    // 如“自定义日期”的输入框
+    const other = document.createElement('input')
+    document.body.appendChild(other)
+    expect(paste(other, '', [image]).defaultPrevented).toBe(false)
+    other.remove()
+    await flush()
+    expect(calls.some((c) => c.cmd === 'paste_image')).toBe(false)
+  })
+
+  it('粘贴的文件不是可用的图片时不读取内容，类型为空的按扩展名判断', async () => {
+    const calls = await renderPage(() => ({ token: 7, name: 'a.heic' }))
+    const input = document.querySelector<HTMLInputElement>('input[role="combobox"]')!
+    for (const f of [new File([], 'a.mp4', { type: 'video/mp4' }), new File([], 'disk.img'), new File([], 'a.psd', { type: 'image/vnd.adobe.photoshop' })]) {
+      expect(paste(input, '', [f]).defaultPrevented).toBe(true)
+    }
+    await flush()
+    expect(calls.some((c) => c.cmd === 'paste_image')).toBe(false)
+    expect(paste(input, '', [new File([], 'a.HEIC')]).defaultPrevented).toBe(true)
+    await flush()
+    expect(calls.some((c) => c.cmd === 'paste_image')).toBe(true)
+  })
+
+  it('读不出粘贴的文件时提示中文', async () => {
+    await renderPage(() => ({ token: 7, name: 'a.png' }))
+    render(<Toaster />)
+    const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) {
+      Object.defineProperty(this, 'error', { value: new DOMException('The requested file could not be read', 'NotReadableError') })
+      this.onerror?.(new ProgressEvent('error') as ProgressEvent<FileReader>)
+    })
+    paste(document.body, '', [new File([], 'a.png', { type: 'image/png' })])
+    await flush()
+    expect(toast()).toContain('无法读取粘贴的图片')
+    expect(toast()).not.toContain('requested')
+    read.mockRestore()
   })
 })

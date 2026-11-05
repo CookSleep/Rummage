@@ -55,6 +55,10 @@ interface Props {
   onAppearance: (next: Appearance) => Promise<void>
 }
 
+/** 以图搜图可用的格式，同 src-tauri/src/image_query.rs 的 `IMAGE_EXTS` */
+const IMAGE_NAME = /\.(jpe?g|png|webp|bmp|tiff?|gif|heic|heif|avif)$/i
+const IMAGE_TYPE = /^image\/(jpeg|png|webp|bmp|tiff|gif|heic|heif|avif)$/
+
 /** 搜索页；右上角进入设置 */
 export default function SearchPage({ coreStatus, setup, setupError, onSetup, onSetupRetry, appearance, onAppearance }: Props) {
   const indexStatus = useIndexStatus(coreStatus === 'running')
@@ -269,12 +273,50 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
 
   const onOpen = useCallback((idx: number) => run('open_file', hits[idx]), [hits, run])
 
-  // 把图片拖进窗口即以图搜图：拖动状态只用于显示提示层；松开后由 Rust 侧把图片换成令牌，以 `image-drop` 推来，
-  // 没有图片时为 null（src-tauri/src/image_query.rs）
+  // 把图片拖进窗口或粘贴图片即以图搜图（src-tauri/src/image_query.rs）。
+  // 拖动状态只用于显示提示层；松开后由 Rust 侧把图片换成令牌，以 `image-drop` 推来，没有图片时为 null。
+  // 粘贴的图片没有路径，内容以 Base64 交给 Rust 侧存成文件后换回令牌
   useEffect(() => {
     if (!isTauri) return
-    // 有弹窗（设置、失败文件等）打开时拖入不搜索，也不显示提示层
+    // 有弹窗（设置、失败文件等）打开时拖入、粘贴不搜索，也不显示提示层
     const modalOpen = () => !!document.querySelector('[aria-modal="true"]')
+    const applyImage = (img: ImageQuery) => {
+      setOverlayOpen(false)
+      setSimilar(null)
+      setImage(img)
+      setNote('')
+    }
+    // 焦点在结果、筛选条的复选框上时也能粘贴；在其他输入框（如自定义日期）中照常粘贴。
+    // 剪贴板中有文字时照常粘贴：从表格、文档中复制的文字常附带一张渲染图；只有空白的不算。
+    // 系统不认识的格式（如 HEIC）类型为空，与 Rust 侧一样按扩展名或类型判断，不是可用图片的不读取内容
+    const onPaste = (e: ClipboardEvent) => {
+      const el = e.target
+      const editable = el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && el.type !== 'checkbox') || (el instanceof HTMLElement && el.isContentEditable)
+      if (!e.clipboardData || modalOpen() || (editable && el !== inputRef.current)) return
+      if (e.clipboardData.getData('text/plain').trim()) return
+      const files = Array.from(e.clipboardData.items).filter((i) => i.kind === 'file')
+      if (!files.length) return
+      e.preventDefault()
+      const file = files.map((i) => i.getAsFile()).find((f) => f && (IMAGE_NAME.test(f.name) || IMAGE_TYPE.test(f.type)))
+      if (!file) {
+        showToast('请粘贴图片文件')
+        return
+      }
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+        .then((url) => invoke<ImageQuery>('paste_image', { data: url.slice(url.indexOf(',') + 1), name: file.name, mime: file.type }))
+        .then(applyImage)
+        .catch((err) => {
+          console.warn('无法读取粘贴的图片：', err)
+          // 读不出文件内容（如复制后文件被移走）时浏览器给出的是英文说明
+          showToast(trimPeriod(err instanceof DOMException ? '无法读取粘贴的图片' : errorMessage(err, '无法读取粘贴的图片')), 'error')
+        })
+    }
+    window.addEventListener('paste', onPaste)
     const unDrag = getCurrentWebview().onDragDropEvent((e) => {
       setDragging(!modalOpen() && (e.payload.type === 'enter' || e.payload.type === 'over'))
     })
@@ -284,12 +326,10 @@ export default function SearchPage({ coreStatus, setup, setupError, onSetup, onS
         showToast('请拖入图片文件')
         return
       }
-      setOverlayOpen(false)
-      setSimilar(null)
-      setImage(e.payload)
-      setNote('')
+      applyImage(e.payload)
     })
     return () => {
+      window.removeEventListener('paste', onPaste)
       void unDrag.then((fn) => fn())
       void unDrop.then((fn) => fn())
     }

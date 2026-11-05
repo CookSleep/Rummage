@@ -156,6 +156,7 @@ pub fn run() {
             image_query::pick_image,
             #[cfg(target_os = "android")]
             android::storage::pick_image,
+            image_query::paste_image,
             setup::setup_status,
             setup::finish_setup,
             setup::set_onboarding_step,
@@ -274,6 +275,10 @@ pub fn run() {
                     paths.join(" "),
                     notice.details.join(" ")
                 );
+            }
+            if let Ok(dir) = app.state::<data::DataDir>().dir() {
+                let dir = dir.to_path_buf();
+                tauri::async_runtime::spawn_blocking(move || image_query::clear_pasted(&dir));
             }
             #[cfg(desktop)]
             {

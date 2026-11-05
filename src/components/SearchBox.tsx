@@ -155,8 +155,8 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
           autoFocus={!isAndroid}
           spellCheck={false}
           enterKeyHint="search"
-          // 手机上不能拖入图片
-          placeholder={isAndroid ? '搜索文件' : '搜索文件，或拖入图片以图搜图'}
+          // 手机上不能拖入图片；长按菜单和输入法都不能粘贴图片，只有外接键盘可以，不作提示
+          placeholder={isAndroid ? '搜索文件' : '搜索文件，或拖入、粘贴图片以图搜图'}
           aria-label="搜索文件"
           className="w-full rounded-xl border border-transparent bg-black/[0.04] py-2.5 pl-10 pr-20 text-sm outline-none transition duration-200 placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30 dark:bg-white/[0.06] dark:text-white"
         />

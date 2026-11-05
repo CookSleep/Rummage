@@ -17,6 +17,8 @@ tauri = { version = "=2.12.3", features = ["devtools", "tray-icon"] }
 tauri-plugin-dialog = "=2.8.2"
 tauri-plugin-log = "=2.10.1"
 tauri-plugin-opener = "=2.7.1"
+# 解码粘贴的图片内容（src/image_query.rs），已是 tauri-plugin-updater 的依赖，MIT OR Apache-2.0
+base64 = "=0.22.1"
 # 诊断包的 Deflate 压缩与 CRC（src/zip.rs），已是 png、tiff 的依赖
 flate2 = "=1.1.10"
 log = "=0.4.34"
