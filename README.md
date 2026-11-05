@@ -103,7 +103,7 @@
 
 ### 🤖 命令行、MCP 与 Skill（Windows）
 - **命令行**：`rummage-core` 可以搜索、查看状态、管理文件夹与设置，方便脚本和启动器调用。
-- **MCP 与 Skill**：让 Claude Code、Codex、Claude Desktop、Cursor、VS Code、OpenCode 等 AI 工具直接搜索你的文件，并把结果导出为 CSV、JSON 或路径列表。在“设置 → Agent”中可以一键添加 MCP、安装给 AI 用的使用说明（Skill）。
+- **MCP 与 Skill**：让 Claude Code、Codex、Claude Desktop、Cursor、VS Code、OpenCode 等 AI 工具直接搜索你的文件，并把结果导出为 CSV、JSON 或路径列表。在“设置 → Agent”中可以一键添加 MCP、安装给 AI 用的使用说明（Skill），已安装的 Skill 会在客户端启动时自动更新到当前版本。
 
 ---
 

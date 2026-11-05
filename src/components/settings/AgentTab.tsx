@@ -30,7 +30,7 @@ const CLIENT_ICON: Record<AgentClient, ComponentType<SVGProps<SVGSVGElement>>> =
   opencode: OpenCodeIcon,
 }
 
-const SKILL_LABEL: Record<SkillTarget, string> = {
+export const SKILL_LABEL: Record<SkillTarget, string> = {
   claude: 'Claude Code',
   agents: 'Codex 等',
 }
@@ -183,7 +183,7 @@ export default function AgentTab() {
       <section className="space-y-3">
         <div className="space-y-1">
           <h4 className={SECTION_TITLE}>Skill</h4>
-          <p className={ROW_DESC}>Skill 为 AI 工具提供 Rummage 的使用说明，包括何时调用、如何检索与导出结果。Claude Code 读取「~\.claude\skills」，Codex 读取「~\.agents\skills」，Cursor、VS Code 与 OpenCode 两处都会读取，安装其中一处即可。</p>
+          <p className={ROW_DESC}>Skill 为 AI 工具提供 Rummage 的使用说明，包括何时调用、如何检索与导出结果。Claude Code 读取「~\.claude\skills」，Codex 读取「~\.agents\skills」，Cursor、VS Code 与 OpenCode 两处都会读取，安装其中一处即可。已安装的 Skill 会在客户端启动时自动更新到当前版本。</p>
         </div>
         <div className={CARD}>
           {info.skills.map((s) => {

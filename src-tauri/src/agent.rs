@@ -5,12 +5,16 @@
 //! - Claude Desktop 的 MSIX 版把 `%APPDATA%` 的写入重定向到 `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming`，
 //!   有这个目录时写在那里。OpenCode 2 仍读 1 的 `mcp.<名称>` 写法，文件中已有 2 的 `mcp.servers` 时才写到其中。
 //! - Skill：复制到 `~\.claude\skills\rummage`（Claude Code）或 `~\.agents\skills\rummage`（Codex 等；Cursor、VS Code、OpenCode 两处都读）。
-//!   目标文件夹的 SKILL.md 不是 Rummage 的时不覆盖、不删除。安装包中的 Skill 在资源目录下的 `skills\rummage`；
+//!   目标文件夹的 SKILL.md 不是 Rummage 的时不覆盖、不删除。安装先完整复制到 skills 上一级的临时文件夹再改名替换，
+//!   失败时保留原有的 Skill，替换中断留下的旧版备份在下次安装时恢复。客户端启动时把已安装但内容过时的 Skill 更新为当前版本。
+//!   安装包中的 Skill 在资源目录下的 `skills\rummage`；
 //!   开发版没有打包资源，直接用仓库中的 `skills/rummage`。
 //! - 只在桌面端提供：命令行与 MCP 只在 Windows 上提供
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use jsonc_parser::{ParseOptions, json};
@@ -23,6 +27,9 @@ use crate::search::error;
 
 /// 写进各客户端配置中的服务名，也是 Skill 的文件夹名
 const NAME: &str = "rummage";
+
+/// 启动时的自动更新与设置页的操作可能同时进行，安装和移除依次执行，避免争用同名的临时文件夹
+static SKILL_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -471,6 +478,101 @@ fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// 杀毒软件、索引服务等会短暂占用文件，Windows 上改名和删除遇到拒绝访问（5）、共享冲突（32）、锁定冲突（33）时
+/// 从 10 ms 起加倍等待重试，总计约 1.3 秒；持续占用时仍返回错误
+fn retry<T>(mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    let mut wait = Duration::from_millis(10);
+    loop {
+        match op() {
+            Err(err)
+                if cfg!(windows)
+                    && matches!(err.raw_os_error(), Some(5 | 32 | 33))
+                    && wait < Duration::from_secs(1) =>
+            {
+                std::thread::sleep(wait);
+                wait *= 2;
+            }
+            result => return result,
+        }
+    }
+}
+
+/// 替换时用的临时文件夹和旧版备份。放在 skills 的上一级，避免 AI 工具把它们当成另一个同名 Skill 读取；
+/// skills 可能是指向其他磁盘的链接，按真实位置取上一级，保证与 Skill 在同一磁盘、可以直接改名
+fn swap_dirs(dst: &Path) -> io::Result<(PathBuf, PathBuf)> {
+    let skills = dunce::canonicalize(
+        dst.parent()
+            .ok_or_else(|| io::Error::other("Skill 目录没有上级文件夹"))?,
+    )?;
+    let base = skills
+        .parent()
+        .ok_or_else(|| io::Error::other("skills 目录没有上级文件夹"))?;
+    Ok((
+        base.join(format!(".{NAME}-skill-new")),
+        base.join(format!(".{NAME}-skill-old")),
+    ))
+}
+
+/// 先完整复制到临时文件夹再替换，任何一步失败都保留原有的 Skill
+fn replace_dir(src: &Path, dst: &Path) -> io::Result<()> {
+    let (new, old) = swap_dirs(dst)?;
+    // 上次替换中断、只剩旧版备份时先改回原名，再清理其余临时文件夹
+    if !dst.exists() && old.exists() {
+        retry(|| fs::rename(&old, dst))?;
+    }
+    for dir in [&new, &old] {
+        if dir.exists() {
+            retry(|| fs::remove_dir_all(dir))?;
+        }
+    }
+    if let Err(err) = copy_dir(src, &new) {
+        let _ = retry(|| fs::remove_dir_all(&new));
+        return Err(err);
+    }
+    if dst.exists()
+        && let Err(err) = retry(|| fs::rename(dst, &old))
+    {
+        let _ = retry(|| fs::remove_dir_all(&new));
+        return Err(err);
+    }
+    if let Err(err) = retry(|| fs::rename(&new, dst)) {
+        if old.exists() {
+            let _ = retry(|| fs::rename(&old, dst));
+        }
+        let _ = retry(|| fs::remove_dir_all(&new));
+        return Err(err);
+    }
+    if old.exists()
+        && let Err(err) = retry(|| fs::remove_dir_all(&old))
+    {
+        log::warn!("无法删除旧版 Skill {}：{err}", old.display());
+    }
+    Ok(())
+}
+
+fn dir_state(src: &Path, dst: &Path) -> State {
+    if !dst.exists() {
+        // 上次替换中断、只剩旧版备份时按需要更新处理，启动时的自动更新会恢复并更新它
+        let interrupted = swap_dirs(dst).is_ok_and(|(_, old)| old.exists());
+        return if interrupted {
+            State::Outdated
+        } else {
+            State::Absent
+        };
+    }
+    if !is_ours(dst) {
+        return State::Invalid;
+    }
+    match same_files(src, dst) {
+        Ok(true) => State::Added,
+        Ok(false) => State::Outdated,
+        Err(err) => {
+            log::warn!("无法比较 Skill {}：{err}", dst.display());
+            State::Outdated
+        }
+    }
+}
+
 fn skill_status(target: SkillTarget, src: &Path) -> SkillStatus {
     let Some(dst) = skill_path(target) else {
         return SkillStatus {
@@ -479,28 +581,15 @@ fn skill_status(target: SkillTarget, src: &Path) -> SkillStatus {
             state: State::NotFound,
         };
     };
-    let state = if !dst.exists() {
-        State::Absent
-    } else if !is_ours(&dst) {
-        State::Invalid
-    } else {
-        match same_files(src, &dst) {
-            Ok(true) => State::Added,
-            Ok(false) => State::Outdated,
-            Err(err) => {
-                log::warn!("无法比较 Skill {}：{err}", dst.display());
-                State::Outdated
-            }
-        }
-    };
     SkillStatus {
         id: target,
         path: dst.to_string_lossy().into_owned(),
-        state,
+        state: dir_state(src, &dst),
     }
 }
 
 fn edit_skill(target: SkillTarget, src: &Path, install: bool) -> Result<(), ApiError> {
+    let _guard = SKILL_LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let dst = skill_path(target)
         .ok_or_else(|| error(ApiError::INTERNAL, "找不到用户文件夹，请手动复制 Skill。"))?;
     if dst.exists() && !is_ours(&dst) {
@@ -509,15 +598,18 @@ fn edit_skill(target: SkillTarget, src: &Path, install: bool) -> Result<(), ApiE
             "这个位置已有另一个名为 rummage 的 Skill，请先手动处理。",
         ));
     }
-    let result = if dst.exists() {
-        fs::remove_dir_all(&dst)
-    } else {
-        Ok(())
-    };
     let result = if install {
-        result.and_then(|_| copy_dir(src, &dst))
+        fs::create_dir_all(dst.parent().expect("skill_path 带有上级目录"))
+            .and_then(|_| replace_dir(src, &dst))
     } else {
-        result
+        // 替换中断留下的备份也一并删除，否则状态仍会显示需要更新；skills 文件夹不存在时没有备份
+        let mut dirs = vec![dst.clone()];
+        if let Ok((new, old)) = swap_dirs(&dst) {
+            dirs.extend([new, old]);
+        }
+        dirs.iter()
+            .filter(|dir| dir.exists())
+            .try_for_each(|dir| retry(|| fs::remove_dir_all(dir)))
     };
     result.map_err(|err| {
         log::warn!(

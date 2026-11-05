@@ -3,6 +3,7 @@ import { useAppFonts } from './hooks/useAppFonts'
 import { useCoreStatus } from './hooks/useCoreStatus'
 import { useAutoUpdateCheck, useReleaseUpdates } from './hooks/useReleaseUpdates'
 import { useSetup } from './hooks/useSetup'
+import { useSkillAutoUpdate } from './hooks/useSkillAutoUpdate'
 import { isTauri, TITLEBAR_HEIGHT } from './lib/platform'
 import CoreStatusNotice from './components/CoreStatusNotice'
 import DataDirNotices from './components/DataDirNotices'
@@ -17,7 +18,7 @@ import UpdateModal from './components/UpdateModal'
 /**
  * 未完成引导时显示引导，否则显示搜索页；
  * 无论哪个页面，都显示启动时的数据目录提示、“索引数据库无法打开”和第一次关闭窗口时的托盘提示。
- * 后台服务连上后自动检查一次更新（可在设置中关闭；检查要用后台服务中的代理设置）
+ * 后台服务连上后自动检查一次更新（可在设置中关闭；检查要用后台服务中的代理设置），桌面端启动时自动更新已安装的 Skill
  */
 export default function App() {
   const coreStatus = useCoreStatus()
@@ -27,6 +28,7 @@ export default function App() {
   // 显示过搜索页后不再退回整页提示：在设置里点“重试”时不关掉设置、不清空搜索
   const [searchShown, setSearchShown] = useState(false)
   useAutoUpdateCheck(isTauri && autoCheck && coreStatus === 'running')
+  useSkillAutoUpdate()
 
   const page = () => {
     if (isTauri && setup.status && !setup.status.onboarded) {
