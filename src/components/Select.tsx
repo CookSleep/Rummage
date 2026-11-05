@@ -1,6 +1,7 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useMenuPlacement } from '../hooks/useMenuPlacement'
+import { DROPDOWN_PANEL_CLASS, DROPDOWN_SCROLL_CLASS } from '../lib/dropdown'
 import { ChevronDownIcon } from './icons'
 import { HoverTip } from './Tip'
 
@@ -106,44 +107,45 @@ export default function Select<T extends string | number>({ value, onChange, opt
 
       {open && (
         <div
-          role="listbox"
-          className={`absolute z-50 w-full overflow-y-auto rounded-xl border border-transparent bg-white/95 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-gray-800/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)] dark:ring-white/[0.06] ${placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up' : 'top-full mt-1.5 animate-dropdown-down'}`}
+          className={`absolute z-50 w-full ${DROPDOWN_PANEL_CLASS} ${placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up' : 'top-full mt-1.5 animate-dropdown-down'}`}
           style={{ maxHeight }}
         >
-          {options.map((o, i) => (
-            <div
-              key={o.value}
-              role="option"
-              aria-selected={o.value === value}
-              onClick={(e) => {
-                e.preventDefault()
-                onChange(o.value)
-                setOpen(false)
-              }}
-              onMouseMove={() => setActive(i)}
-              // 选项多到出现滚动条时，键盘移到的选项保持可见
-              ref={i === active ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
-              className={`flex min-h-9 cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${o.value === value ? 'bg-black/[0.05] font-medium text-blue-600 dark:bg-white/[0.08] dark:text-blue-400' : `text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06] ${i === active ? 'bg-gray-50 dark:bg-white/[0.06]' : ''}`}`}
-            >
-              <span className="min-w-0 truncate" style={o.style}>{o.label}</span>
-              {o.action && (
-                <button
-                  type="button"
-                  aria-label={o.action.label}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    o.action?.onClick()
-                    setOpen(false)
-                  }}
-                  className="relative -my-1 -mr-1.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-black/[0.06] hover:text-gray-600 dark:text-gray-500 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
-                >
-                  {o.action.icon}
-                  <HoverTip label={o.action.label} />
-                </button>
-              )}
-            </div>
-          ))}
+          <div role="listbox" className={DROPDOWN_SCROLL_CLASS}>
+            {options.map((o, i) => (
+              <div
+                key={o.value}
+                role="option"
+                aria-selected={o.value === value}
+                onClick={(e) => {
+                  e.preventDefault()
+                  onChange(o.value)
+                  setOpen(false)
+                }}
+                onMouseMove={() => setActive(i)}
+                // 选项多到出现滚动条时，键盘移到的选项保持可见
+                ref={i === active ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+                className={`flex min-h-9 cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${o.value === value ? 'bg-black/[0.05] font-medium text-blue-600 dark:bg-white/[0.08] dark:text-blue-400' : `text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06] ${i === active ? 'bg-gray-50 dark:bg-white/[0.06]' : ''}`}`}
+              >
+                <span className="min-w-0 truncate" style={o.style}>{o.label}</span>
+                {o.action && (
+                  <button
+                    type="button"
+                    aria-label={o.action.label}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      o.action?.onClick()
+                      setOpen(false)
+                    }}
+                    className="relative -my-1 -mr-1.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-black/[0.06] hover:text-gray-600 dark:text-gray-500 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
+                  >
+                    {o.action.icon}
+                    <HoverTip label={o.action.label} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

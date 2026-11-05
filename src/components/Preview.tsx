@@ -85,19 +85,22 @@ function Segment({ segmentId, query }: { segmentId: number; query: string }) {
   return (
     <div className="flex flex-col gap-1">
       {loc && <p className="text-xs text-blue-500/80 dark:text-blue-400/80">{loc}</p>}
-      <pre
-        ref={boxRef}
-        data-selectable-text
-        className="relative max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/[0.03] p-3 font-mono text-xs leading-relaxed text-gray-700 [scrollbar-gutter:stable] dark:bg-white/[0.04] dark:text-gray-200"
-      >
-        {state === 'failed' ? '内容读取失败' : state === 'missing' ? '这段内容已不在索引中' : !seg ? '加载中' : (
-          <>
-            {seg.before && <span className={context}><Marked text={seg.before} query={query} />{'\n\n'}</span>}
-            <span ref={hitRef}><Marked text={seg.text ?? ''} query={query} /></span>
-            {seg.after && <span className={context}>{'\n\n'}<Marked text={seg.after} query={query} /></span>}
-          </>
-        )}
-      </pre>
+      {/* 外层圆角只负责裁切，滚动条才不会伸出圆角 */}
+      <div className="overflow-hidden rounded-xl bg-black/[0.03] dark:bg-white/[0.04]">
+        <pre
+          ref={boxRef}
+          data-selectable-text
+          className="relative max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl p-3 font-mono text-xs leading-relaxed text-gray-700 [scrollbar-gutter:stable] dark:text-gray-200"
+        >
+          {state === 'failed' ? '内容读取失败' : state === 'missing' ? '这段内容已不在索引中' : !seg ? '加载中' : (
+            <>
+              {seg.before && <span className={context}><Marked text={seg.before} query={query} />{'\n\n'}</span>}
+              <span ref={hitRef}><Marked text={seg.text ?? ''} query={query} /></span>
+              {seg.after && <span className={context}>{'\n\n'}<Marked text={seg.after} query={query} /></span>}
+            </>
+          )}
+        </pre>
+      </div>
     </div>
   )
 }
@@ -199,22 +202,25 @@ function LongImagePreview({ hit, region, onOpen }: { hit: SearchHit; region: Non
   }
   const pct = (v: number, total: number) => `${(v / total) * 100}%`
   return (
-    <div ref={boxRef} className="h-[var(--long-image-max)] flex-shrink-0 overflow-auto rounded-xl bg-black/[0.03] [scrollbar-gutter:stable] dark:bg-white/[0.04]">
-      <div className={`relative ${wide ? 'w-max' : ''} ${size ? '' : 'invisible'}`}>
-        <img
-          src={imageUrl(hit.fileId)}
-          alt={hit.name}
-          onClick={onOpen}
-          onLoad={(e) => onLoad(e.currentTarget)}
-          onError={() => setOriginalFailed(true)}
-          className={`block cursor-pointer ${wide ? 'h-[calc(var(--long-image-max)-8px)] w-auto max-w-none' : 'w-full'}`}
-        />
-        {size && (
-          <div
-            className="pointer-events-none absolute rounded-md bg-blue-500/10 ring-2 ring-blue-500"
-            style={{ left: pct(region.x, size.w), top: pct(region.y, size.h), width: pct(region.width, size.w), height: pct(region.height, size.h) }}
+    // 外层圆角只负责裁切，滚动条才不会伸出圆角
+    <div className="h-[var(--long-image-max)] flex-shrink-0 overflow-hidden rounded-xl bg-black/[0.03] dark:bg-white/[0.04]">
+      <div ref={boxRef} className="h-full overflow-auto rounded-xl [scrollbar-gutter:stable]">
+        <div className={`relative ${wide ? 'w-max' : ''} ${size ? '' : 'invisible'}`}>
+          <img
+            src={imageUrl(hit.fileId)}
+            alt={hit.name}
+            onClick={onOpen}
+            onLoad={(e) => onLoad(e.currentTarget)}
+            onError={() => setOriginalFailed(true)}
+            className={`block cursor-pointer ${wide ? 'h-[calc(var(--long-image-max)-8px)] w-auto max-w-none' : 'w-full'}`}
           />
-        )}
+          {size && (
+            <div
+              className="pointer-events-none absolute rounded-md bg-blue-500/10 ring-2 ring-blue-500"
+              style={{ left: pct(region.x, size.w), top: pct(region.y, size.h), width: pct(region.width, size.w), height: pct(region.height, size.h) }}
+            />
+          )}
+        </div>
       </div>
     </div>
   )

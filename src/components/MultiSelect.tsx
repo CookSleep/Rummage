@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useMenuPlacement } from '../hooks/useMenuPlacement'
+import { DROPDOWN_PANEL_CLASS, DROPDOWN_SCROLL_CLASS } from '../lib/dropdown'
 import { CheckIcon, ChevronDownIcon } from './icons'
 import { SELECT_CLASS } from './Select'
 import { HoverTip } from './Tip'
@@ -117,37 +118,37 @@ export default function MultiSelect<T extends string | number>({ values, onChang
 
       {open && (
         <div
-          role="listbox"
-          aria-multiselectable
-          className={`absolute z-50 w-full overflow-y-auto rounded-xl border border-transparent bg-white/95 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-gray-800/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)] dark:ring-white/[0.06] ${placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up' : 'top-full mt-1.5 animate-dropdown-down'}`}
+          className={`absolute z-50 w-full ${DROPDOWN_PANEL_CLASS} ${placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up' : 'top-full mt-1.5 animate-dropdown-down'}`}
           style={{ maxHeight }}
         >
-          {options.map((o, i) => {
-            const checked = values.includes(o.value)
-            const locked = checked && values.length === 1
-            return (
-              <div
-                key={o.value}
-                role="option"
-                aria-selected={checked}
-                aria-disabled={locked || undefined}
-                // 不抢走触发器的焦点，点选后键盘仍可继续操作
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={(e) => {
-                  e.preventDefault()
-                  toggle(o.value)
-                }}
-                onMouseMove={() => setActive(i)}
-                // 选项多到出现滚动条时，键盘移到的选项保持可见
-                ref={i === active ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
-                className={`flex min-h-9 items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${locked ? 'cursor-not-allowed' : 'cursor-pointer'} ${checked ? 'font-medium text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'} ${i === active ? 'bg-gray-50 dark:bg-white/[0.06]' : ''}`}
-              >
-                <span className="min-w-0 truncate">{o.label}</span>
-                {checked && <CheckIcon className="h-3.5 w-3.5 flex-shrink-0" />}
-                {o.tip && <HoverTip label={o.tip} wrap />}
-              </div>
-            )
-          })}
+          <div role="listbox" aria-multiselectable className={DROPDOWN_SCROLL_CLASS}>
+            {options.map((o, i) => {
+              const checked = values.includes(o.value)
+              const locked = checked && values.length === 1
+              return (
+                <div
+                  key={o.value}
+                  role="option"
+                  aria-selected={checked}
+                  aria-disabled={locked || undefined}
+                  // 不抢走触发器的焦点，点选后键盘仍可继续操作
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    toggle(o.value)
+                  }}
+                  onMouseMove={() => setActive(i)}
+                  // 选项多到出现滚动条时，键盘移到的选项保持可见
+                  ref={i === active ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+                  className={`flex min-h-9 items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${locked ? 'cursor-not-allowed' : 'cursor-pointer'} ${checked ? 'font-medium text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'} ${i === active ? 'bg-gray-50 dark:bg-white/[0.06]' : ''}`}
+                >
+                  <span className="min-w-0 truncate">{o.label}</span>
+                  {checked && <CheckIcon className="h-3.5 w-3.5 flex-shrink-0" />}
+                  {o.tip && <HoverTip label={o.tip} wrap />}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState, type KeyboardEvent, type RefObject } from 'react'
 import type { ImageQuery, SimilarQuery } from '../types'
+import { DROPDOWN_PANEL_CLASS, DROPDOWN_SCROLL_CLASS } from '../lib/dropdown'
 import { abbreviateName } from '../lib/format'
 import { queryImageUrl } from '../lib/media'
 import { isAndroid } from '../lib/platform'
@@ -175,39 +176,38 @@ export default function SearchBox({ inputRef, text, onText, note, onNote, image,
       {open && (
         // 列表中按下鼠标不让输入框失焦，否则列表在点击生效前就收起了；高度放得下默认的 10 条
         <div
-          id={LIST_ID}
-          role="listbox"
-          aria-label="最近的搜索"
           onMouseDown={(e) => e.preventDefault()}
-          className="absolute left-0 top-full z-50 mt-1.5 max-h-[22.5rem] w-full animate-dropdown-down overflow-y-auto rounded-xl border border-transparent bg-white/95 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-gray-800/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)] dark:ring-white/[0.06]"
+          className={`absolute left-0 top-full z-50 mt-1.5 max-h-[22.5rem] w-full animate-dropdown-down ${DROPDOWN_PANEL_CLASS}`}
         >
-          {history.map((q, i) => (
-            <div
-              key={q}
-              id={`${LIST_ID}-${i}`}
-              role="option"
-              aria-selected={i === active}
-              onClick={() => onPickHistory(q)}
-              onMouseMove={() => setActive(i)}
-              className={`group flex h-9 cursor-pointer items-center gap-2.5 px-3 text-sm text-gray-700 transition-colors dark:text-gray-300 ${i === active ? 'bg-black/[0.05] dark:bg-white/[0.08]' : ''}`}
-            >
-              <ClockIcon className="h-3.5 w-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500" />
-              <span className="min-w-0 flex-1 truncate">{q}</span>
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onRemoveHistory(q)
-                }}
-                aria-label={`删除“${q}”`}
-                className={`rounded-full p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 group-hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-gray-200 [@media(hover:none)]:opacity-100 ${i === active ? 'opacity-100' : 'opacity-0'}`}
+          <div id={LIST_ID} role="listbox" aria-label="最近的搜索" className={DROPDOWN_SCROLL_CLASS}>
+            {history.map((q, i) => (
+              <div
+                key={q}
+                id={`${LIST_ID}-${i}`}
+                role="option"
+                aria-selected={i === active}
+                onClick={() => onPickHistory(q)}
+                onMouseMove={() => setActive(i)}
+                className={`group flex h-9 cursor-pointer items-center gap-2.5 px-3 text-sm text-gray-700 transition-colors dark:text-gray-300 ${i === active ? 'bg-black/[0.05] dark:bg-white/[0.08]' : ''}`}
               >
-                <CloseIcon className="h-3.5 w-3.5" />
-                <HoverTip label="从历史中删除（Delete / Backspace）" />
-              </button>
-            </div>
-          ))}
+                <ClockIcon className="h-3.5 w-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500" />
+                <span className="min-w-0 flex-1 truncate">{q}</span>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRemoveHistory(q)
+                  }}
+                  aria-label={`删除“${q}”`}
+                  className={`rounded-full p-1 text-gray-400 transition hover:bg-black/5 hover:text-gray-600 group-hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-gray-200 [@media(hover:none)]:opacity-100 ${i === active ? 'opacity-100' : 'opacity-0'}`}
+                >
+                  <CloseIcon className="h-3.5 w-3.5" />
+                  <HoverTip label="从历史中删除（Delete / Backspace）" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
